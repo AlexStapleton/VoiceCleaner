@@ -15,6 +15,11 @@ Config Config::load(const std::string& path) {
   c.ringFrames = rawRing < 0 ? 0 : (size_t)rawRing;   // 0 -> validate() floors to 3
   c.csvPath         = t["csv_path"].value_or(std::string("drift.csv"));
   c.logLevel        = t["log_level"].value_or(1);
+  c.driftCompensation = t["drift_compensation"].value_or(true);
+  c.kp                = t["drift_kp"].value_or(2e-7);
+  c.ki                = t["drift_ki"].value_or(2e-9);
+  c.driftMaxPpm       = t["drift_max_ppm"].value_or(150.0);
+  c.filterAlpha       = t["drift_filter_alpha"].value_or(0.02);
   c.validate();
   return c;
 }

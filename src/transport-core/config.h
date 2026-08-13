@@ -8,6 +8,11 @@ struct Config {
   size_t      ringFrames = 1024;
   std::string csvPath = "drift.csv";
   int         logLevel = 1;
+  bool   driftCompensation = true;
+  double kp             = 2e-7;
+  double ki             = 2e-9;
+  double driftMaxPpm    = 150.0;
+  double filterAlpha    = 0.02;
   static Config load(const std::string& tomlPath);
   void apply_cli(int argc, char** argv);
   void validate();

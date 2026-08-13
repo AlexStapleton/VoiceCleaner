@@ -5,8 +5,9 @@
 #include <ctime>
 namespace vc {
 
-Logger::Logger(std::string csvPath, const SpscRing<Frame>* ringA, const SpscRing<Frame>* ringB, const DropoutCounter* dc)
-  : csvPath_(std::move(csvPath)), ringA_(ringA), ringB_(ringB), dc_(dc) {}
+Logger::Logger(std::string csvPath, const SpscRing<Frame>* ringA, const SpscRing<Frame>* ringB, const DropoutCounter* dc,
+               const std::atomic<double>* ratioPpm, const std::atomic<double>* filtOcc)
+  : csvPath_(std::move(csvPath)), ringA_(ringA), ringB_(ringB), dc_(dc), ratioPpm_(ratioPpm), filtOcc_(filtOcc) {}
 
 Logger::~Logger() { stop(); }
 
@@ -36,7 +37,7 @@ void Logger::run() {
   std::strftime(wallStr, sizeof(wallStr), "%Y-%m-%d %H:%M:%S", &tmv);
 
   std::fprintf(f, "# started %s\n", wallStr);
-  std::fprintf(f, "elapsed_ms,ringA_frames,ringB_frames,ringA_hi,ringB_hi,underruns,overruns\n");
+  std::fprintf(f, "elapsed_ms,ringA_frames,ringB_frames,ringA_hi,ringB_hi,underruns,overruns,ratio_ppm,filt_occ\n");
   std::fflush(f);
 
   LARGE_INTEGER freq, t0;
@@ -57,13 +58,15 @@ void Logger::run() {
     if (elapsed_ms >= nextWriteMs) {  // true ~1 Hz, driven by real elapsed time
       uint64_t un = dc_->underruns();
       uint64_t ov = dc_->overruns();
-      std::fprintf(f, "%lld,%zu,%zu,%zu,%zu,%llu,%llu\n",
+      double ratio_ppm = ratioPpm_->load(std::memory_order_relaxed);
+      double filt_occ  = filtOcc_->load(std::memory_order_relaxed);
+      std::fprintf(f, "%lld,%zu,%zu,%zu,%zu,%llu,%llu,%.2f,%.1f\n",
                    elapsed_ms, a, b, occA_.high_water(), occB_.high_water(),
-                   (unsigned long long)un, (unsigned long long)ov);
+                   (unsigned long long)un, (unsigned long long)ov, ratio_ppm, filt_occ);
       std::fflush(f);
-      std::printf("[%4llds] A=%-4zu B=%-4zu (hi A=%zu B=%zu) under=%llu over=%llu\n",
+      std::printf("[%4llds] A=%-4zu B=%-4zu (hi A=%zu B=%zu) under=%llu over=%llu ratio=%+.1fppm filt=%.1f\n",
                   elapsed_ms / 1000, a, b, occA_.high_water(), occB_.high_water(),
-                  (unsigned long long)un, (unsigned long long)ov);
+                  (unsigned long long)un, (unsigned long long)ov, ratio_ppm, filt_occ);
       std::fflush(stdout);
 
       do { nextWriteMs += 1000; } while (nextWriteMs <= elapsed_ms);

@@ -14,8 +14,10 @@ Bridge::Bridge(const Config& cfg)
   : cfg_(cfg),
     ringA_(cfg.ringFrames),
     ringB_(cfg.ringFrames),
-    logger_(cfg.csvPath, &ringA_, &ringB_, &dropouts_) {
+    controller_({ (double)(cfg.ringFrames / 2), cfg.kp, cfg.ki, cfg.driftMaxPpm, cfg.filterAlpha }),
+    logger_(cfg.csvPath, &ringA_, &ringB_, &dropouts_, &ratioPpm_, &filtOcc_) {
   mono_.reserve(48000);   // 1 s ch0 scratch, avoids steady-state realloc
+  rsOut_.resize(2 * FRAME_SAMPLES);   // resize (not just reserve) so [] is valid; ratio<=+150ppm => <=481 out
 }
 
 bool Bridge::start() {
@@ -74,12 +76,23 @@ void Bridge::onCapture(const float* interleaved, size_t frames, int channels) {
 
 void Bridge::relayLoop() {
   MmcssThread mmcss;
-  Frame f;
+  Frame f, f2;
   while (running_.load(std::memory_order_acquire)) {
     WaitForSingleObject(static_cast<HANDLE>(frameReady_), 200);
     if (!running_.load(std::memory_order_acquire)) break;
     while (ringA_.try_pop(f)) {
-      if (!ringB_.try_push(f)) dropouts_.record_overrun();
+      if (cfg_.driftCompensation) {
+        const double ratio = controller_.update((double)ringB_.size());
+        resampler_.set_ratio(ratio);
+        ratioPpm_.store(controller_.ratioPpm(), std::memory_order_relaxed);
+        filtOcc_.store(controller_.filteredOccupancy(), std::memory_order_relaxed);
+        const size_t m = resampler_.process(f.data(), FRAME_SAMPLES, rsOut_.data(), rsOut_.size());
+        reframe_.write(rsOut_.data(), m);
+        while (reframe_.pop_frame(f2.data()))
+          if (!ringB_.try_push(f2)) dropouts_.record_overrun();
+      } else {
+        if (!ringB_.try_push(f)) dropouts_.record_overrun();
+      }
     }
   }
 }

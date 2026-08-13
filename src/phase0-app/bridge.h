@@ -6,6 +6,8 @@
 #include "spsc_ring.h"
 #include "frame.h"
 #include "framer.h"
+#include "resampler.h"
+#include "drift_control.h"
 #include "dropout.h"
 #include "logger.h"
 #include "wasapi_capture.h"
@@ -26,6 +28,12 @@ private:
   SpscRing<Frame>    ringA_;
   SpscRing<Frame>    ringB_;
   DropoutCounter     dropouts_;
+  DriftController    controller_;
+  Resampler          resampler_;
+  FrameAccumulator   reframe_;    // relay side: re-block resampler output into 480-sample frames
+  std::vector<float> rsOut_;      // relay side: resampler output scratch
+  std::atomic<double> ratioPpm_{0.0};
+  std::atomic<double> filtOcc_{0.0};
   FrameAccumulator   accum_;      // capture side only
   FrameDistributor   dist_;       // render (onFill) side only
   std::vector<float> mono_;       // capture ch0 scratch

@@ -11,7 +11,8 @@ namespace vc {
 // and prints a ~1 Hz console status line. Never touched by the RT threads.
 class Logger {
 public:
-  Logger(std::string csvPath, const SpscRing<Frame>* ringA, const SpscRing<Frame>* ringB, const DropoutCounter* dc);
+  Logger(std::string csvPath, const SpscRing<Frame>* ringA, const SpscRing<Frame>* ringB, const DropoutCounter* dc,
+         const std::atomic<double>* ratioPpm, const std::atomic<double>* filtOcc);
   bool start();
   void stop();
   ~Logger();
@@ -21,6 +22,8 @@ private:
   const SpscRing<Frame>* ringA_;
   const SpscRing<Frame>* ringB_;
   const DropoutCounter*  dc_;
+  const std::atomic<double>* ratioPpm_;
+  const std::atomic<double>* filtOcc_;
   OccupancyStats occA_, occB_;
   std::atomic<bool> running_{false};
   std::thread thread_;
