@@ -21,6 +21,8 @@ FetchContent_MakeAvailable(tomlplusplus)
 
 enable_testing()
 add_subdirectory(src/transport-core)
+add_subdirectory(src/denoise-core)
 add_subdirectory(src/win-audio)
 add_subdirectory(src/phase0-app)
 add_subdirectory(tests/transport-core)
+add_subdirectory(tests/denoise-core)
