@@ -43,17 +43,18 @@ void Logger::run() {
   QueryPerformanceFrequency(&freq);
   QueryPerformanceCounter(&t0);
 
-  size_t iter = 0;
+  long long nextWriteMs = 0;
   while (running_.load(std::memory_order_acquire)) {
     size_t a = ringA_->size();
     size_t b = ringB_->size();
     occA_.sample(a);
     occB_.sample(b);
 
-    if (iter % 100 == 0) {  // ~1 Hz
-      LARGE_INTEGER now;
-      QueryPerformanceCounter(&now);
-      long long elapsed_ms = (now.QuadPart - t0.QuadPart) * 1000 / freq.QuadPart;
+    LARGE_INTEGER now;
+    QueryPerformanceCounter(&now);
+    long long elapsed_ms = (now.QuadPart - t0.QuadPart) * 1000 / freq.QuadPart;
+
+    if (elapsed_ms >= nextWriteMs) {  // true ~1 Hz, driven by real elapsed time
       uint64_t un = dc_->underruns();
       uint64_t ov = dc_->overruns();
       std::fprintf(f, "%lld,%zu,%zu,%zu,%zu,%llu,%llu\n",
@@ -64,9 +65,10 @@ void Logger::run() {
                   elapsed_ms / 1000, a, b, occA_.high_water(), occB_.high_water(),
                   (unsigned long long)un, (unsigned long long)ov);
       std::fflush(stdout);
+
+      do { nextWriteMs += 1000; } while (nextWriteMs <= elapsed_ms);
     }
 
-    ++iter;
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
 
