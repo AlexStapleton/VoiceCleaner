@@ -29,9 +29,20 @@ public:
   }
 
   size_t size() const noexcept {
+    // Consistent occupancy for a third-party observer (e.g. a telemetry thread). Pin head across
+    // the tail read: if head advances between the two loads, the modulo can otherwise wrap to a
+    // bogus near-capacity value. Retry until head is stable; converges in one iteration in practice.
+    for (int attempt = 0; attempt < 4; ++attempt) {
+      const size_t h1 = head_.idx.load(std::memory_order_acquire);
+      const size_t t  = tail_.idx.load(std::memory_order_acquire);
+      const size_t h2 = head_.idx.load(std::memory_order_acquire);
+      if (h1 == h2) return (h1 + cap_ - t) % cap_;
+    }
+    // Fallback (head churning improbably fast): bounded, never a wrapped-huge value.
     const size_t h = head_.idx.load(std::memory_order_acquire);
     const size_t t = tail_.idx.load(std::memory_order_acquire);
-    return (h + cap_ - t) % cap_;
+    const size_t s = (h + cap_ - t) % cap_;
+    return s <= (cap_ - 1) ? s : 0;
   }
   size_t capacity() const noexcept { return cap_ - 1; }
   T* data() noexcept { return slots_.data(); }
