@@ -6,6 +6,7 @@
 namespace vc {
 
 bool WasapiCapture::start(IMMDevice* dev, SampleCb onSamples, ErrorCb onError) {
+  if (running_.load(std::memory_order_acquire)) return false;   // already started
   onSamples_ = std::move(onSamples);
   onError_   = std::move(onError);
   if (dev == nullptr) return false;
@@ -58,7 +59,7 @@ void WasapiCapture::run() {
 
     UINT32 packet = 0;
     HRESULT hr = capture_->GetNextPacketSize(&packet);
-    if (FAILED(hr)) { if (onError_) onError_("GetNextPacketSize failed"); break; }
+    if (FAILED(hr)) { if (onError_) onError_("GetNextPacketSize failed"); running_.store(false, std::memory_order_release); break; }
     while (packet != 0) {
       BYTE* data = nullptr;
       UINT32 frames = 0;

@@ -8,6 +8,7 @@
 namespace vc {
 
 bool WasapiRender::start(IMMDevice* dev, FillCb onFill, ErrorCb onError) {
+  if (running_.load(std::memory_order_acquire)) return false;   // already started
   onFill_  = std::move(onFill);
   onError_ = std::move(onError);
   if (dev == nullptr) return false;
