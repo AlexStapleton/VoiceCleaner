@@ -37,9 +37,13 @@ bool Bridge::start() {
 
   frameReady_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
   running_.store(true, std::memory_order_release);
+  deviceLost_.store(false, std::memory_order_release);   // reset any prior fatal state
   logger_.start();
 
-  auto errCb = [](const char* w){ std::fprintf(stderr, "audio error: %s\n", w); };
+  auto errCb = [this](const char* w){
+    std::fprintf(stderr, "audio error: %s\n", w);
+    deviceLost_.store(true, std::memory_order_release);
+  };
 
   if (!render_.start(renDev, [this](float* o, size_t n){ return onFill(o, n); }, errCb)) {
     std::fprintf(stderr, "error: render failed to start\n");

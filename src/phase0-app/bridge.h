@@ -17,6 +17,7 @@ public:
   bool start();   // resolves devices, locks+primes rings, starts render/relay/capture/logger
   void stop();
   ~Bridge();
+  bool device_lost() const noexcept { return deviceLost_.load(std::memory_order_acquire); }
 private:
   void   relayLoop();
   void   onCapture(const float* interleaved, size_t frames, int channels);
@@ -30,6 +31,7 @@ private:
   std::vector<float> mono_;       // capture ch0 scratch
   void*              frameReady_ = nullptr;   // auto-reset HANDLE, capture->relay
   std::atomic<bool>  running_{false};
+  std::atomic<bool>  deviceLost_{false};
   std::thread        relay_;
   WasapiCapture      capture_;
   WasapiRender       render_;

@@ -126,8 +126,13 @@ non-RT writer — here the logger stands in for it).
   resampling. Sample format: handle IEEE float32 (the WASAPI shared-mode engine default) directly;
   convert 16-bit PCM if encountered; refuse anything else with a clear message. Channel count:
   the mix format is often 2ch even for a mono mic — take channel 0 (§5.7).
-- **Minimal lifecycle only:** handle `AUDCLNT_E_DEVICE_INVALIDATED` with a clean stop, a clear error,
-  and one rebuild attempt. Full `IMMNotificationClient` hot-unplug handling is Phase 1.
+- **Minimal lifecycle only:** on `AUDCLNT_E_DEVICE_INVALIDATED` (or any fatal stream error), the
+  affected WASAPI thread surfaces it via `onError`; the bridge then **fails fast visibly** — clean
+  stop of the whole bridge, a clear stderr message, and a non-zero process exit — so an unattended
+  run ends *visibly* rather than zombie-ing with one dead stream. Automatic rebuild/reconnect is
+  deliberately deferred to Phase 1, where the full `IMMNotificationClient` device-lifecycle lives
+  and where the Logger's monotonic `elapsed_ms` clock and CSV must be preserved across a reconnect
+  (a partial rebuild here would reset the drift time-axis and corrupt the measurement).
 
 ## 7. Instrumentation and the drift measurement
 
