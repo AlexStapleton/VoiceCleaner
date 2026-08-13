@@ -1,9 +1,12 @@
 #include <gtest/gtest.h>
 #include <fstream>
+#include <filesystem>
+#include <stdexcept>
 #include "config.h"
 using vc::Config;
 static std::string write_tmp(const char* body) {
-  std::string p = "tmp_cfg.toml";
+  auto dir = std::filesystem::temp_directory_path();
+  std::string p = (dir / "vc_tmp_cfg.toml").string();
   std::ofstream(p) << body;
   return p;
 }
@@ -31,4 +34,15 @@ TEST(Config, EnforcesRingFloor) {
   Config c; c.ringFrames = 2;
   c.validate();
   EXPECT_GE(c.ringFrames, 3u);
+}
+TEST(Config, ThrowsOnMalformedToml) {
+  auto p = write_tmp("this is = = not valid ][ toml\n");
+  EXPECT_THROW(Config::load(p), std::runtime_error);
+}
+TEST(Config, ClampsNegativeRingFromCli) {
+  Config c;
+  const char* argv[] = {"app", "--ring", "-5"};
+  c.apply_cli(3, const_cast<char**>(argv));
+  EXPECT_GE(c.ringFrames, 3u);
+  EXPECT_LE(c.ringFrames, 1048576u);
 }
