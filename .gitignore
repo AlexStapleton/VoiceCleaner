@@ -3,3 +3,6 @@
 .vs/
 /out/
 *.csv
+*.log
+# machine-specific runtime config (device IDs); see docs/runbooks for how to generate
+drift.toml
