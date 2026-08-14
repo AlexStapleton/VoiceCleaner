@@ -52,26 +52,27 @@ Plan: `docs/superpowers/plans/2026-08-13-phase1.5-drift-compensation.md`.
 - Live path wired: `engine`/`dsp_chain` config selects the engine + chain in the RT relay.
 Plan: `docs/superpowers/plans/2026-08-13-phase2-denoise-core-offline-cli.md`.
 
-### DeepFilterNet3 — foundation built & de-risked (NOT yet wired)
-- **STFT/ISTFT** (`stft.h`): Vorbis window, perfect reconstruction; `third_party/kissfft/` (real FFT).
+### DeepFilterNet3 — OFFLINE ENGINE COMPLETE & VALIDATED
+Full offline pipeline works and **sample-matches the official `deep-filter` reference (Pearson r =
+0.9946)** on a synthetic noisy clip — see `docs/dfn3-validation.md`. Run it:
+`offline-cli --engine dfn3 <in.wav> <out.wav>`.
+- **STFT/ISTFT** (`stft.h`): Vorbis window + libDF `wnorm` analysis normalization, perfect
+  reconstruction; `third_party/kissfft/` (real FFT).
 - **ERB filterbank** (`erb.h`): 32 bands, exact libDF construction.
-- **ONNX Runtime 1.28.0** vendored via FetchContent (pinned SHA256).
-- **DFN3 models** vendored in `models/dfn3/` (enc/erb_dec/df_dec + config.ini). `src/dfn3-probe/` loads
-  all three and runs a dummy inference successfully.
-Reference details (params, model I/O shapes, validation): `docs/dfn3-progress.md`.
+- **Feature extraction** (`dfn3_features.h`): `feat_erb`/`feat_spec` with libDF exp-mean normalization.
+- **Post-inference DSP** (`dfn3_postdsp.h`): ERB mask broadcast + order-5 deep filter.
+- **ONNX Runtime 1.28.0** vendored (FetchContent, pinned SHA256); models in `models/dfn3/`.
+- **Orchestrator** `src/dfn3/dfn3_offline.{h,cpp}`: STFT → features → enc/erb_dec/df_dec over full T →
+  mask (high bins) + deep filter (noisy low bins) → ISTFT. `src/dfn3-probe/` loads/checks the models.
+Reference details (params, model I/O shapes): `docs/dfn3-progress.md`.
 
-## What remains (DFN3 "hard middle")
+## What remains (DFN3)
 
-1. **Feature extraction:** `feat_erb` (log-compressed ERB + exponential-mean normalization, `norm_tau=1`)
-   and `feat_spec` (first 96 bins complex, normalized), matching libDF bit-closely.
-2. **Inference orchestration:** run enc → {erb_dec, df_dec} per frame, carrying recurrent (GRU) state and
-   the 2+2-frame lookahead. Exact ONNX I/O shapes are in `docs/dfn3-progress.md`.
-3. **Post-inference DSP:** apply the ERB gain mask `m`, apply the deep filter (`coefs`, order 5, 96 DF
-   bins), then ISTFT overlap-add.
-4. **`DeepFilterFilter : INoiseFilter`** wrapper + wire into `offline-cli`/live relay.
-5. **Validation** (blueprint requires sample-for-sample): via golden intermediate vectors from
-   DeepFilterNet's `export.py` (`.npz` dumps) and/or the `deep-filter` CLI end-to-end reference.
-   **Open decision:** validate-first vs build-then-validate-end-to-end.
+**Live/real-time streaming.** The ONNX export has **no recurrent-state I/O**, so it must run over a
+whole sequence at once — fine offline, but frame-by-frame live playback would reset the GRU context
+every 10 ms. A live DFN3 needs a state-carrying solution: a state-exposing re-export (Python), or a
+bounded sliding-window/chunked approach (latency/compute tradeoff). Until then **RNNoise is the live
+engine; DFN3 is offline-only** (great for the dry-tap / archival path, §13).
 
 ## Notes / gotchas
 - `rnnoise_data.c` is a 75 MB vendored weights file (~34 MB in git) — could switch to the "little" model
