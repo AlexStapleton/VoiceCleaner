@@ -2,9 +2,9 @@
 #include <cstddef>
 #include <vector>
 namespace vc {
-// Parameterized real STFT/ISTFT with sqrt-Hann analysis+synthesis windows.
-// At 50% overlap (hop == fftSize/2) the two sqrt-Hann windows multiply to a
-// periodic Hann window, which satisfies COLA -> perfect reconstruction.
+// Parameterized real STFT/ISTFT with DFN3 Vorbis analysis+synthesis windows.
+// At 50% overlap (hop == fftSize/2) the Vorbis window satisfies the
+// Princen-Bradley condition -> perfect reconstruction.
 // The reconstructed signal is delayed by (fftSize - hop) samples vs. input.
 //
 // kiss_fft types are kept out of this header (pimpl); allocation happens in

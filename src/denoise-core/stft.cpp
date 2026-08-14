@@ -16,7 +16,7 @@ struct Stft::Impl {
   kiss_fftr_cfg fwd;   // forward real FFT
   kiss_fftr_cfg inv;   // inverse real FFT
 
-  std::vector<float> window;    // sqrt-Hann, length fftSize
+  std::vector<float> window;    // Vorbis (DFN3), length fftSize
   std::vector<float> anaBuf;    // analysis buffer, holds latest fftSize samples
   std::vector<float> olaBuf;    // synthesis overlap-add accumulator, length fftSize
 
@@ -32,13 +32,14 @@ Stft::Stft(int fftSize, int hop) : p_(new Impl{}) {
   p_->fwd = kiss_fftr_alloc(fftSize, /*inverse=*/0, nullptr, nullptr);
   p_->inv = kiss_fftr_alloc(fftSize, /*inverse=*/1, nullptr, nullptr);
 
-  // Periodic Hann (0.5*(1 - cos(2*pi*n/N))) satisfies COLA at 50% overlap;
-  // sqrt of it is applied on both analysis and synthesis so the product is Hann.
+  // DeepFilterNet3 Vorbis window: w[n] = sin( (pi/2) * sin^2( pi*(n+0.5)/N ) ).
+  // Applied on both analysis and synthesis; satisfies the Princen-Bradley
+  // condition -> perfect reconstruction at 50% overlap. (libDF lib.rs:126-132)
   p_->window.resize(fftSize);
-  const double twoPi = 2.0 * 3.14159265358979323846;
+  const double pi = 3.14159265358979323846;
   for (int n = 0; n < fftSize; ++n) {
-    double hann = 0.5 * (1.0 - std::cos(twoPi * n / fftSize));
-    p_->window[n] = static_cast<float>(std::sqrt(hann));
+    double s = std::sin(pi * (static_cast<double>(n) + 0.5) / fftSize);
+    p_->window[n] = static_cast<float>(std::sin(0.5 * pi * s * s));
   }
 
   p_->anaBuf.assign(fftSize, 0.0f);
