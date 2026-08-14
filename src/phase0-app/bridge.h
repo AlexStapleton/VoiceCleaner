@@ -1,5 +1,6 @@
 #pragma once
 #include <atomic>
+#include <memory>
 #include <thread>
 #include <vector>
 #include "config.h"
@@ -12,6 +13,10 @@
 #include "logger.h"
 #include "wasapi_capture.h"
 #include "wasapi_render.h"
+#include "inoise_filter.h"
+#include "passthrough_filter.h"
+#include "rnnoise_filter.h"
+#include "dsp_chain.h"
 namespace vc {
 class Bridge {
 public:
@@ -32,6 +37,9 @@ private:
   Resampler          resampler_;
   FrameAccumulator   reframe_;    // relay side: re-block resampler output into 480-sample frames
   std::vector<float> rsOut_;      // relay side: resampler output scratch
+  std::unique_ptr<INoiseFilter> engine_;   // constructed in start() (non-RT)
+  std::unique_ptr<DspChain>     chain_;     // optional DC->HPF->AGC->limiter wrap
+  Frame                         proc_;      // processed-frame scratch (relay RT)
   std::atomic<double> ratioPpm_{0.0};
   std::atomic<double> filtOcc_{0.0};
   FrameAccumulator   accum_;      // capture side only

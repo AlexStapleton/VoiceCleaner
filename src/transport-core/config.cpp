@@ -20,6 +20,8 @@ Config Config::load(const std::string& path) {
   c.ki                = t["drift_ki"].value_or(2e-9);
   c.driftMaxPpm       = t["drift_max_ppm"].value_or(150.0);
   c.filterAlpha       = t["drift_filter_alpha"].value_or(0.02);
+  c.engine            = t["engine"].value_or(std::string("none"));
+  c.dspChain          = t["dsp_chain"].value_or(false);
   c.validate();
   return c;
 }

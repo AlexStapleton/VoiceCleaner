@@ -13,6 +13,8 @@ struct Config {
   double ki             = 2e-9;
   double driftMaxPpm    = 150.0;
   double filterAlpha    = 0.02;
+  std::string engine   = "none";   // "none" (passthrough) | "rnnoise"
+  bool        dspChain = false;     // wrap engine in DC->HPF->AGC->limiter chain
   static Config load(const std::string& tomlPath);
   void apply_cli(int argc, char** argv);
   void validate();

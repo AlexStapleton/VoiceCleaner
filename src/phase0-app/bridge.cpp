@@ -37,6 +37,11 @@ bool Bridge::start() {
   Frame silent{}; silent.fill(0.0f);
   for (size_t i = 0; i < ringB_.capacity() / 2; ++i) ringB_.try_push(silent);  // prime half-full
 
+  // Engine + optional DSP chain: constructed here (non-RT) before any thread starts.
+  if (cfg_.engine == "rnnoise") engine_ = std::make_unique<RnnoiseFilter>();
+  else                          engine_ = std::make_unique<PassthroughFilter>();
+  if (cfg_.dspChain) chain_ = std::make_unique<DspChain>(engine_.get(), DspChain::Config{});
+
   frameReady_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
   running_.store(true, std::memory_order_release);
   deviceLost_.store(false, std::memory_order_release);   // reset any prior fatal state
@@ -58,8 +63,9 @@ bool Bridge::start() {
   }
 
   capDev->Release(); renDev->Release();   // WASAPI classes Activated their own client; device no longer needed
-  std::printf("bridge running: ring=%zu frames (primed %zu), csv=%s\n",
-              ringB_.capacity(), ringB_.capacity()/2, cfg_.csvPath.c_str());
+  std::printf("bridge running: ring=%zu frames (primed %zu), engine=%s, dsp_chain=%s, csv=%s\n",
+              ringB_.capacity(), ringB_.capacity()/2,
+              cfg_.engine.c_str(), cfg_.dspChain ? "on" : "off", cfg_.csvPath.c_str());
   return true;
 }
 
@@ -81,17 +87,21 @@ void Bridge::relayLoop() {
     WaitForSingleObject(static_cast<HANDLE>(frameReady_), 200);
     if (!running_.load(std::memory_order_acquire)) break;
     while (ringA_.try_pop(f)) {
+      const float* src = f.data();
+      if (chain_)       { chain_->process_frame(f.data(), proc_.data()); src = proc_.data(); }
+      else if (engine_) { engine_->ProcessFrame(f.data(), proc_.data()); src = proc_.data(); }
       if (cfg_.driftCompensation) {
         const double ratio = controller_.update((double)ringB_.size());
         resampler_.set_ratio(ratio);
         ratioPpm_.store(controller_.ratioPpm(), std::memory_order_relaxed);
         filtOcc_.store(controller_.filteredOccupancy(), std::memory_order_relaxed);
-        const size_t m = resampler_.process(f.data(), FRAME_SAMPLES, rsOut_.data(), rsOut_.size());
+        const size_t m = resampler_.process(src, FRAME_SAMPLES, rsOut_.data(), rsOut_.size());
         reframe_.write(rsOut_.data(), m);
         while (reframe_.pop_frame(f2.data()))
           if (!ringB_.try_push(f2)) dropouts_.record_overrun();
       } else {
-        if (!ringB_.try_push(f)) dropouts_.record_overrun();
+        Frame pf; for (size_t i = 0; i < FRAME_SAMPLES; ++i) pf[i] = src[i];
+        if (!ringB_.try_push(pf)) dropouts_.record_overrun();
       }
     }
   }
