@@ -16,6 +16,7 @@ struct Stft::Impl {
   kiss_fftr_cfg fwd;   // forward real FFT
   kiss_fftr_cfg inv;   // inverse real FFT
 
+  float wnorm;                  // forward-analysis normalization (libDF lib.rs:133)
   std::vector<float> window;    // Vorbis (DFN3), length fftSize
   std::vector<float> anaBuf;    // analysis buffer, holds latest fftSize samples
   std::vector<float> olaBuf;    // synthesis overlap-add accumulator, length fftSize
@@ -41,6 +42,14 @@ Stft::Stft(int fftSize, int hop) : p_(new Impl{}) {
     double s = std::sin(pi * (static_cast<double>(n) + 0.5) / fftSize);
     p_->window[n] = static_cast<float>(std::sin(0.5 * pi * s * s));
   }
+
+  // Forward-analysis spectrum normalization (libDF lib.rs:133): applied to the
+  // forward FFT output ONLY, so the complex spectrum fed to the DFN3 feature
+  // extractor is at libDF's scale. wnorm = 2*hop / fftSize^2. Combined with the
+  // (unnormalized) inverse FFT below, the analysis->synthesis round-trip gain is
+  // wnorm*fftSize = 2*hop/fftSize = 1 at 50% overlap, preserving reconstruction.
+  p_->wnorm = 2.0f * static_cast<float>(hop) /
+              (static_cast<float>(fftSize) * static_cast<float>(fftSize));
 
   p_->anaBuf.assign(fftSize, 0.0f);
   p_->olaBuf.assign(fftSize, 0.0f);
@@ -76,9 +85,10 @@ void Stft::analyze(const float* hopSamples, float* re, float* im) noexcept {
 
   kiss_fftr(p_->fwd, td, p_->freq.data());
 
+  const float wn = p_->wnorm;
   for (int i = 0; i < p_->bins; ++i) {
-    re[i] = p_->freq[i].r;
-    im[i] = p_->freq[i].i;
+    re[i] = p_->freq[i].r * wn;
+    im[i] = p_->freq[i].i * wn;
   }
 }
 
@@ -94,11 +104,12 @@ void Stft::synthesize(const float* re, const float* im, float* hopOut) noexcept 
   float* td = p_->td.data();
   kiss_fftri(p_->inv, p_->freq.data(), td);   // NOT normalized: scaled by N
 
-  // Apply synthesis window + inverse-FFT normalization (1/N), overlap-add.
+  // Apply synthesis window + overlap-add. No inverse-FFT 1/N here: the forward
+  // analysis already carries wnorm, and wnorm * (unnormalized inverse FFT gain N)
+  // = 1 (matches libDF frame_synthesis, which normalizes in analysis only).
   const float* w = p_->window.data();
-  const float invN = 1.0f / static_cast<float>(N);
   float* ola = p_->olaBuf.data();
-  for (int i = 0; i < N; ++i) ola[i] += (td[i] * invN) * w[i];
+  for (int i = 0; i < N; ++i) ola[i] += td[i] * w[i];
 
   // Output first hop samples.
   for (int i = 0; i < H; ++i) hopOut[i] = ola[i];

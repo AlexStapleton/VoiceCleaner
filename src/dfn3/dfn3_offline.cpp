@@ -16,6 +16,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <map>
 #include <stdexcept>
 #include <string>
@@ -221,6 +223,30 @@ std::vector<float> Dfn3Offline::process(const std::vector<float>& mono48k) {
     if (kv.second.shape.size() == 4) { coefs = kv.second.data.data(); break; }
   }
   if (!coefs) throw std::runtime_error("Dfn3Offline: df_dec coefs output not found");
+
+  // ---- DEBUG (gated by VC_DFN3_DEBUG): mean ERB mask m and mean lsnr over the
+  // noise-only lead-in (first 50 frames) vs. the speech region. ----
+  if (std::getenv("VC_DFN3_DEBUG")) {
+    const int lead = static_cast<int>(T) < 50 ? static_cast<int>(T) : 50;
+    OwnedTensor* lsnrT = nullptr;
+    for (auto& kv : encOut)
+      if (kv.second.shape.size() == 3 && kv.second.shape.back() == 1) lsnrT = &kv.second;
+    auto meanRange = [](const float* p, int stride, int t0, int t1, int n) {
+      double s = 0.0; int cnt = 0;
+      for (int t = t0; t < t1; ++t) for (int j = 0; j < n; ++j) { s += p[static_cast<size_t>(t) * stride + j]; ++cnt; }
+      return cnt ? s / cnt : 0.0;
+    };
+    double mNoise = meanRange(mask, kErb, 0, lead, kErb);
+    double mSpeech = meanRange(mask, kErb, lead, static_cast<int>(T), kErb);
+    std::fprintf(stderr, "[DFN3-DBG] T=%lld lead=%d  mean_m noise=%.4f speech=%.4f",
+                 static_cast<long long>(T), lead, mNoise, mSpeech);
+    if (lsnrT) {
+      double lNoise = meanRange(lsnrT->data.data(), 1, 0, lead, 1);
+      double lSpeech = meanRange(lsnrT->data.data(), 1, lead, static_cast<int>(T), 1);
+      std::fprintf(stderr, "  mean_lsnr noise=%.3f speech=%.3f", lNoise, lSpeech);
+    }
+    std::fprintf(stderr, "\n");
+  }
 
   // ---- 6. Assemble enhanced spectrum. ----
   // Working copy = NOISY spectrum.
