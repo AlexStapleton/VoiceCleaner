@@ -21,6 +21,7 @@ FetchContent_MakeAvailable(tomlplusplus)
 
 enable_testing()
 add_subdirectory(third_party/rnnoise)
+add_subdirectory(third_party/kissfft)
 add_subdirectory(src/transport-core)
 add_subdirectory(src/denoise-core)
 add_subdirectory(src/win-audio)
