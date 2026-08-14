@@ -1,9 +1,11 @@
 // offline-cli: WAV in -> 480-sample frames -> INoiseFilter (or DspChain) -> WAV out.
 #include <cstdio>
 #include <cstring>
+#include <exception>
 #include <vector>
 
 #include "channel.h"
+#include "dfn3_offline.h"
 #include "dsp_chain.h"
 #include "frame.h"
 #include "passthrough_filter.h"
@@ -13,6 +15,7 @@
 int main(int argc, char** argv) {
   bool useChain = false;
   bool useRnnoise = false;
+  bool useDfn3 = false;
   int argi = 1;
   // Optional flags in any order: --chain and --engine <name> (default passthrough).
   while (argi < argc) {
@@ -21,16 +24,18 @@ int main(int argc, char** argv) {
       ++argi;
     } else if (std::strcmp(argv[argi], "--engine") == 0) {
       if (argi + 1 >= argc) {
-        std::fprintf(stderr, "error: --engine requires a value (passthrough|rnnoise)\n");
+        std::fprintf(stderr, "error: --engine requires a value (passthrough|rnnoise|dfn3)\n");
         return 2;
       }
       const char* eng = argv[argi + 1];
       if (std::strcmp(eng, "rnnoise") == 0) {
         useRnnoise = true;
+      } else if (std::strcmp(eng, "dfn3") == 0) {
+        useDfn3 = true;
       } else if (std::strcmp(eng, "passthrough") == 0) {
         useRnnoise = false;
       } else {
-        std::fprintf(stderr, "error: unknown engine '%s' (expected passthrough|rnnoise)\n", eng);
+        std::fprintf(stderr, "error: unknown engine '%s' (expected passthrough|rnnoise|dfn3)\n", eng);
         return 2;
       }
       argi += 2;
@@ -41,7 +46,7 @@ int main(int argc, char** argv) {
 
   if (argc - argi != 2) {
     std::fprintf(stderr,
-                 "usage: offline-cli [--chain] [--engine passthrough|rnnoise] <in.wav> <out.wav>\n");
+                 "usage: offline-cli [--chain] [--engine passthrough|rnnoise|dfn3] <in.wav> <out.wav>\n");
     return 2;
   }
 
@@ -57,6 +62,30 @@ int main(int argc, char** argv) {
   const size_t frames = in.channels > 0 ? in.samples.size() / in.channels : 0;
   std::vector<float> mono(frames);
   vc::extract_channel(in.samples.data(), frames, in.channels, 0, mono.data());
+
+  // DeepFilterNet3 is a complete whole-utterance engine: process the entire mono
+  // signal at once and write it out (ignores --chain).
+  if (useDfn3) {
+    std::vector<float> enhanced;
+    try {
+      vc::Dfn3Offline dfn3("models/dfn3");
+      enhanced = dfn3.process(mono);
+    } catch (const std::exception& e) {
+      std::fprintf(stderr, "error: dfn3 failed: %s\n", e.what());
+      return 1;
+    }
+    vc::WavData outDfn3;
+    outDfn3.sampleRate = in.sampleRate;
+    outDfn3.channels = 1;
+    outDfn3.samples = enhanced;
+    if (!vc::wav_write(outPath, outDfn3, /*asFloat=*/false)) {
+      std::fprintf(stderr, "error: failed to write %s\n", outPath);
+      return 1;
+    }
+    std::printf("engine=dfn3 chain=n/a: processed %zu samples at %u Hz -> %s\n",
+                enhanced.size(), outDfn3.sampleRate, outPath);
+    return 0;
+  }
 
   std::vector<float> processed(frames);
   vc::PassthroughFilter passthrough;
