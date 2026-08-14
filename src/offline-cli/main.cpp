@@ -7,18 +7,41 @@
 #include "dsp_chain.h"
 #include "frame.h"
 #include "passthrough_filter.h"
+#include "rnnoise_filter.h"
 #include "wav.h"
 
 int main(int argc, char** argv) {
   bool useChain = false;
+  bool useRnnoise = false;
   int argi = 1;
-  if (argc >= 2 && std::strcmp(argv[1], "--chain") == 0) {
-    useChain = true;
-    ++argi;
+  // Optional flags in any order: --chain and --engine <name> (default passthrough).
+  while (argi < argc) {
+    if (std::strcmp(argv[argi], "--chain") == 0) {
+      useChain = true;
+      ++argi;
+    } else if (std::strcmp(argv[argi], "--engine") == 0) {
+      if (argi + 1 >= argc) {
+        std::fprintf(stderr, "error: --engine requires a value (passthrough|rnnoise)\n");
+        return 2;
+      }
+      const char* eng = argv[argi + 1];
+      if (std::strcmp(eng, "rnnoise") == 0) {
+        useRnnoise = true;
+      } else if (std::strcmp(eng, "passthrough") == 0) {
+        useRnnoise = false;
+      } else {
+        std::fprintf(stderr, "error: unknown engine '%s' (expected passthrough|rnnoise)\n", eng);
+        return 2;
+      }
+      argi += 2;
+    } else {
+      break;
+    }
   }
 
   if (argc - argi != 2) {
-    std::fprintf(stderr, "usage: offline-cli [--chain] <in.wav> <out.wav>\n");
+    std::fprintf(stderr,
+                 "usage: offline-cli [--chain] [--engine passthrough|rnnoise] <in.wav> <out.wav>\n");
     return 2;
   }
 
@@ -36,7 +59,11 @@ int main(int argc, char** argv) {
   vc::extract_channel(in.samples.data(), frames, in.channels, 0, mono.data());
 
   std::vector<float> processed(frames);
-  vc::PassthroughFilter filter;
+  vc::PassthroughFilter passthrough;
+  vc::RnnoiseFilter rnnoise;
+  vc::INoiseFilter& filter =
+      useRnnoise ? static_cast<vc::INoiseFilter&>(rnnoise)
+                 : static_cast<vc::INoiseFilter&>(passthrough);
   vc::DspChain chain(&filter, vc::DspChain::Config{});
 
   const size_t fullBlocks = frames / vc::FRAME_SAMPLES;
@@ -80,8 +107,8 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  std::printf("chain=%s: processed %zu frames (%zu samples) at %u Hz -> %s\n",
-              useChain ? "on" : "off", blocksProcessed, frames, out.sampleRate,
-              outPath);
+  std::printf("engine=%s chain=%s: processed %zu frames (%zu samples) at %u Hz -> %s\n",
+              useRnnoise ? "rnnoise" : "passthrough", useChain ? "on" : "off",
+              blocksProcessed, frames, out.sampleRate, outPath);
   return 0;
 }
