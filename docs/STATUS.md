@@ -10,7 +10,7 @@ capture/render clock drift, and renders into VB-Cable "CABLE Input" (which Disco
 mic). A second, larger engine — **DeepFilterNet3** — has its full foundation built and de-risked but
 is **not yet wired end-to-end** (the inference/DSP "middle" remains).
 
-**56 unit tests pass.** Two executables build: `phase0-app` (live suppressor) and `offline-cli`
+**55 unit tests pass.** Two executables build: `phase0-app` (live suppressor) and `offline-cli`
 (file-based §11 harness), plus `dfn3-probe` (ONNX model loader).
 
 ## How to build & run
