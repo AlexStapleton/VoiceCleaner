@@ -1,5 +1,6 @@
 // offline-cli: WAV in -> 480-sample frames -> INoiseFilter (or DspChain) -> WAV out.
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <exception>
 #include <vector>
@@ -19,12 +20,21 @@ int main(int argc, char** argv) {
   bool useDfn3 = false;
   bool useDfn3Ll = false;
   bool useDfn3Stream = false;
+  float aggression = 0.0f;  // 0 = disabled; only affects whole-utterance dfn3 / dfn3-ll
   int argi = 1;
-  // Optional flags in any order: --chain and --engine <name> (default passthrough).
+  // Optional flags in any order: --chain, --engine <name> (default passthrough),
+  // --aggression <0..1> (ERB-mask shaping for dfn3 / dfn3-ll only).
   while (argi < argc) {
     if (std::strcmp(argv[argi], "--chain") == 0) {
       useChain = true;
       ++argi;
+    } else if (std::strcmp(argv[argi], "--aggression") == 0) {
+      if (argi + 1 >= argc) {
+        std::fprintf(stderr, "error: --aggression requires a value (0..1)\n");
+        return 2;
+      }
+      aggression = static_cast<float>(std::atof(argv[argi + 1]));
+      argi += 2;
     } else if (std::strcmp(argv[argi], "--engine") == 0) {
       if (argi + 1 >= argc) {
         std::fprintf(stderr,
@@ -81,7 +91,7 @@ int main(int argc, char** argv) {
   if (useDfn3) {
     std::vector<float> enhanced;
     try {
-      vc::Dfn3Offline dfn3("models/dfn3");
+      vc::Dfn3Offline dfn3("models/dfn3", /*dfLeftPad=*/2, aggression);
       enhanced = dfn3.process(mono);
     } catch (const std::exception& e) {
       std::fprintf(stderr, "error: dfn3 failed: %s\n", e.what());
@@ -105,7 +115,7 @@ int main(int argc, char** argv) {
   if (useDfn3Ll) {
     std::vector<float> enhanced;
     try {
-      vc::Dfn3Offline dfn3("models/dfn3-ll", /*dfLeftPad=*/4);
+      vc::Dfn3Offline dfn3("models/dfn3-ll", /*dfLeftPad=*/4, aggression);
       enhanced = dfn3.process(mono);
     } catch (const std::exception& e) {
       std::fprintf(stderr, "error: dfn3-ll failed: %s\n", e.what());

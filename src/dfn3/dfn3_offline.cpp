@@ -23,6 +23,7 @@
 #include <string>
 #include <vector>
 
+#include "aggression.h"
 #include "dfn3_features.h"
 #include "dfn3_postdsp.h"
 #include "erb.h"
@@ -64,8 +65,10 @@ struct Dfn3Offline::Impl {
   Ort::MemoryInfo mem = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
   NamedSession enc, erbDec, dfDec;
   int dfLeftPad = 2;
+  float aggressionSlider = 0.0f;  // 0 = disabled (no mask shaping)
 
-  explicit Impl(const std::string& modelDir, int dfLeftPad_) : dfLeftPad(dfLeftPad_) {
+  explicit Impl(const std::string& modelDir, int dfLeftPad_, float aggressionSlider_)
+      : dfLeftPad(dfLeftPad_), aggressionSlider(aggressionSlider_) {
     std::string dir = modelDir;
     if (!dir.empty() && dir.back() != '/' && dir.back() != '\\') dir += '/';
 
@@ -127,8 +130,8 @@ struct Dfn3Offline::Impl {
   }
 };
 
-Dfn3Offline::Dfn3Offline(const std::string& modelDir, int dfLeftPad)
-    : p_(new Impl(modelDir, dfLeftPad)) {}
+Dfn3Offline::Dfn3Offline(const std::string& modelDir, int dfLeftPad, float aggressionSlider)
+    : p_(new Impl(modelDir, dfLeftPad, aggressionSlider)) {}
 Dfn3Offline::~Dfn3Offline() { delete p_; }
 
 std::vector<float> Dfn3Offline::process(const std::vector<float>& mono48k) {
@@ -210,6 +213,17 @@ std::vector<float> Dfn3Offline::process(const std::vector<float>& mono48k) {
   std::map<std::string, OwnedTensor> erbOut = p_->run(p_->erbDec, erbIn);
   if (erbOut.empty()) throw std::runtime_error("Dfn3Offline: erb_dec produced no output");
   OwnedTensor& maskT = erbOut.begin()->second;  // single output: m[1,1,T,32]
+
+  // Optional aggression: shape the ERB gain mask harder toward attenuation before
+  // it is applied (g' = max(gMin, g^gamma)). slider 0 => gamma 1.0 identity is NOT
+  // guaranteed by the mapping (0 => 0.4), so we gate on slider>0 to keep the default
+  // path byte-for-byte identical to the original behavior. Only affects ERB bins
+  // (>=96 == >=4800 Hz); the deep-filtered low bins are untouched.
+  if (p_->aggressionSlider > 0.0f) {
+    const float gamma = aggression_gamma(p_->aggressionSlider);
+    constexpr float kGMin = 0.1f;  // 10^(-20/20): floor at -20 dB, avoid musical nulls
+    apply_aggression(maskT.data.data(), maskT.data.size(), gamma, kGMin);
+  }
   const float* mask = maskT.data.data();
 
   // ---- 5. df_dec(emb, c0) -> coefs[1,T,96,10] ----
