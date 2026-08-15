@@ -28,6 +28,16 @@ from dfn3_compare import read_mono, best_lag  # noqa: E402
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 EPS = 1e-12
 
+# Optional filename suffix inserted before ".wav" (e.g. "_n" for the
+# normalized +20 dB re-test). Set via argv: `python dfn3_realtest.py _n`.
+SUFFIX = ""
+
+
+def wav(name):
+    """Insert SUFFIX before the .wav extension, e.g. typing_only -> typing_only_n."""
+    base, ext = os.path.splitext(name)
+    return os.path.join(ROOT, base + SUFFIX + ext)
+
 
 def rms(x):
     return float(np.sqrt(np.mean(x * x))) if len(x) else 0.0
@@ -90,12 +100,12 @@ def band_energy(x, sr, lo, hi, nfft=1024, hop=256):
 
 # ------------------------------------------------------------------ Test A
 def test_keyboard_suppression(sr):
-    inp, _ = read_mono(os.path.join(ROOT, "typing_only.wav"))
+    inp, _ = read_mono(wav("typing_only.wav"))
     rows = {}
     for name, fn in [("dfn3-stream", "typing_dfn3.wav"),
                      ("rnnoise", "typing_rnnoise.wav"),
                      ("passthrough", "typing_pass.wav")]:
-        proc, _ = read_mono(os.path.join(ROOT, fn))
+        proc, _ = read_mono(wav(fn))
         i, p, lag = align_to_input(inp, proc)
         rms_red = 20.0 * np.log10((rms(p) + EPS) / (rms(i) + EPS))
         cf_in, cf_out = crest_factor(i), crest_factor(p)
@@ -118,13 +128,13 @@ def test_keyboard_suppression(sr):
 
 # ------------------------------------------------------------------ Test B
 def test_voice_preservation(sr):
-    inp, _ = read_mono(os.path.join(ROOT, "speech_only.wav"))
+    inp, _ = read_mono(wav("speech_only.wav"))
     rows = {}
     # voiced frames = loudest 40% of input short-time frames
     for name, fn in [("dfn3-stream", "speech_dfn3.wav"),
                      ("rnnoise", "speech_rnnoise.wav"),
                      ("passthrough", "speech_pass.wav")]:
-        proc, _ = read_mono(os.path.join(ROOT, fn))
+        proc, _ = read_mono(wav(fn))
         i, p, lag = align_to_input(inp, proc)
         # speech-band energy retention (100-5000 Hz)
         e_in = band_energy(i, sr, 100, 5000)
@@ -169,7 +179,7 @@ def test_voice_preservation(sr):
 
 # ------------------------------------------------------------------ Test C
 def test_real_usecase(sr):
-    inp, _ = read_mono(os.path.join(ROOT, "speech_typing.wav"))
+    inp, _ = read_mono(wav("speech_typing.wav"))
     rows = {}
     nfft, hop = 1024, 256
     win = np.hanning(nfft)
@@ -179,7 +189,7 @@ def test_real_usecase(sr):
     for name, fn in [("dfn3-stream", "abtest_dfn3.wav"),
                      ("rnnoise", "abtest_rnnoise.wav"),
                      ("passthrough", "abtest_pass.wav")]:
-        proc, _ = read_mono(os.path.join(ROOT, fn))
+        proc, _ = read_mono(wav(fn))
         i, p, lag = align_to_input(inp, proc)
         specs_in, specs_out, sp_energy, hf_in = [], [], [], []
         for k in range(0, len(i) - nfft, hop):
@@ -223,6 +233,10 @@ def ptable(title, rows, fields):
 
 
 def main():
+    global SUFFIX
+    if len(sys.argv) > 1:
+        SUFFIX = sys.argv[1]
+        print(f"(using filename suffix '{SUFFIX}')")
     sr = 48000
     a = test_keyboard_suppression(sr)
     b = test_voice_preservation(sr)

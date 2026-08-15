@@ -150,3 +150,85 @@ deleted.)
 
 Reproduce: `python tools/dfn3_realtest.py` (expects the input recordings + processed
 outputs in the repo root).
+
+---
+
+## Follow-up: normalized (+20 dB) re-test
+
+**Question.** The quiet-level result raised a fair objection: was DFN3's weak keyboard
+suppression a *real* limitation, or an artifact of the quiet recordings (peaks -27 to
+-42 dBFS) starving the level-dependent `_ll` gain mask? If DFN3 is just conservative at low
+input, feeding it a hotter signal should make it "wake up."
+
+**Method.** Applied a uniform **+20 dB** gain (x10.0) to each of the three raw recordings
+(`tools/dfn3_gain.py`), producing `*_n.wav`. +20 dB on -27 to -42 dBFS peaks lands at -7 to
+-22 dBFS — comfortably below full scale. **Clipped samples after gain: 0 (0.0000%) on all
+three files.** Re-ran both engines BARE on the normalized clips and re-scored with the same
+metrics.
+
+### A. Keyboard suppression — normalized vs quiet
+
+| metric | DFN3 quiet | **DFN3 +20 dB** | RNNoise quiet | **RNNoise +20 dB** |
+|---|---:|---:|---:|---:|
+| rms_in (dBFS)          | -66.41 | -46.41 | -66.41 | -46.41 |
+| rms_out (dBFS)         | -69.39 | -51.99 | -93.57 | -78.50 |
+| **rms_reduction (dB)** | -2.98  | **-5.57** | -27.16 | **-32.09** |
+| **p99 short-time reduction (dB)** | -2.37 | **-5.38** | -22.58 | **-27.36** |
+| residual (dBFS)        | -69.39 | **-51.99** | -93.57 | **-78.50** |
+
+### B. Voice preservation — normalized vs quiet
+
+| metric | DFN3 quiet | **DFN3 +20 dB** | RNNoise quiet | **RNNoise +20 dB** |
+|---|---:|---:|---:|---:|
+| **speechband_retention** | 0.9586 | **0.9600** | 0.9183 | **0.8757** |
+| **lsd (dB, voiced)**     | 1.314  | **0.982**  | 2.436  | **2.891** |
+| **nrmse (voiced)**       | 0.0288 | **0.0319** | 0.1030 | **0.1685** |
+
+### C. Real use case (speech+typing) — normalized vs quiet
+
+| metric | DFN3 quiet | **DFN3 +20 dB** | RNNoise quiet | **RNNoise +20 dB** |
+|---|---:|---:|---:|---:|
+| **HF (>3 kHz) transient reduction (dB)** | -1.68 | **-1.97** | -2.02 | **-2.11** |
+
+### Updated verdict — did DFN3 wake up? No, not enough. RNNoise still wins by ~26 dB.
+
+**The decisive number:** at normal level, DFN3-stream removes **-5.57 dB rms / -5.38 dB p99**
+of keyboard noise; RNNoise removes **-32.09 dB rms / -27.36 dB p99**. That is a **~26.5 dB
+gap — actually slightly *wider* than the 24 dB gap at quiet level.**
+
+- **DFN3 did partially wake up.** Its keyboard suppression roughly doubled with the hotter
+  input (2.98 → 5.57 dB rms; 2.37 → 5.38 dB p99), so the level-dependence hypothesis is
+  **partially confirmed** — the `_ll` mask *is* more conservative at low input. Level matters.
+- **But it does not change the verdict, and it does not close the gap.** RNNoise *also*
+  scaled up with more level (27.16 → 32.09 dB), so DFN3 never catches up. 5.6 dB of removal
+  leaves a -52 dBFS keyboard residual you can plainly hear; RNNoise's -78 dBFS is effectively
+  gone. DFN3's earlier weakness was **not primarily a gain-staging artifact** — it is a real,
+  structural limitation on impulsive mechanical-keyboard noise that persists at proper levels.
+- **Voice preservation gap actually widened in DFN3's favor.** At normal level RNNoise gets
+  more aggressive on the voice too (retention 0.9183 → 0.8757, LSD 2.44 → 2.89), while DFN3
+  holds steady (0.960, LSD 0.98). So the tradeoff is unchanged in shape, just sharper: DFN3 =
+  gentle on voice + weak on noise; RNNoise = strong on noise + a bit more voice coloration.
+- **Real-use HF click removal stays a near-tie** (DFN3 -1.97 vs RNNoise -2.11 dB), both up
+  slightly with level, RNNoise still marginally ahead.
+
+**Default recommendation: unchanged — RNNoise is the default; DFN3 stays opt-in.** The core
+product objective is killing mechanical-keyboard noise, and even correctly gain-staged, DFN3
+suppresses ~26 dB *less* of it than RNNoise at roughly one-third the CPU. The "it was just
+quiet input" objection is answered: no, DFN3 is genuinely weaker on this noise class.
+
+**Caveat worth carrying forward:** DFN3 *is* level-sensitive (suppression nearly doubled
+with +20 dB), so the full chain still needs proper gain-staging / a level meter, and DFN3
+should be re-tested inside the full chain where AGC sets a consistent hot level. That would
+let DFN3 perform at its best — but its best here is still ~5.6 dB, far short of RNNoise.
+
+Reproduce: `python tools/dfn3_gain.py <in.wav> <out.wav> 20` on each raw clip, re-run the
+engines on the `_n.wav` inputs, then `python tools/dfn3_realtest.py _n`.
+
+### Normalized A/B clips left for the user (repo root, not committed)
+
+| clip | DFN3-stream | RNNoise |
+|---|---|---|
+| **speech + typing, +20 dB** | `abtest_dfn3_n.wav` | `abtest_rnnoise_n.wav` |
+
+(Also present from the run: `typing_*_n.wav`, `speech_*_n.wav`, `*_pass_n.wav`, and the
+gained inputs `*_n.wav` — all untracked, deletable.)
