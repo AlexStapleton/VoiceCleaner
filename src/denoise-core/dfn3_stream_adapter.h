@@ -13,6 +13,7 @@ public:
   float    LastVadProbability() const noexcept override;      // from lsnr
   void     SetAggression(float) noexcept override {}          // DFN3 aggression: future work
   uint32_t AlgorithmicDelaySamples() const noexcept override; // = Dfn3Streaming::latencySamples() (480)
+  uint64_t failedHops() const noexcept;                       // silenced ORT-failure hops (observability)
 private:
   std::unique_ptr<Dfn3Streaming> eng_;
 };

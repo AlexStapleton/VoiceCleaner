@@ -26,14 +26,15 @@ TEST(Switchable, SteadyStateEqualsActiveEngineDelayAligned){
 TEST(Switchable, EqualPowerGainLawOnSwitch){
   // a passes the input through (the "from" stream); b outputs 0 (the "to" stream). With
   // delay 0 on both, the crossfade output equals the equal-power gain cos(theta) each frame,
-  // theta stepping 0->pi/2 across fadeFrames=4. This pins the equal-power law to exact values.
+  // theta stepping 0->pi/2 across fadeFrames=4 with p spanning 0..1 INCLUSIVE. Frame 0 -> p=0
+  // -> cos(0)=1 == the pre-switch value (continuous); last fade frame -> p=1 -> cos(pi/2)=0.
   GainEngine a(1.0f,0), b(0.0f,0);
   SwitchableEngine sw(&a,&b,/*fadeFrames=*/4);
   std::vector<float> in(480,1.0f), out(480);
   sw.ProcessFrame(in.data(), out.data());
   EXPECT_NEAR(out[0], 1.0f, 1e-4f);                          // steady on engine 0 before switch
   sw.requestActive(1);
-  const float expect[4] = {0.92388f, 0.70711f, 0.38268f, 0.0f};   // cos(0.25,0.5,0.75,1.0 * pi/2)
+  const float expect[4] = {1.0f, 0.86603f, 0.5f, 0.0f};   // cos(0, pi/6, pi/3, pi/2)
   for(int f=0; f<4; ++f){
     sw.ProcessFrame(in.data(), out.data());
     for(int i=0;i<480;++i) EXPECT_NEAR(out[i], expect[f], 1e-4f) << "fade frame " << f;

@@ -29,6 +29,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <initializer_list>
 #include <stdexcept>
 #include <string>
@@ -331,6 +332,8 @@ struct Dfn3Streaming::Impl {
 
   bool hopFailed = false;      // true if the most recent hop threw (output was silenced)
   uint64_t failedHops = 0;     // sticky count of silenced hops since construction
+  bool needsResync = false;    // set on failure; triggers a reset() before the next hop
+  bool warnedFail = false;     // one-time stderr warning has been emitted
 
   explicit Impl(const std::string& modelDir) {
     std::string dir = modelDir;
@@ -465,14 +468,30 @@ void Dfn3Streaming::process(const float* in480, float* out480) noexcept {
   // this hop and record it. State carried into the next hop may be stale after a failure,
   // but the stream keeps running instead of crashing the process.
   try {
+    // Recover from a prior failure: WindowRunner::run advances the rolling window and
+    // GRU state BEFORE calling ORT, so a throw leaves the model desynced. Restart from a
+    // clean state (reset() zeroes windows/GRU/ring) before processing this hop. The
+    // reset alloc happens only on the rare failure path; the success path stays alloc-free.
+    if (p_->needsResync) {
+      p_->reset();
+      p_->needsResync = false;
+    }
     p_->process(in480, out480);
     p_->hopFailed = false;
   } catch (...) {
     std::fill(out480, out480 + kHop, 0.0f);
     p_->hopFailed = true;
     ++p_->failedHops;
+    p_->needsResync = true;
+    if (!p_->warnedFail) {
+      std::fprintf(stderr,
+                   "[dfn3] engine hop failed (ORT); resyncing. Further failures counted silently.\n");
+      p_->warnedFail = true;
+    }
   }
 }
+
+uint64_t Dfn3Streaming::failedHops() const noexcept { return p_->failedHops; }
 
 uint32_t Dfn3Streaming::latencySamples() const noexcept { return kHop; }
 float Dfn3Streaming::lastLsnr() const noexcept { return p_->lastLsnr; }

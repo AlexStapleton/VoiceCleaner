@@ -43,12 +43,17 @@ bool Bridge::start() {
     // Both leaves run warm; SwitchableEngine crossfades between them on request_engine().
     leafA_ = std::make_unique<RnnoiseFilter>();
     leafB_ = std::make_unique<Dfn3StreamAdapter>("models/dfn3-ll");
+    dfn3Adapter_ = static_cast<Dfn3StreamAdapter*>(leafB_.get());
     auto sw = std::make_unique<SwitchableEngine>(leafA_.get(), leafB_.get());
     switch_ = sw.get();
     engine_ = std::move(sw);
   }
   else if (cfg_.engine == "rnnoise") engine_ = std::make_unique<RnnoiseFilter>();
-  else if (cfg_.engine == "dfn3")    engine_ = std::make_unique<Dfn3StreamAdapter>("models/dfn3-ll");
+  else if (cfg_.engine == "dfn3") {
+    auto adapter = std::make_unique<Dfn3StreamAdapter>("models/dfn3-ll");
+    dfn3Adapter_ = adapter.get();
+    engine_ = std::move(adapter);
+  }
   else                               engine_ = std::make_unique<PassthroughFilter>();
   if (cfg_.dspChain) chain_ = std::make_unique<DspChain>(engine_.get(), DspChain::Config{});
 
@@ -151,6 +156,10 @@ void Bridge::stop() {
                   frameStats_.meanMs(), frameStats_.maxMs(),
                   frameStats_.percentileMs(50.0), frameStats_.percentileMs(99.0), frameStats_.percentileMs(99.9),
                   frameStats_.fractionOverMs(10.0) * 100.0);
+    }
+    if (dfn3Adapter_ && dfn3Adapter_->failedHops() > 0) {
+      std::printf("dfn3 engine failures (silenced hops): %llu\n",
+                  (unsigned long long)dfn3Adapter_->failedHops());
     }
   }
   render_.stop();
