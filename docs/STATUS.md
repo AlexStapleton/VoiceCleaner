@@ -1,6 +1,10 @@
 # VoiceCleaner — Project Status & Resume Guide
 
-_Last updated: 2026-08-13_
+_Last updated: 2026-08-14_
+
+**Active work:** unblocking **live/real-time DeepFilterNet3** (the blueprint's default engine, D9).
+Offline DFN3 is complete and validated (r=0.9946); the remaining barrier is recurrent-state streaming —
+the current ONNX export runs whole-utterance only. See "What remains (DFN3)" below.
 
 ## TL;DR
 
