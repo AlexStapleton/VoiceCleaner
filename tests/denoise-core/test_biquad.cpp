@@ -27,3 +27,13 @@ TEST(Biquad, AttenuatesLowFrequency) {
   float ri = rms(x, 24000), ro = rms(y, 24000);
   EXPECT_LT(ro/ri, 0.3f);                        // clearly attenuated below cutoff
 }
+
+TEST(Biquad, SetHighpassRetunesWithoutResettingState) {
+  vc::Biquad bq = vc::Biquad::highpass(48000.0, 80.0);
+  std::vector<float> in(64, 1.0f), out(64);
+  bq.process(in.data(), out.data(), in.size());   // build up filter state
+  bq.setHighpass(48000.0, 200.0);                  // retune, keep state
+  bq.process(in.data(), out.data(), in.size());
+  for (float v : out) EXPECT_TRUE(std::isfinite(v));
+  EXPECT_LT(std::fabs(out.back()), 1.0f);
+}

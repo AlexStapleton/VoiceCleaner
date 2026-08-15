@@ -33,6 +33,8 @@ void Limiter::process(const float* in, float* out, size_t n) noexcept {
   }
 }
 
+void Limiter::setCeilingDb(float db) noexcept { ceiling_ = std::pow(10.0f, db / 20.0f); }
+
 void Limiter::reset() noexcept {
   std::fill(delay_.begin(), delay_.end(), 0.0f);
   widx_ = 0;

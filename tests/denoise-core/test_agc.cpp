@@ -17,3 +17,15 @@ TEST(Agc, FrozenWhenVadInactive){
   a.process(x.data(),y.data(),x.size(),false);  // silence + no vad -> gain must not hunt up
   EXPECT_NEAR(a.currentGainDb(), 0.0f, 1e-3f);
 }
+
+TEST(Agc, SetTargetDbChangesGainTargetLive) {
+  vc::Agc a({-30.0f, 5.0f, 5.0f, 30.0f, -10.0f, 48000.0f});
+  std::vector<float> in(4800, 0.1f), out(4800);
+  a.process(in.data(), out.data(), in.size(), true);
+  a.setTargetDb(-6.0f);                      // raise the target
+  a.process(in.data(), out.data(), in.size(), true);
+  float rmsAfter = 0; for (float v : out) rmsAfter += v * v;
+  rmsAfter = std::sqrt(rmsAfter / out.size());
+  const float targetLin = std::pow(10.0f, -6.0f / 20.0f);
+  EXPECT_NEAR(rmsAfter, targetLin, 0.05f);   // converged near the NEW target
+}

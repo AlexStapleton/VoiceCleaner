@@ -1,5 +1,6 @@
 #pragma once
 #include <cstddef>
+#include <cmath>
 namespace vc {
 class Agc {
 public:
@@ -10,6 +11,7 @@ public:
   // hunting up during pauses (blueprint §7.1). out may alias in.
   void  process(const float* in, float* out, size_t n, bool vadActive) noexcept;
   float currentGainDb() const noexcept;
+  void setTargetDb(float db) noexcept { targetLin_ = std::pow(10.0f, db / 20.0f); }
   void  reset() noexcept;
 private:
   Config cfg_; float gainDb_ = 0.0f; float envRms_ = 0.0f;

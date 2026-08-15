@@ -6,6 +6,7 @@ class Biquad {
 public:
   static Biquad highpass(double fs, double fc, double Q = 0.70710678);
   void process(const float* in, float* out, size_t n) noexcept;   // may alias
+  void setHighpass(double fs, double fc, double Q = 0.70710678) noexcept;  // retune, keep state
   void reset() noexcept { x1_=x2_=y1_=y2_=0.0f; }
 private:
   float b0_=1,b1_=0,b2_=0,a1_=0,a2_=0;

@@ -20,3 +20,13 @@ TEST(Limiter, UnityBelowCeiling){
   // output equals input delayed by 144, gain ~1
   for(size_t i=500;i<2000;++i) EXPECT_NEAR(y[i], x[i-144], 1e-3f);
 }
+
+TEST(Limiter, SetCeilingDbLowersTheCeilingLive) {
+  vc::Limiter lim(-1.0f, 16, 50.0f, 48000.0f);
+  lim.setCeilingDb(-12.0f);
+  std::vector<float> in(2048, 0.9f), out(2048);
+  lim.process(in.data(), out.data(), in.size());
+  float peak = 0; for (float v : out) { float a = std::fabs(v); if (a > peak) peak = a; }
+  const float ceilLin = std::pow(10.0f, -12.0f / 20.0f);
+  EXPECT_LE(peak, ceilLin + 1e-3f);
+}
