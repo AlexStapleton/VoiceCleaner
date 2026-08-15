@@ -16,6 +16,7 @@
 #include "inoise_filter.h"
 #include "passthrough_filter.h"
 #include "rnnoise_filter.h"
+#include "dfn3_stream_adapter.h"
 #include "dsp_chain.h"
 namespace vc {
 class Bridge {

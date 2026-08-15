@@ -38,8 +38,9 @@ bool Bridge::start() {
   for (size_t i = 0; i < ringB_.capacity() / 2; ++i) ringB_.try_push(silent);  // prime half-full
 
   // Engine + optional DSP chain: constructed here (non-RT) before any thread starts.
-  if (cfg_.engine == "rnnoise") engine_ = std::make_unique<RnnoiseFilter>();
-  else                          engine_ = std::make_unique<PassthroughFilter>();
+  if      (cfg_.engine == "rnnoise") engine_ = std::make_unique<RnnoiseFilter>();
+  else if (cfg_.engine == "dfn3")    engine_ = std::make_unique<Dfn3StreamAdapter>("models/dfn3-ll");
+  else                               engine_ = std::make_unique<PassthroughFilter>();
   if (cfg_.dspChain) chain_ = std::make_unique<DspChain>(engine_.get(), DspChain::Config{});
 
   frameReady_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
