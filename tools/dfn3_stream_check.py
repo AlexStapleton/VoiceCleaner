@@ -21,6 +21,8 @@ import numpy as np
 import onnxruntime as ort
 
 HIDDEN = 512
+# T=40 is chosen unique among all model output dims (1/2/8/16/32/64/96/512/10) so that
+# time_axis() can identify the time axis unambiguously by matching the dim value == T.
 T = 40
 TOL = 1e-3
 W_CANDIDATES = [1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 16]

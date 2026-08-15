@@ -132,6 +132,8 @@ def split_encoder(model_dir):
 
     # GRU X comes from a Transpose whose input is the pre-GRU embedding tensor.
     transpose_node = get_node_by_output(graph, gru_node.input[0])
+    assert transpose_node is not None and transpose_node.op_type == "Transpose", \
+        "enc GRU.X not fed by expected Transpose; re-export changed the pre-GRU layout — revisit the encoder split"
     pre_gru_emb = transpose_node.input[0]
     print(f"  Pre-GRU embedding tensor: {pre_gru_emb}")
 
@@ -251,6 +253,8 @@ def _build_enc_gru(enc_path, gru_ref, hidden_size, pre_gru_emb, gru_const_names,
             del graph.node[i]
 
     gru = next(n for n in graph.node if n.op_type == "GRU")
+    assert not any(a.name == "direction" and a.s not in (b"", b"forward") for a in gru.attribute), \
+        "bidirectional GRU — state shapes assume forward"
 
     old_h = gru.input[5] if len(gru.input) > 5 else ""
     while len(gru.input) < 6:
@@ -331,6 +335,17 @@ def patch_decoder(model_dir, filename, prefix, slice_specs):
     hidden = next(a.i for a in grus[0].attribute if a.name == "hidden_size")
     print(f"  {filename}: {num_layers} GRU layer(s), hidden_size={hidden}")
 
+    # Drop any original graph output that isn't a windowed/sliced data output (e.g. df_dec's
+    # `302`, an un-sliced [.,S,1] sigmoid the host never consumes). Leaving it un-sliced would
+    # return W frames — an untested trap. Removing it orphans its producers; onnxsim prunes them.
+    dropped = [o.name for o in graph.output if o.name not in slice_specs]
+    for name in dropped:
+        for j in reversed(range(len(graph.output))):
+            if graph.output[j].name == name:
+                del graph.output[j]
+    if dropped:
+        print(f"    dropped unused output(s): {dropped}")
+
     h0_name, h1_name = f"{prefix}_h0", f"{prefix}_h1"
     graph.initializer.append(numpy_helper.from_array(np.array([0], np.int64), f"_{prefix}_y0_starts"))
     graph.initializer.append(numpy_helper.from_array(np.array([1], np.int64), f"_{prefix}_y0_ends"))
@@ -340,6 +355,8 @@ def patch_decoder(model_dir, filename, prefix, slice_specs):
     # pre_nodes must precede the GRUs (they feed initial_h); post_nodes follow the GRUs.
     pre_nodes, post_nodes, h1_parts = [], [], []
     for i, gru in enumerate(grus):
+        assert not any(a.name == "direction" and a.s not in (b"", b"forward") for a in gru.attribute), \
+            "bidirectional GRU — state shapes assume forward"
         # per-layer initial_h = h0[i:i+1]  -> [1,1,hidden]
         s_out = f"_{prefix}_h0_L{i}"
         graph.initializer.append(numpy_helper.from_array(np.array([i], np.int64), f"_{prefix}_hs_{i}"))
