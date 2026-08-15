@@ -6,14 +6,86 @@
 #include <thread>
 #include <chrono>
 #include <iostream>
+#include <vector>
 #include <windows.h>
 #include "com_guard.h"
 #include "device_enumerator.h"
 #include "config.h"
 #include "bridge.h"
+#include "wasapi_capture.h"
+#include "channel.h"
+#include "wav.h"
 
 static std::atomic<bool> g_stop{false};
 static BOOL WINAPI ctrlHandler(DWORD) { g_stop.store(true); return TRUE; }
+
+static std::wstring widen(const std::string& s) { return std::wstring(s.begin(), s.end()); } // ASCII device IDs
+
+// Record path: capture the configured capture device (K688) to a 48 kHz mono PCM16 WAV for N
+// seconds with NO processing/render/engine/relay. Mirrors the bridge's device resolution +
+// WasapiCapture usage. Returns process exit code (0 ok, non-zero device failure).
+static int runRecord(const vc::Config& cfg, const std::string& recordPath, int seconds) {
+  if (cfg.captureDeviceId.empty()) {
+    std::fprintf(stderr, "error: --record needs a capture device ID (via --config or --capture). Use --list-devices.\n");
+    return 1;
+  }
+  vc::DeviceEnumerator e;
+  IMMDevice* capDev = e.resolve(widen(cfg.captureDeviceId));
+  if (!capDev) {
+    std::fprintf(stderr, "error: could not resolve capture device '%s' (check ID via --list-devices)\n",
+                 cfg.captureDeviceId.c_str());
+    return 1;
+  }
+
+  std::vector<float> samples;
+  samples.reserve((size_t)48000 * (size_t)(seconds > 0 ? seconds + 1 : 16));  // avoid steady-state realloc
+  std::vector<float> mono;
+  std::atomic<bool> failed{false};
+
+  vc::WasapiCapture capture;
+  auto errCb = [&failed](const char* w){
+    std::fprintf(stderr, "audio error: %s\n", w);
+    failed.store(true, std::memory_order_release);
+  };
+  auto sampleCb = [&samples, &mono](const float* interleaved, size_t frames, int channels){
+    mono.resize(frames);
+    vc::extract_channel(interleaved, frames, channels, 0, mono.data());
+    samples.insert(samples.end(), mono.begin(), mono.end());
+  };
+
+  if (!capture.start(capDev, sampleCb, errCb)) {
+    std::fprintf(stderr, "error: capture failed to start on device '%s'\n", cfg.captureDeviceId.c_str());
+    capDev->Release();
+    return 1;
+  }
+  capDev->Release();   // WasapiCapture Activated its own client; device no longer needed
+
+  SetConsoleCtrlHandler(ctrlHandler, TRUE);
+  const int dur = seconds > 0 ? seconds : 15;
+  std::printf("recording %ds from capture device to %s (Ctrl+C to stop early)...\n", dur, recordPath.c_str());
+  auto t0 = std::chrono::steady_clock::now();
+  while (!g_stop.load() && !failed.load(std::memory_order_acquire)) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    auto el = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - t0).count();
+    if (el >= dur) break;
+  }
+  capture.stop();
+
+  if (failed.load(std::memory_order_acquire)) {
+    std::fprintf(stderr, "error: recording aborted due to audio device error\n");
+    return 2;
+  }
+
+  vc::WavData wav; wav.sampleRate = 48000; wav.channels = 1; wav.samples = std::move(samples);
+  const size_t n = wav.samples.size();
+  if (!vc::wav_write(recordPath, wav, /*asFloat=*/false)) {
+    std::fprintf(stderr, "error: failed to write WAV to %s\n", recordPath.c_str());
+    return 1;
+  }
+  std::printf("recorded %zu samples (%.2fs) at 48000 Hz mono -> %s\n",
+              n, (double)n / 48000.0, recordPath.c_str());
+  return 0;
+}
 
 static const char* kindStr(vc::SampleKind k) {
   switch (k) { case vc::SampleKind::Float32: return "float32";
@@ -26,11 +98,12 @@ static void printList(const char* label, EDataFlow flow, vc::DeviceEnumerator& e
 }
 
 int main(int argc, char** argv) {
-  bool listDevices = false; std::string configPath; int seconds = 0;
+  bool listDevices = false; std::string configPath; int seconds = 0; std::string recordPath;
   for (int i = 1; i < argc; ++i) {
     if (!std::strcmp(argv[i], "--list-devices")) listDevices = true;
     else if (!std::strcmp(argv[i], "--config") && i + 1 < argc) configPath = argv[++i];
     else if (!std::strcmp(argv[i], "--seconds") && i + 1 < argc) seconds = std::atoi(argv[++i]);
+    else if (!std::strcmp(argv[i], "--record") && i + 1 < argc) recordPath = argv[++i];
   }
 
   try {
@@ -45,6 +118,10 @@ int main(int argc, char** argv) {
     vc::Config cfg;
     if (!configPath.empty()) cfg = vc::Config::load(configPath);
     cfg.apply_cli(argc, argv);
+
+    // Record mode: capture -> WAV only. No render/engine/relay; render device not required.
+    if (!recordPath.empty()) return runRecord(cfg, recordPath, seconds);
+
     if (cfg.captureDeviceId.empty() || cfg.renderDeviceId.empty()) {
       std::fprintf(stderr, "error: need capture and render device IDs (via --config or --capture/--render). Use --list-devices.\n");
       return 1;
