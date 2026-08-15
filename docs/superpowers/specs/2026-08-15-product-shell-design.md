@@ -22,6 +22,7 @@ background audio process. It realizes blueprint §8 (UI architecture), §8.5 (co
 | Tuning depth | **Full tuning panel** | Live aggression / HPF / output-gain sliders — requires exposing `DspChain` params through the §8.3 snapshot. |
 | First-run | **Deferred stub** | First launch opens the window with the mic picker highlighted and the meter live. The full §4.1/§4.3 checklist is deferred. |
 | Packaging | **Portable** | All files (both exes, `onnxruntime.dll`, `models/`, `settings.toml`) live in one self-contained folder; paths resolved relative to the module directory. |
+| Per-mic config | **Full per-microphone profiles + drift warm-start** | Each mic remembers its own engine/tuning and its last converged drift ppm; switching restores that mic's preferences and seeds the drift controller for a faster settle. |
 
 ## 3. Architecture
 
@@ -58,7 +59,9 @@ Headline controls, top to bottom:
 2. **Input level meter** — Direct2D, input RMS with peak-hold and decay, target zone −18…−12 dBFS
    marked (§4.2 gain staging). Updated from the worker's telemetry at ~20 Hz.
 3. **Microphone input** — dropdown of capture devices (WASAPI enumeration already exists in
-   `win-audio` `DeviceEnumerator`). Selecting one is a **structural** change (pipeline rebuild).
+   `win-audio` `DeviceEnumerator`). Selecting one is a **structural** change (pipeline rebuild, §5.1),
+   and it **loads that mic's saved profile** (engine, tuning, cached drift ppm; §7) — the controls
+   snap to the new mic's preferences and the drift controller is seeded with its cached ppm.
 4. **Engine** — segmented `RNNoise | DeepFilterNet3` + a `Warm standby` checkbox. With warm standby on
    (both engines loaded), switching is instant (a param update); with it off, switching rebuilds.
 5. **Tuning** — three headline sliders: Aggression, HPF cutoff, Output gain (param updates, ramped in
@@ -102,7 +105,12 @@ on a **dedicated non-RT thread** in the worker. The RT thread never touches the 
   **ramps** any changed continuous value over ~10–20 ms so parameter jumps never click.
 - **Structural commands** — select capture/render device, toggle warm-standby build, reset counters,
   shut down. These stop → rebuild → restart the pipeline on the command thread (never mutate a live
-  RT pipeline).
+  RT pipeline). The **select-capture-device** command carries a **drift-ppm seed** (from the mic's
+  saved profile, §7); the worker seeds the `DriftController`'s integrator with it so the resampler
+  starts near the steady-state ratio instead of converging from zero.
+
+The worker continuously reports the **current converged drift ppm** in telemetry (§5.2, already a
+`ratio_ppm` field) so the UI can persist an updated value back into the active mic's profile.
 
 Message schema is small and explicit (a tagged command with a fixed payload); JSON-lines or a compact
 binary framing — chosen at implementation time, isolated behind the `vc-ipc` codec.
@@ -126,7 +134,10 @@ expensive aggregates update per-second. No queue, no strings, no logging on the 
   pointers/strings in the shared structs.
 - **`denoise-core`** — give `DspChain` a `Params`-driven path: the currently-hardcoded aggression /
   HPF / AGC / limiter constants become **ramped targets** with RT-safe setters. This is the "full
-  tuning panel" plumbing and the only change to the DSP libraries. Must not regress the DFN3 goldens.
+  tuning panel" plumbing. Must not regress the DFN3 goldens.
+- **`transport-core`** — add a **seedable initial condition** to `DriftController` (set the leaky
+  integrator's starting ratio from a saved ppm) for the drift warm-start. Cold start = 0 ppm, so
+  existing behavior is the default when no seed is given.
 - **worker** (`phase0-app` → renamed target `voicecleaner-worker`): add the named-pipe server + command
   thread, the shared-memory telemetry writer, the in-process `Params` double-buffer + `PublishParams`,
   and a device re-select / pipeline-rebuild path. The interim stdin `1`/`2` key reader is replaced by
@@ -134,7 +145,8 @@ expensive aggregates update per-second. No queue, no strings, no logging on the 
 - **`voicecleaner`** (new UI target): the single Win32 window, Direct2D meter, controls, device
   enumeration/selection (reuse `win-audio` `DeviceEnumerator`), the `Shell_NotifyIcon` tray icon +
   `TrackPopupMenu` quick controls (enable/bypass, engine switch, open, quit), minimize/close-to-tray,
-  `settings.toml` read/write, and the spawn/attach/supervise logic.
+  `settings.toml` read/write **including per-mic profile lookup/save and drift-ppm persistence**, and
+  the spawn/attach/supervise logic.
 
 **Naming to confirm on review:** rename the `phase0-app` target to `voicecleaner-worker`; introduce
 the `vc-ipc` lib rather than folding the structs into `transport-core`.
@@ -146,6 +158,41 @@ the `vc-ipc` lib rather than folding the structs into `transport-core`.
   registry, no installer.
 - The UI is the owner of record: it reads `settings.toml` at startup, spawns the worker pointed at it,
   and on any change updates memory + sends the pipe command + **debounced-writes** the file back.
+
+### 7.1 Schema — global block + per-microphone profiles
+`settings.toml` has a small **global** block (last-selected mic, output device = CABLE Input,
+window/tray state) plus one **profile section per microphone**, keyed by the stable WASAPI device ID:
+
+```toml
+[global]
+active_capture_id = "{0.0.1.00000000}.{5fbcc184-...}"
+render_id         = "{0.0.0.00000000}.{59cf8297-...}"   # CABLE Input
+
+[mic."{0.0.1.00000000}.{5fbcc184-...}"]   # fifine K688
+name          = "fifine Microphone (K688)"  # cached label for the dropdown
+engine        = "dfn3"
+warm_standby  = true
+aggression    = 0.65
+hpf_hz        = 90
+output_gain_dbfs = -16
+limiter_dbfs  = -1
+dsp_chain     = true
+drift_ppm     = -26.0        # last converged value → warm-start seed
+```
+
+**Flow:**
+- **Startup / mic-select:** the UI looks up the chosen mic's profile (creating a default one on first
+  encounter), applies its params to the controls, and issues the structural select-device command
+  carrying `drift_ppm` as the seed (§5.1).
+- **Live edits** (engine/tuning) write into the *active mic's* profile, debounced.
+- **Drift persistence:** the UI periodically snapshots the worker's reported converged `ratio_ppm`
+  (and on mic-switch / quit) into the active profile's `drift_ppm`, so the next switch warm-starts
+  from an updated value.
+
+The drift seed is a *warm start, not a fixed value* — the controller still adapts each session
+(drift shifts with temperature / per-boot); a stale or missing `drift_ppm` just means a slightly
+longer convergence, never wrong output.
+
 - **Caveat:** a portable app that writes next to itself must not be installed under `Program Files`
   (not user-writable without UAC virtualization). It lives in a user-owned folder — which also
   satisfies the §3 "nothing runs elevated" rule. If the settings write fails (read-only location), the
@@ -177,7 +224,10 @@ the `vc-ipc` lib rather than folding the structs into `transport-core`.
 - `DspChain` param path: setters clamp to valid ranges; ramping reaches the target monotonically with
   no discontinuity between frames; a param change mid-stream produces a click-free envelope.
 - `settings.toml` round-trip: load → mutate → save → load is identity; missing/partial files fall back
-  to defaults.
+  to defaults; per-mic profiles round-trip, and selecting an unseen mic creates a default profile.
+- `DriftController` seed: seeding the integrator with a saved ppm starts the ratio at that value and
+  converges to the true offset no worse than a cold start; a zero/absent seed reproduces today's
+  behavior exactly.
 - `vc-ipc` codec: every command serializes and parses back to the same value; malformed frames are
   rejected, not crashed.
 
@@ -189,7 +239,8 @@ params equal today's hardcoded defaults.
 - UI launches → worker spawns → audio flows to CABLE Input.
 - Live knob changes (aggression / HPF / gain) are audibly click-free.
 - Engine switch under warm standby is instant and clean; without warm standby, rebuild works.
-- Mic-input change rebuilds the pipeline without crashing.
+- Mic-input change rebuilds the pipeline without crashing, restores that mic's saved profile, and
+  seeds drift so occupancy settles faster than a cold start.
 - Bypass toggles cleanly (from both the window and the tray menu).
 - Meter tracks real input level and supports gain staging to −18…−12 dBFS.
 - **Tray:** minimize/close hides to tray with audio still flowing; tray enable/bypass and engine
@@ -201,14 +252,15 @@ params equal today's hardcoded defaults.
 ## 10. Phased build order
 
 1. **Shared structs + DSP plumbing** — `vc-ipc` (`Params`, telemetry, codec) + `DspChain` ramped
-   param path + unit tests. Drive via config/CLI to validate ramping; no UI yet. Keeps DFN3 goldens
-   green.
+   param path + `DriftController` seedable initial condition + unit tests. Drive via config/CLI to
+   validate ramping and the drift seed; no UI yet. Keeps DFN3 goldens green.
 2. **Worker IPC** — named-pipe server + command thread (replaces stdin keys) + shared-memory telemetry
    writer + device-rebuild path.
 3. **UI skeleton** — single window that spawns/attaches/supervises the worker and drives engine switch
    + bypass over the pipe. Proves the end-to-end loop.
 4. **UI settings surface** — Direct2D meter, mic picker, tuning sliders, Advanced section, and
-   `settings.toml` persistence.
+   `settings.toml` persistence **with per-mic profiles + drift warm-start** (needs the `DriftController`
+   seed from phase 1–2 and the `ratio_ppm` telemetry field).
 5. **First-run stub + polish** — highlight the mic picker with live meter on first run; error/reconnect
    flows; window state.
 
@@ -232,5 +284,7 @@ Each phase is independently testable and leaves the worker headless-correct.
 - The portable folder is user-writable (not `Program Files`).
 - Warm standby (both engines loaded) is affordable as the default, per the measured live headroom
   (DFN3 mean 0.71 ms, p99.9 1.06 ms; both-engines smoke mean 2.07 ms, 0% over budget).
+- WASAPI device IDs are stable enough to key per-mic profiles on; the cached drift ppm is a warm-start
+  hint the controller always re-adapts from, so staleness is harmless.
 - Output device defaults to CABLE Input; the user routes Discord to CABLE Output (unchanged from today).
 - No global hotkeys / input hooks anywhere in the shell (§3, §8.6).
