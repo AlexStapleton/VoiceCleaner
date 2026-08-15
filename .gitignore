@@ -6,3 +6,5 @@
 *.log
 # machine-specific runtime config (device IDs); see docs/runbooks for how to generate
 drift.toml
+# visual-companion brainstorming scratch
+.superpowers/
