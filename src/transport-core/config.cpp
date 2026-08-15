@@ -22,6 +22,7 @@ Config Config::load(const std::string& path) {
   c.filterAlpha       = t["drift_filter_alpha"].value_or(0.02);
   c.engine            = t["engine"].value_or(std::string("none"));
   c.dspChain          = t["dsp_chain"].value_or(false);
+  c.warmStandby       = t["warm_standby"].value_or(false);
   c.validate();
   return c;
 }

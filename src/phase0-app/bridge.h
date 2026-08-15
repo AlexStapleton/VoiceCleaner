@@ -18,6 +18,7 @@
 #include "passthrough_filter.h"
 #include "rnnoise_filter.h"
 #include "dfn3_stream_adapter.h"
+#include "switchable_engine.h"
 #include "dsp_chain.h"
 namespace vc {
 class Bridge {
@@ -27,6 +28,8 @@ public:
   void stop();
   ~Bridge();
   bool device_lost() const noexcept { return deviceLost_.load(std::memory_order_acquire); }
+  // Non-RT switch trigger (warm-standby only). idx 0 = rnnoise, 1 = dfn3. No-op otherwise.
+  void request_engine(int idx) noexcept { if (switch_) switch_->requestActive(idx); }
 private:
   void   relayLoop();
   void   onCapture(const float* interleaved, size_t frames, int channels);
@@ -39,7 +42,9 @@ private:
   Resampler          resampler_;
   FrameAccumulator   reframe_;    // relay side: re-block resampler output into 480-sample frames
   std::vector<float> rsOut_;      // relay side: resampler output scratch
+  std::unique_ptr<INoiseFilter> leafA_, leafB_;  // warm-standby leaves (owned; borrowed by switch_)
   std::unique_ptr<INoiseFilter> engine_;   // constructed in start() (non-RT)
+  SwitchableEngine*             switch_ = nullptr;  // non-owning; points into engine_ when warm-standby
   std::unique_ptr<DspChain>     chain_;     // optional DC->HPF->AGC->limiter wrap
   Frame                         proc_;      // processed-frame scratch (relay RT)
   std::atomic<double> ratioPpm_{0.0};

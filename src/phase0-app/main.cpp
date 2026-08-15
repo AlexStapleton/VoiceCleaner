@@ -5,6 +5,7 @@
 #include <atomic>
 #include <thread>
 #include <chrono>
+#include <iostream>
 #include <windows.h>
 #include "com_guard.h"
 #include "device_enumerator.h"
@@ -53,6 +54,21 @@ int main(int argc, char** argv) {
     SetConsoleCtrlHandler(ctrlHandler, TRUE);
     if (!bridge.start()) return 1;
 
+    // Interim warm-standby switch trigger (NOT the §8.5 command channel): a non-RT stdin
+    // reader that maps 1->engine 0 (RNNoise), 2->engine 1 (DFN3). Only spawned when
+    // warm_standby is set; normal single-engine runs never start this thread. Blocking on
+    // std::cin, so on shutdown we set g_stop and detach (join would block until a keypress).
+    std::thread switchThread;
+    if (cfg.warmStandby) {
+      switchThread = std::thread([&bridge]{
+        std::string line;
+        while (!g_stop.load() && std::getline(std::cin, line)) {
+          if (line.find('1') != std::string::npos)      { bridge.request_engine(0); std::printf("switch -> RNNoise\n"); }
+          else if (line.find('2') != std::string::npos) { bridge.request_engine(1); std::printf("switch -> DFN3\n"); }
+        }
+      });
+    }
+
     int rc = 0;
     auto t0 = std::chrono::steady_clock::now();
     while (!g_stop.load()) {
@@ -70,6 +86,8 @@ int main(int argc, char** argv) {
     }
     std::printf("stopping...\n");
     bridge.stop();
+    // The stdin reader blocks in std::getline; detach so shutdown never waits on a keypress.
+    if (switchThread.joinable()) switchThread.detach();
     return rc;
   } catch (const std::exception& ex) {
     std::fprintf(stderr, "fatal: %s\n", ex.what());
