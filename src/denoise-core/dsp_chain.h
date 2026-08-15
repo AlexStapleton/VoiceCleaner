@@ -24,6 +24,13 @@ public:
   void process_frame(const float* in, float* out) noexcept;   // FRAME_SAMPLES in/out
   void reset() noexcept;
   bool vadActive() const noexcept { return vadActive_; }
+  void setHpfCutoffHz(float hz) noexcept          { hpfTarget_ = hz; }
+  void setAgcTargetDb(float db) noexcept          { agcTarget_ = db; }
+  void setLimiterCeilingDb(float db) noexcept     { limTarget_ = db; }
+  void setBypass(bool on) noexcept                { bypass_ = on; }
+  float currentHpfCutoffHz() const noexcept       { return hpfCur_; }
+  float currentAgcTargetDb() const noexcept       { return agcCur_; }
+  float currentLimiterCeilingDb() const noexcept  { return limCur_; }
 private:
   INoiseFilter* engine_;
   DcBlocker dc_;
@@ -37,5 +44,11 @@ private:
   int   holdSamples_;
   float t1_[FRAME_SAMPLES];
   float t2_[FRAME_SAMPLES];
+  float fs_;
+  float hpfCur_, hpfTarget_;
+  float agcCur_, agcTarget_;
+  float limCur_, limTarget_;
+  bool  bypass_ = false;
+  static constexpr float kRampCoef = 0.6065f;   // e^{-10ms/20ms}
 };
 }

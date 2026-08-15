@@ -49,3 +49,50 @@ TEST(DspChain, RemovesDcOffset){
   float mean=0; for(size_t i=0;i<FRAME_SAMPLES;++i) mean+=out[i]; mean/=FRAME_SAMPLES;
   EXPECT_LT(std::fabs(mean), 0.05f);    // DC blocker + HPF removed the offset
 }
+
+TEST(DspChain, CurrentsInitializeToConfigNotZero) {
+  vc::PassthroughFilter eng;
+  vc::DspChain::Config cfg;              // hpf 80, agc -15, lim -1
+  vc::DspChain chain(&eng, cfg);
+  EXPECT_FLOAT_EQ(chain.currentHpfCutoffHz(), 80.0f);
+  EXPECT_FLOAT_EQ(chain.currentAgcTargetDb(), -15.0f);
+  EXPECT_FLOAT_EQ(chain.currentLimiterCeilingDb(), -1.0f);
+}
+TEST(DspChain, HpfCutoffRampsMonotonicallyToTarget) {
+  vc::PassthroughFilter eng;
+  vc::DspChain chain(&eng, vc::DspChain::Config{});
+  chain.setHpfCutoffHz(200.0f);
+  std::vector<float> in(vc::FRAME_SAMPLES, 0.0f), out(vc::FRAME_SAMPLES);
+  float prev = chain.currentHpfCutoffHz();
+  bool monotonic = true;
+  for (int f = 0; f < 20; ++f) {
+    chain.process_frame(in.data(), out.data());
+    float cur = chain.currentHpfCutoffHz();
+    if (cur < prev - 1e-3f) monotonic = false;   // never decreases toward a higher target
+    prev = cur;
+  }
+  EXPECT_TRUE(monotonic);
+  EXPECT_NEAR(chain.currentHpfCutoffHz(), 200.0f, 1.0f);  // arrived
+}
+TEST(DspChain, NoSingleFrameJumpOnParamChange) {
+  vc::PassthroughFilter eng;
+  vc::DspChain chain(&eng, vc::DspChain::Config{});
+  chain.setAgcTargetDb(0.0f);            // big change from -15
+  float prev = chain.currentAgcTargetDb();
+  std::vector<float> in(vc::FRAME_SAMPLES, 0.0f), out(vc::FRAME_SAMPLES);
+  for (int f = 0; f < 5; ++f) {
+    chain.process_frame(in.data(), out.data());
+    float step = std::fabs(chain.currentAgcTargetDb() - prev);
+    EXPECT_LT(step, 10.0f);              // no full-jump in one frame (full jump would be 15 dB)
+    prev = chain.currentAgcTargetDb();
+  }
+}
+TEST(DspChain, BypassCopiesInputToOutput) {
+  vc::PassthroughFilter eng;
+  vc::DspChain chain(&eng, vc::DspChain::Config{});
+  chain.setBypass(true);
+  std::vector<float> in(vc::FRAME_SAMPLES), out(vc::FRAME_SAMPLES);
+  for (size_t i = 0; i < in.size(); ++i) in[i] = 0.01f * static_cast<float>(i % 50);
+  chain.process_frame(in.data(), out.data());
+  for (size_t i = 0; i < in.size(); ++i) EXPECT_FLOAT_EQ(out[i], in[i]);
+}

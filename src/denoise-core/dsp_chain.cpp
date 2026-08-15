@@ -9,9 +9,24 @@ DspChain::DspChain(INoiseFilter* engine, const Config& c)
       lim_(c.limiterCeilingDb, 144, 50.0f, c.fs),
       open_(c.vadOpen),
       close_(c.vadClose),
-      holdSamples_((int)(c.vadHoldMs * 0.001f * c.fs)) {}
+      holdSamples_((int)(c.vadHoldMs * 0.001f * c.fs)),
+      fs_(c.fs),
+      hpfCur_(c.hpfCutoffHz), hpfTarget_(c.hpfCutoffHz),
+      agcCur_(c.agcTargetDb), agcTarget_(c.agcTargetDb),
+      limCur_(c.limiterCeilingDb), limTarget_(c.limiterCeilingDb) {}
 
 void DspChain::process_frame(const float* in, float* out) noexcept {
+  if (bypass_) {
+    for (size_t i = 0; i < FRAME_SAMPLES; ++i) out[i] = in[i];
+    return;
+  }
+  // Ramp params toward targets (one-pole, ~20 ms) and push into the leaves.
+  hpfCur_ = kRampCoef * hpfCur_ + (1.0f - kRampCoef) * hpfTarget_;
+  agcCur_ = kRampCoef * agcCur_ + (1.0f - kRampCoef) * agcTarget_;
+  limCur_ = kRampCoef * limCur_ + (1.0f - kRampCoef) * limTarget_;
+  hpf_.setHighpass(fs_, hpfCur_);
+  agc_.setTargetDb(agcCur_);
+  lim_.setCeilingDb(limCur_);
   // 1. DC blocker (only stage before the engine).
   dc_.process(in, t1_, FRAME_SAMPLES);
   // 2. Engine.
@@ -42,6 +57,7 @@ void DspChain::reset() noexcept {
   lim_.reset();
   vadActive_ = false;
   holdLeft_ = 0;
+  hpfCur_ = hpfTarget_; agcCur_ = agcTarget_; limCur_ = limTarget_;
 }
 
 }  // namespace vc
