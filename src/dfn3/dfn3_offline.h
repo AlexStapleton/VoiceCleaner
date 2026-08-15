@@ -7,7 +7,10 @@ namespace vc {
 class Dfn3Offline {
 public:
   // dfLeftPad = deep-filter left/past pad = order - df_lookahead - 1 (standard model: 2; _ll: 4).
-  explicit Dfn3Offline(const std::string& modelDir, int dfLeftPad = 2);  // throws on load failure
+  // aggressionSlider (0..1) shapes the ERB gain mask before it is applied: 0 = no change
+  // (default, exact original behavior). See src/denoise-core/aggression.{h,cpp}.
+  explicit Dfn3Offline(const std::string& modelDir, int dfLeftPad = 2,
+                       float aggressionSlider = 0.0f);  // throws on load failure
   ~Dfn3Offline();
   std::vector<float> process(const std::vector<float>& mono48k);  // returns enhanced mono
 private:

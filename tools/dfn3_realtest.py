@@ -12,10 +12,14 @@ output against the RAW INPUT, using metrics that make sense for real audio:
 Each processed file is aligned to its input by integer xcorr lag first
 (engines add algorithmic delay), then trimmed to common length.
 
+The set of engines compared is the ENGINES table below: each entry names the
+per-test output WAV (produced by offline-cli.exe). Missing files are skipped for
+that test, so a partial set (e.g. only the aggression sweep) still runs.
+
 Usage:
-  python tools/dfn3_realtest.py
-Assumes the input recordings and the processed *_dfn3 / *_rnnoise / *_pass wavs
-live in the repo root (produced by offline-cli.exe).
+  python tools/dfn3_realtest.py [suffix]
+The optional suffix (e.g. "_n" for the +20 dB normalized re-test) is inserted
+before ".wav" in every filename. All WAVs live in the repo root.
 """
 import os
 import sys
@@ -32,11 +36,32 @@ EPS = 1e-12
 # normalized +20 dB re-test). Set via argv: `python dfn3_realtest.py _n`.
 SUFFIX = ""
 
+# ---------------------------------------------------------------- engine table
+# Each engine names its output WAV stem for each test (before SUFFIX / .wav).
+# Set a stem to None to exclude the engine from that test. Files that are
+# absent on disk are silently skipped, so this table can list more than exists.
+ENGINES = [
+    # label                 typing (test A)      speech (test B)         abtest (C)
+    ("rnnoise",            "typing_rnnoise",    "speech_rnnoise",    "abtest_rnnoise"),
+    ("dfn3-standard",      "typing_dfn3std",    "speech_dfn3std",    None),
+    ("dfn3-ll(whole)",     "typing_dfn3ll",     "speech_dfn3ll",     None),
+    ("dfn3-stream(_ll RT)","typing_dfn3stream", "speech_dfn3stream", None),
+    ("dfn3 aggr=0.25",     "typing_dfn3a025",   "speech_dfn3a025",   None),
+    ("dfn3 aggr=0.50",     "typing_dfn3a050",   "speech_dfn3a050",   None),
+    ("dfn3 aggr=0.75",     "typing_dfn3a075",   "speech_dfn3a075",   None),
+    ("dfn3 aggr=1.00",     "typing_dfn3a100",   "speech_dfn3a100",   None),
+    ("passthrough",        "typing_pass",       "speech_pass",       "abtest_pass"),
+]
+
 
 def wav(name):
     """Insert SUFFIX before the .wav extension, e.g. typing_only -> typing_only_n."""
     base, ext = os.path.splitext(name)
     return os.path.join(ROOT, base + SUFFIX + ext)
+
+
+def exists(stem):
+    return stem is not None and os.path.isfile(wav(stem + ".wav"))
 
 
 def rms(x):
@@ -76,16 +101,6 @@ def short_time_levels(x, sr, win_ms=20.0):
     return np.sqrt(np.mean(fr * fr, axis=1))
 
 
-def stft_mag(x, nfft=1024, hop=256):
-    win = np.hanning(nfft)
-    frames = []
-    for i in range(0, len(x) - nfft, hop):
-        frames.append(np.abs(np.fft.rfft(x[i:i + nfft] * win)))
-    if not frames:
-        return np.zeros((1, nfft // 2 + 1)), np.fft.rfftfreq(nfft, 1.0)
-    return np.array(frames), None
-
-
 def band_energy(x, sr, lo, hi, nfft=1024, hop=256):
     """Total energy in [lo,hi] Hz summed over all frames."""
     win = np.hanning(nfft)
@@ -102,10 +117,10 @@ def band_energy(x, sr, lo, hi, nfft=1024, hop=256):
 def test_keyboard_suppression(sr):
     inp, _ = read_mono(wav("typing_only.wav"))
     rows = {}
-    for name, fn in [("dfn3-stream", "typing_dfn3.wav"),
-                     ("rnnoise", "typing_rnnoise.wav"),
-                     ("passthrough", "typing_pass.wav")]:
-        proc, _ = read_mono(wav(fn))
+    for label, typ, _sp, _ab in ENGINES:
+        if not exists(typ):
+            continue
+        proc, _ = read_mono(wav(typ + ".wav"))
         i, p, lag = align_to_input(inp, proc)
         rms_red = 20.0 * np.log10((rms(p) + EPS) / (rms(i) + EPS))
         cf_in, cf_out = crest_factor(i), crest_factor(p)
@@ -114,7 +129,7 @@ def test_keyboard_suppression(sr):
         p99_in = np.percentile(stl_in, 99)
         p99_out = np.percentile(stl_out, 99)
         p99_red = 20.0 * np.log10((p99_out + EPS) / (p99_in + EPS))
-        rows[name] = dict(
+        rows[label] = dict(
             lag=lag,
             rms_in_db=dbfs(i), rms_out_db=dbfs(p),
             rms_reduction_db=rms_red,
@@ -130,11 +145,10 @@ def test_keyboard_suppression(sr):
 def test_voice_preservation(sr):
     inp, _ = read_mono(wav("speech_only.wav"))
     rows = {}
-    # voiced frames = loudest 40% of input short-time frames
-    for name, fn in [("dfn3-stream", "speech_dfn3.wav"),
-                     ("rnnoise", "speech_rnnoise.wav"),
-                     ("passthrough", "speech_pass.wav")]:
-        proc, _ = read_mono(wav(fn))
+    for label, _typ, sp, _ab in ENGINES:
+        if not exists(sp):
+            continue
+        proc, _ = read_mono(wav(sp + ".wav"))
         i, p, lag = align_to_input(inp, proc)
         # speech-band energy retention (100-5000 Hz)
         e_in = band_energy(i, sr, 100, 5000)
@@ -167,7 +181,7 @@ def test_voice_preservation(sr):
         num = np.sqrt(np.mean((vo[:, vb] - vi[:, vb]) ** 2))
         den = np.sqrt(np.mean(vi[:, vb] ** 2)) + EPS
         nrmse = float(num / den)
-        rows[name] = dict(
+        rows[label] = dict(
             lag=lag,
             speechband_retention=retention,
             lsd_db=lsd,
@@ -186,10 +200,10 @@ def test_real_usecase(sr):
     freqs = np.fft.rfftfreq(nfft, 1.0 / sr)
     hb = freqs > 3000            # high band (clicks live here)
     sb = (freqs >= 100) & (freqs <= 5000)
-    for name, fn in [("dfn3-stream", "abtest_dfn3.wav"),
-                     ("rnnoise", "abtest_rnnoise.wav"),
-                     ("passthrough", "abtest_pass.wav")]:
-        proc, _ = read_mono(wav(fn))
+    for label, _typ, _sp, ab in ENGINES:
+        if not exists(ab):
+            continue
+        proc, _ = read_mono(wav(ab + ".wav"))
         i, p, lag = align_to_input(inp, proc)
         specs_in, specs_out, sp_energy, hf_in = [], [], [], []
         for k in range(0, len(i) - nfft, hop):
@@ -208,8 +222,7 @@ def test_real_usecase(sr):
         hf_e_in = np.sum(specs_in[active][:, hb] ** 2)
         hf_e_out = np.sum(specs_out[active][:, hb] ** 2)
         hf_red_db = 10.0 * np.log10((hf_e_out + EPS) / (hf_e_in + EPS))
-        # also crest factor of HF-filtered time domain as a transient proxy
-        rows[name] = dict(
+        rows[label] = dict(
             lag=lag,
             hf_transient_reduction_db=hf_red_db,
             rms_in_db=dbfs(i), rms_out_db=dbfs(p),
@@ -218,18 +231,22 @@ def test_real_usecase(sr):
 
 
 def ptable(title, rows, fields):
-    order = ["dfn3-stream", "rnnoise", "passthrough"]
+    order = [label for (label, *_rest) in ENGINES if label in rows]
     print(f"\n## {title}")
+    if not order:
+        print("  (no output files present)")
+        return
     label_w = max(len(f[0]) for f in fields)
-    hdr = f"{'metric':<{label_w}} | " + " | ".join(f"{o:>14}" for o in order)
+    colw = max(14, max(len(o) for o in order))
+    hdr = f"{'metric':<{label_w}} | " + " | ".join(f"{o:>{colw}}" for o in order)
     print(hdr)
     print("-" * len(hdr))
     for key, fmt in fields:
         cells = []
         for o in order:
             v = rows[o].get(key)
-            cells.append(fmt.format(v) if v is not None else "n/a".rjust(14))
-        print(f"{key:<{label_w}} | " + " | ".join(f"{c:>14}" for c in cells))
+            cells.append(fmt.format(v) if v is not None else "n/a".rjust(colw))
+        print(f"{key:<{label_w}} | " + " | ".join(f"{c:>{colw}}" for c in cells))
 
 
 def main():
@@ -248,36 +265,36 @@ def main():
     print("=" * 78)
 
     ptable("A. KEYBOARD SUPPRESSION  (typing_only.wav -> ideal = silence)", a, [
-        ("lag", "{:14d}"),
-        ("rms_in_db", "{:14.2f}"),
-        ("rms_out_db", "{:14.2f}"),
-        ("rms_reduction_db", "{:14.2f}"),
-        ("crest_in", "{:14.2f}"),
-        ("crest_out", "{:14.2f}"),
-        ("crest_reduction", "{:14.2f}"),
-        ("p99_reduction_db", "{:14.2f}"),
-        ("residual_dbfs", "{:14.2f}"),
+        ("lag", "{:d}"),
+        ("rms_in_db", "{:.2f}"),
+        ("rms_out_db", "{:.2f}"),
+        ("rms_reduction_db", "{:.2f}"),
+        ("crest_in", "{:.2f}"),
+        ("crest_out", "{:.2f}"),
+        ("crest_reduction", "{:.2f}"),
+        ("p99_reduction_db", "{:.2f}"),
+        ("residual_dbfs", "{:.2f}"),
     ])
     print("\n  more-negative rms/p99 reduction = more suppression;"
           " larger crest_reduction = flatter clicks;"
           " residual_dbfs = noise LEFT (lower=quieter).")
 
     ptable("B. VOICE PRESERVATION  (speech_only.wav -> ideal = untouched)", b, [
-        ("lag", "{:14d}"),
-        ("speechband_retention", "{:14.4f}"),
-        ("lsd_db", "{:14.3f}"),
-        ("nrmse", "{:14.4f}"),
-        ("rms_in_db", "{:14.2f}"),
-        ("rms_out_db", "{:14.2f}"),
+        ("lag", "{:d}"),
+        ("speechband_retention", "{:.4f}"),
+        ("lsd_db", "{:.3f}"),
+        ("nrmse", "{:.4f}"),
+        ("rms_in_db", "{:.2f}"),
+        ("rms_out_db", "{:.2f}"),
     ])
     print("\n  speechband_retention ~1.0 = voice preserved (<<1 = over-suppressed);"
           " lower lsd_db / nrmse = less damage.")
 
     ptable("C. REAL USE CASE  (speech_typing.wav -> click removal under speech)", c, [
-        ("lag", "{:14d}"),
-        ("hf_transient_reduction_db", "{:14.2f}"),
-        ("rms_in_db", "{:14.2f}"),
-        ("rms_out_db", "{:14.2f}"),
+        ("lag", "{:d}"),
+        ("hf_transient_reduction_db", "{:.2f}"),
+        ("rms_in_db", "{:.2f}"),
+        ("rms_out_db", "{:.2f}"),
     ])
     print("\n  hf_transient_reduction_db over speech-active frames:"
           " more negative = more >3kHz click energy removed while speech present.")
