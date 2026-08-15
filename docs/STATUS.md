@@ -2,8 +2,18 @@
 
 _Last updated: 2026-08-14_
 
-**Active work:** **live/real-time DeepFilterNet3** (blueprint default engine, D9) — engine BUILT, one
-hardware gate remaining. On branch `feat/live-dfn3-streaming`: streaming ONNX surgery + orchestrator done
+**Active work:** COMPLETE — **live real-time DeepFilterNet3 (STANDARD model), competitive with RNNoise.**
+`engine="dfn3"` now runs the standard streaming model (Gates A/B/C all green: streaming==offline
+r=0.999999, live mean 0.71 ms / p99.9 1.06 ms / 0% over budget). On real K688 keyboard audio it
+suppresses **−30.4 dB** (vs `_ll` −5.6, RNNoise −32.1) and **retains voice better than RNNoise**
+(0.891 vs 0.876) — the blueprint D9 premise realized. The `_ll` model was the wrong choice (0-lookahead
+can't bracket transients) and is retired from the live path (kept offline). ~30 ms latency vs RNNoise
+~10 ms; RNNoise still edges peak-click suppression. **Open product call:** default engine (RNNoise vs
+standard DFN3 vs warm-standby both, switch live). Then: product shell (tray UI + §8.5 command channel +
+first-run wizard + level meter). Prior stale line below is history.
+
+---
+_(historical — superseded by the line above)_ On branch `feat/live-dfn3-streaming`: streaming ONNX surgery + orchestrator done
 and validated (Gate A frame-by-frame == whole-utterance 1.2e-5; Gate B streaming C++ vs whole-utterance
 `_ll` r=1.000000), RT-hardened (allocation-free hot path), and wired live as `engine="dfn3"`. **Remaining:
 Gate C** — a live K688 run to confirm the `_ll` model fits the 10 ms real-time budget. **Gate C PASSED (2026-08-14, live K688):** frame-time
