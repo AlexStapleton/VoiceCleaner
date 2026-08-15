@@ -13,6 +13,14 @@
 //   7. Stft::synthesize -> out480.
 //
 // All GRU hidden = 512. The only algorithmic latency is the STFT's one hop (480).
+//
+// RT-safety: process() is the MMCSS/relay-thread hot path. After warm-up (once each
+// rolling window has filled) it performs NO heap allocation in our code -- all
+// containers are preallocated members reused in place, the frame ring is a fixed
+// index-based circular buffer, output names/indices are resolved once at load, and
+// ORT reads/writes go through persistent input/output OrtValues bound to our reused
+// buffers (see WindowRunner). The residual ORT `Run` throw risk is contained by a
+// try/catch in Dfn3Streaming::process that fails safe (silence + sticky flag).
 
 #include "dfn3_streaming.h"
 
@@ -21,8 +29,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <deque>
-#include <map>
+#include <initializer_list>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -53,11 +60,15 @@ struct OwnedTensor {
   std::vector<int64_t> shape;
 };
 
-// Query and cache a session's input/output names as std::string.
+// Query and cache a session's input/output names. The cached `const char*` arrays are
+// built once (after the name strings are final) and reused for every Run -- no per-hop
+// string construction. NamedSession must not be moved/copied after init(): the cached
+// pointers alias the std::string buffers.
 struct NamedSession {
   Ort::Session session{nullptr};
   std::vector<std::string> inNames;
   std::vector<std::string> outNames;
+  std::vector<const char*> outPtrs;  // outNames[i].c_str(), model order
 
   void init() {
     Ort::AllocatorWithDefaultOptions alloc;
@@ -65,49 +76,16 @@ struct NamedSession {
       inNames.emplace_back(session.GetInputNameAllocated(i, alloc).get());
     for (size_t i = 0; i < session.GetOutputCount(); ++i)
       outNames.emplace_back(session.GetOutputNameAllocated(i, alloc).get());
+    outPtrs.reserve(outNames.size());
+    for (const std::string& n : outNames) outPtrs.push_back(n.c_str());
+  }
+
+  int outIndex(const std::string& name) const {
+    for (size_t i = 0; i < outNames.size(); ++i)
+      if (outNames[i] == name) return static_cast<int>(i);
+    return -1;
   }
 };
-
-// Run a session by name. inputs maps input-name -> (data ptr, shape). All the
-// session's outputs are extracted into owned buffers keyed by output name.
-std::map<std::string, OwnedTensor> runSession(
-    Ort::MemoryInfo& mem, NamedSession& ns,
-    const std::map<std::string, std::pair<float*, std::vector<int64_t>>>& inputs) {
-  std::vector<Ort::Value> inVals;
-  std::vector<const char*> inPtrs;
-  inVals.reserve(ns.inNames.size());
-  for (const std::string& name : ns.inNames) {
-    auto it = inputs.find(name);
-    if (it == inputs.end())
-      throw std::runtime_error("Dfn3Streaming: missing input tensor for \"" + name + "\"");
-    const auto& shape = it->second.second;
-    size_t count = 1;
-    for (int64_t d : shape) count *= static_cast<size_t>(d);
-    inVals.push_back(Ort::Value::CreateTensor<float>(
-        mem, it->second.first, count, shape.data(), shape.size()));
-    inPtrs.push_back(name.c_str());
-  }
-
-  std::vector<const char*> outPtrs;
-  for (const std::string& n : ns.outNames) outPtrs.push_back(n.c_str());
-
-  std::vector<Ort::Value> outs =
-      ns.session.Run(Ort::RunOptions{nullptr}, inPtrs.data(), inVals.data(), inVals.size(),
-                     outPtrs.data(), outPtrs.size());
-
-  std::map<std::string, OwnedTensor> result;
-  for (size_t i = 0; i < outs.size(); ++i) {
-    if (!outs[i].IsTensor()) continue;
-    auto info = outs[i].GetTensorTypeAndShapeInfo();
-    OwnedTensor ot;
-    ot.shape = info.GetShape();
-    size_t count = info.GetElementCount();
-    const float* d = outs[i].GetTensorData<float>();
-    ot.data.assign(d, d + count);
-    result.emplace(ns.outNames[i], std::move(ot));
-  }
-  return result;
-}
 
 // Description of one windowed input tensor.
 //   fourDim=true  -> ONNX shape [1, chan, S, feat]  (e0..e3/c0/feat_erb/feat_spec)
@@ -134,6 +112,11 @@ struct WinInput {
 //   advanced by exactly one frame/hop -- only when the window is full (about to drop
 //   its oldest frame) do we set h <- (h1 from the run made while that frame was oldest).
 // At W==1 this degrades to a plain stateful GRU (h <- h1), which is enc_gru's case.
+//
+// Allocation-free after warm-up: the frame history is a fixed W-slot circular buffer,
+// window/shape/name scratch are preallocated members, and ORT talks to persistent
+// input/output OrtValues bound to those reused buffers. Output shapes are constant
+// (slice-last / per-frame), so they are discovered on the first Run and then reused.
 class WindowRunner {
 public:
   void init(Ort::MemoryInfo* mem, NamedSession* ns, int W, std::vector<WinInput> ins,
@@ -145,73 +128,178 @@ public:
     layers_ = layers;
     hIn_ = std::move(hIn);
     hOut_ = std::move(hOut);
+
+    const size_t n = ins_.size();
+
+    // Preallocated per-input window storage (max S == W) and shape scratch.
+    winStorage_.resize(n);
+    shapeStorage_.resize(n);
+    for (size_t i = 0; i < n; ++i) {
+      winStorage_[i].assign(static_cast<size_t>(ins_[i].perFrame()) * W_, 0.0f);
+      shapeStorage_[i] = ins_[i].shape(W_);  // S dim overwritten in place each hop
+    }
+
+    // Input name pointers in OUR feed order: [ins_ ..., hIn_]. Stable for the object's
+    // lifetime (they alias ins_[i].name / hIn_, which are not mutated after init).
+    inPtrs_.reserve(n + (layers_ > 0 ? 1 : 0));
+    for (size_t i = 0; i < n; ++i) inPtrs_.push_back(ins_[i].name.c_str());
+    if (layers_ > 0) inPtrs_.push_back(hIn_.c_str());
+    inVals_.reserve(n + (layers_ > 0 ? 1 : 0));
+
+    // Fixed W-slot frame ring; each slot holds one flat per-frame buffer per input.
+    ring_.resize(W_);
+    for (int s = 0; s < W_; ++s) {
+      ring_[s].resize(n);
+      for (size_t i = 0; i < n; ++i)
+        ring_[s][i].assign(static_cast<size_t>(ins_[i].perFrame()), 0.0f);
+    }
+
     if (layers_ > 0) {
       h_.assign(static_cast<size_t>(layers_) * kGru, 0.0f);
-      pending_ = h_;
+      pending_.assign(static_cast<size_t>(layers_) * kGru, 0.0f);
+      hShape_ = {layers_, 1, kGru};
+      hOutIdx_ = ns_->outIndex(hOut_);
+      if (hOutIdx_ < 0)
+        throw std::runtime_error("Dfn3Streaming: state output \"" + hOut_ + "\" not found");
     }
+
+    // Output scratch sized on first Run (shapes are constant); one slot per output.
+    outScratch_.resize(ns_->outNames.size());
+    outVals_.reserve(ns_->outNames.size());
+    for (size_t i = 0; i < ns_->outNames.size(); ++i) outVals_.emplace_back(nullptr);
+
     reset();
   }
 
   void reset() {
-    frames_.clear();
+    head_ = 0;
+    count_ = 0;
+    inBound_ = false;  // window restarts at S=1; persistent input values must be rebuilt
     if (layers_ > 0) {
       std::fill(h_.begin(), h_.end(), 0.0f);
       std::fill(pending_.begin(), pending_.end(), 0.0f);
     }
+    // outScratch_/outVals_ (constant shapes) are intentionally kept across resets.
   }
 
-  // frameBufs: one flat buffer per WinInput, in the same order as ins_.
-  std::map<std::string, OwnedTensor> run(std::vector<std::vector<float>> frameBufs) {
+  // srcs: one flat per-frame source pointer per WinInput, in ins_ order. Each points to
+  // perFrame() floats laid out [chan][feat]. Data is copied into the ring immediately.
+  void run(std::initializer_list<const float*> srcs) {
     // Advance the rolling window (and, for stateful graphs, the carried GRU state).
-    if (static_cast<int>(frames_.size()) == W_) {
-      if (layers_ > 0) h_ = pending_;
-      frames_.pop_front();
+    if (count_ == W_) {
+      if (layers_ > 0) std::copy(pending_.begin(), pending_.end(), h_.begin());
+      head_ = (head_ + 1) % W_;  // drop oldest
+      --count_;
     }
-    frames_.push_back(std::move(frameBufs));
-    const int S = static_cast<int>(frames_.size());
+    const int slot = (head_ + count_) % W_;
+    size_t i = 0;
+    for (const float* s : srcs) {
+      std::copy(s, s + ins_[i].perFrame(), ring_[slot][i].begin());
+      ++i;
+    }
+    ++count_;
+    const int S = count_;
 
-    // Build the window tensors (owned; must outlive the Run call below).
-    std::vector<std::vector<float>> wins(ins_.size());
-    std::map<std::string, std::pair<float*, std::vector<int64_t>>> inputs;
-    for (size_t i = 0; i < ins_.size(); ++i) {
-      const WinInput& in = ins_[i];
-      wins[i].assign(static_cast<size_t>(in.perFrame()) * S, 0.0f);
+    // Scatter the S retained frames into each input's window buffer, layout [chan][S][feat].
+    for (size_t j = 0; j < ins_.size(); ++j) {
+      const WinInput& in = ins_[j];
+      std::vector<float>& win = winStorage_[j];
       for (int t = 0; t < S; ++t) {
-        const std::vector<float>& src = frames_[t][i];
+        const std::vector<float>& src = ring_[(head_ + t) % W_][j];
         for (int c = 0; c < in.chan; ++c)
           for (int x = 0; x < in.feat; ++x)
-            wins[i][(static_cast<size_t>(c) * S + t) * in.feat + x] =
+            win[(static_cast<size_t>(c) * S + t) * in.feat + x] =
                 src[static_cast<size_t>(c) * in.feat + x];
       }
-      inputs[in.name] = {wins[i].data(), in.shape(S)};
+      if (in.fourDim)
+        shapeStorage_[j][2] = S;  // [1,chan,S,feat]
+      else
+        shapeStorage_[j][1] = S;  // [1,S,feat]
     }
 
-    std::vector<int64_t> hShape;
-    if (layers_ > 0) {
-      hShape = {layers_, 1, kGru};
-      inputs[hIn_] = {h_.data(), hShape};
-    }
+    runInference(S);
 
-    std::map<std::string, OwnedTensor> out = runSession(*mem_, *ns_, inputs);
-
-    if (layers_ > 0) {
-      auto it = out.find(hOut_);
-      if (it == out.end())
-        throw std::runtime_error("Dfn3Streaming: state output \"" + hOut_ + "\" not found");
-      pending_ = it->second.data;  // = GRU state after buf[0]
-    }
-    return out;
+    if (layers_ > 0)  // *_h1 = GRU state after the window's first frame
+      std::copy(outScratch_[hOutIdx_].data.begin(), outScratch_[hOutIdx_].data.end(),
+                pending_.begin());
   }
 
+  int outIndex(const std::string& name) const { return ns_->outIndex(name); }
+  const OwnedTensor& out(int i) const { return outScratch_[static_cast<size_t>(i)]; }
+  const float* outData(int i) const { return outScratch_[static_cast<size_t>(i)].data.data(); }
+
 private:
+  // (Re)build the ORT input value list over our reused buffers. Once the window is full
+  // (S==W) the values are created once and reused every hop (persistent binding); ORT
+  // re-reads the same buffers, which we refill in place -- so the steady state allocates
+  // nothing. During warm-up (S<W) the shape changes each hop, so we rebuild.
+  void bindInputs(int S) {
+    const bool persistent = (S == W_);
+    if (inBound_ && persistent) return;  // already bound; buffers stable, just reused
+    inVals_.clear();
+    for (size_t i = 0; i < ins_.size(); ++i)
+      inVals_.emplace_back(Ort::Value::CreateTensor<float>(
+          *mem_, winStorage_[i].data(), static_cast<size_t>(ins_[i].perFrame()) * S,
+          shapeStorage_[i].data(), shapeStorage_[i].size()));
+    if (layers_ > 0)
+      inVals_.emplace_back(Ort::Value::CreateTensor<float>(
+          *mem_, h_.data(), h_.size(), hShape_.data(), hShape_.size()));
+    inBound_ = persistent;
+  }
+
+  void runInference(int S) {
+    bindInputs(S);
+    if (!outBound_) {
+      // First Run: discover output shapes and bind persistent output values in place.
+      std::vector<Ort::Value> outs = ns_->session.Run(
+          Ort::RunOptions{nullptr}, inPtrs_.data(), inVals_.data(), inVals_.size(),
+          ns_->outPtrs.data(), ns_->outPtrs.size());
+      for (size_t i = 0; i < outs.size(); ++i) {
+        if (!outs[i].IsTensor()) continue;
+        auto info = outs[i].GetTensorTypeAndShapeInfo();
+        outScratch_[i].shape = info.GetShape();
+        const size_t cnt = info.GetElementCount();
+        const float* d = outs[i].GetTensorData<float>();
+        outScratch_[i].data.assign(d, d + cnt);
+        outVals_[i] = Ort::Value::CreateTensor<float>(
+            *mem_, outScratch_[i].data.data(), cnt, outScratch_[i].shape.data(),
+            outScratch_[i].shape.size());
+      }
+      outBound_ = true;
+    } else {
+      // Steady state: ORT writes results directly into our reused output buffers.
+      ns_->session.Run(Ort::RunOptions{nullptr}, inPtrs_.data(), inVals_.data(),
+                       inVals_.size(), ns_->outPtrs.data(), outVals_.data(),
+                       outVals_.size());
+    }
+  }
+
   Ort::MemoryInfo* mem_ = nullptr;
   NamedSession* ns_ = nullptr;
   int W_ = 1;
   int layers_ = 0;
   std::string hIn_, hOut_;
   std::vector<WinInput> ins_;
-  std::deque<std::vector<std::vector<float>>> frames_;
+
+  // Input side (all reused).
+  std::vector<std::vector<float>> winStorage_;      // [ins_][perFrame*W]
+  std::vector<std::vector<int64_t>> shapeStorage_;  // [ins_] shape vecs (S dim mutable)
+  std::vector<int64_t> hShape_;                     // {layers,1,kGru}
+  std::vector<const char*> inPtrs_;                 // feed order: [ins_ names..., hIn]
+  std::vector<Ort::Value> inVals_;                  // reused; persistent once S==W
+  bool inBound_ = false;
   std::vector<float> h_, pending_;
+
+  // Fixed-capacity frame ring: ring_[slot][input] = flat [perFrame] frame buffer.
+  std::vector<std::vector<std::vector<float>>> ring_;
+  int head_ = 0;
+  int count_ = 0;
+
+  // Output side (all reused). outScratch_[i]/outVals_[i] correspond to ns_->outNames[i].
+  std::vector<OwnedTensor> outScratch_;
+  std::vector<Ort::Value> outVals_;
+  bool outBound_ = false;
+  int hOutIdx_ = -1;
 };
 
 }  // namespace
@@ -228,12 +316,21 @@ struct Dfn3Streaming::Impl {
 
   WindowRunner encConv, encGru, erbDec, dfDec;
 
+  // Cached output indices (resolved once at load) so the hot path does no name lookups.
+  int ecEmb = 0, ecE3 = 0, ecE2 = 0, ecE1 = 0, ecE0 = 0, ecC0 = 0;  // enc_conv outputs
+  int egEmbOut = 0, egLsnr = 0;                                     // enc_gru outputs
+  int erbM = 0;                                                     // erb_dec output
+  int dfCoefs = 0;                                                  // df_dec output
+
   // Per-hop scratch (kept as members to avoid reallocation on the hot path).
   std::vector<float> re, im;             // noisy spectrum [481]
   std::vector<float> featErb, featSpec;  // [32], [2*96]
   std::vector<float> outRe, outIm;       // enhanced spectrum [481]
   std::vector<float> lowRe, lowIm;       // deep-filtered low bins [96]
   float lastLsnr = 0.0f;
+
+  bool hopFailed = false;      // true if the most recent hop threw (output was silenced)
+  uint64_t failedHops = 0;     // sticky count of silenced hops since construction
 
   explicit Impl(const std::string& modelDir) {
     std::string dir = modelDir;
@@ -274,6 +371,24 @@ struct Dfn3Streaming::Impl {
                {{"emb", 1, kGru, false}, {"c0", 64, kDf, true}},
                /*layers=*/3, "df_h0", "df_h1");
 
+    // Resolve output indices once (no map/string work on the hot path).
+    auto idx = [](WindowRunner& r, const char* name) {
+      int i = r.outIndex(name);
+      if (i < 0)
+        throw std::runtime_error(std::string("Dfn3Streaming: missing output \"") + name + "\"");
+      return i;
+    };
+    ecEmb = idx(encConv, "emb");
+    ecE3 = idx(encConv, "e3");
+    ecE2 = idx(encConv, "e2");
+    ecE1 = idx(encConv, "e1");
+    ecE0 = idx(encConv, "e0");
+    ecC0 = idx(encConv, "c0");
+    egEmbOut = idx(encGru, "emb_out");
+    egLsnr = idx(encGru, "lsnr");
+    erbM = idx(erbDec, "m");
+    dfCoefs = idx(dfDec, "coefs");
+
     re.assign(kBins, 0.0f);
     im.assign(kBins, 0.0f);
     featErb.assign(kErb, 0.0f);
@@ -293,8 +408,11 @@ struct Dfn3Streaming::Impl {
     erbDec.reset();
     dfDec.reset();
     lastLsnr = 0.0f;
+    hopFailed = false;
   }
 
+  // The per-hop inference. May throw (ORT Run can raise Ort::Exception); the caller
+  // (Dfn3Streaming::process) contains that so the audio thread never terminates.
   void process(const float* in480, float* out480) {
     // 1. STFT analysis -> noisy spectrum.
     stft.analyze(in480, re.data(), im.data());
@@ -303,32 +421,30 @@ struct Dfn3Streaming::Impl {
     feats.process(re.data(), im.data(), featErb.data(), featSpec.data());
 
     // 3. enc_conv (W=6, stateless).
-    std::map<std::string, OwnedTensor> encOut = encConv.run({featErb, featSpec});
+    encConv.run({featErb.data(), featSpec.data()});
 
     // 4. enc_gru (one frame/hop) -> emb_out, lsnr, h1.
-    std::map<std::string, OwnedTensor> gruOut = encGru.run({encOut.at("emb").data});
-    const std::vector<float>& lsnr = gruOut.at("lsnr").data;
+    encGru.run({encConv.outData(ecEmb)});
+    const std::vector<float>& lsnr = encGru.out(egLsnr).data;
     lastLsnr = lsnr.empty() ? 0.0f : lsnr[0];
-    std::vector<float>& embOut = gruOut.at("emb_out").data;
+    const float* embOut = encGru.outData(egEmbOut);
 
     // 5. Decoders.
-    std::map<std::string, OwnedTensor> erbOut = erbDec.run(
-        {embOut, encOut.at("e3").data, encOut.at("e2").data, encOut.at("e1").data,
-         encOut.at("e0").data});
-    const std::vector<float>& mask = erbOut.at("m").data;  // [32]
+    erbDec.run({embOut, encConv.outData(ecE3), encConv.outData(ecE2),
+                encConv.outData(ecE1), encConv.outData(ecE0)});
+    const float* mask = erbDec.outData(erbM);  // [32]
 
-    std::map<std::string, OwnedTensor> dfOut = dfDec.run({embOut, encOut.at("c0").data});
-    const std::vector<float>& coefs = dfOut.at("coefs").data;  // [96*10]
+    dfDec.run({embOut, encConv.outData(ecC0)});
+    const float* coefs = dfDec.outData(dfCoefs);  // [96*10]
 
     // 6. Deep filter (low bins) + ERB mask (high bins).
     int outT = 0;
-    const bool ready =
-        ring.push(re.data(), im.data(), coefs.data(), outT, lowRe.data(), lowIm.data());
+    const bool ready = ring.push(re.data(), im.data(), coefs, outT, lowRe.data(), lowIm.data());
 
     std::copy(re.begin(), re.end(), outRe.begin());
     std::copy(im.begin(), im.end(), outIm.begin());
-    apply_erb_mask(fb, mask.data(), outRe.data(), outIm.data());  // masks all bins
-    if (ready) {                                                   // overwrite low bins (<96)
+    apply_erb_mask(fb, mask, outRe.data(), outIm.data());  // masks all bins
+    if (ready) {                                           // overwrite low bins (<96)
       for (int b = 0; b < kDf; ++b) {
         outRe[b] = lowRe[b];
         outIm[b] = lowIm[b];
@@ -344,11 +460,23 @@ Dfn3Streaming::Dfn3Streaming(const std::string& modelDir) : p_(new Impl(modelDir
 Dfn3Streaming::~Dfn3Streaming() { delete p_; }
 
 void Dfn3Streaming::process(const float* in480, float* out480) noexcept {
-  p_->process(in480, out480);
+  // Fail safe on the RT thread: ORT's Run can throw Ort::Exception. Rather than let an
+  // exception escape a noexcept function (std::terminate on the audio thread), silence
+  // this hop and record it. State carried into the next hop may be stale after a failure,
+  // but the stream keeps running instead of crashing the process.
+  try {
+    p_->process(in480, out480);
+    p_->hopFailed = false;
+  } catch (...) {
+    std::fill(out480, out480 + kHop, 0.0f);
+    p_->hopFailed = true;
+    ++p_->failedHops;
+  }
 }
 
 uint32_t Dfn3Streaming::latencySamples() const noexcept { return kHop; }
 float Dfn3Streaming::lastLsnr() const noexcept { return p_->lastLsnr; }
+bool Dfn3Streaming::lastHopFailed() const noexcept { return p_->hopFailed; }
 void Dfn3Streaming::reset() noexcept { p_->reset(); }
 
 }  // namespace vc

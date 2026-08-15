@@ -14,6 +14,7 @@ public:
   void process(const float* in480, float* out480) noexcept;  // exactly 480 in/out
   uint32_t latencySamples() const noexcept;                  // ~kHop (480) for _ll
   float lastLsnr() const noexcept;
+  bool lastHopFailed() const noexcept;  // true if the last process() hop threw (silenced)
   void reset() noexcept;
 private:
   struct Impl; Impl* p_;
