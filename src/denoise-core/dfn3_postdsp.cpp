@@ -118,4 +118,75 @@ void apply_deep_filter(float* specRe, float* specIm, const float* coefs,
   }
 }
 
+// --- Streaming (ring-based) deep filter ------------------------------------
+// Emits one output frame at a time, reproducing apply_deep_filter EXACTLY.
+// The tap for output frame outT reads input frames [outT-leftPad, outT+future],
+// future = order-1-leftPad. Frames outside the pushed range are zero (constant
+// padding), matching the whole-buffer form's ti<0 / ti>=T checks.
+DeepFilterRing::DeepFilterRing(int nbDf, int order, int leftPad)
+    : nbDf_(nbDf),
+      order_(order),
+      leftPad_(leftPad),
+      future_(order - 1 - leftPad),
+      depth_(order + (order - 1 - leftPad) + 1) {
+  if (nbDf_ < 0) nbDf_ = 0;
+  if (order_ < 1) order_ = 1;
+  if (future_ < 0) future_ = 0;
+  if (depth_ < 1) depth_ = 1;
+  re_.assign(static_cast<size_t>(depth_) * nbDf_, 0.0f);
+  im_.assign(static_cast<size_t>(depth_) * nbDf_, 0.0f);
+  cf_.assign(static_cast<size_t>(depth_) * nbDf_ * order_ * 2, 0.0f);
+}
+
+bool DeepFilterRing::emit(int outT, float* outRe, float* outIm) noexcept {
+  const size_t coefStride = static_cast<size_t>(nbDf_) * order_ * 2;
+  const size_t cslot = static_cast<size_t>(outT % depth_) * coefStride;
+  for (int b = 0; b < nbDf_; ++b) {
+    float accRe = 0.0f, accIm = 0.0f;
+    for (int k = 0; k < order_; ++k) {
+      const int ti = outT + k - leftPad_;          // input frame for tap k
+      if (ti < 0 || ti >= pushed_) continue;        // constant zero padding
+      const size_t si = static_cast<size_t>(ti % depth_) * nbDf_ + b;
+      const float sRe = re_[si];
+      const float sIm = im_[si];
+      const size_t ci = cslot + (static_cast<size_t>(b) * order_ + k) * 2;
+      const float cRe = cf_[ci];
+      const float cIm = cf_[ci + 1];
+      accRe += sRe * cRe - sIm * cIm;               // complex multiply
+      accIm += sIm * cRe + sRe * cIm;
+    }
+    outRe[b] = accRe;
+    outIm[b] = accIm;
+  }
+  return true;
+}
+
+bool DeepFilterRing::push(const float* re481, const float* im481,
+                          const float* coefs_nbDf_order2, int& outT,
+                          float* outRe, float* outIm) noexcept {
+  const int slot = pushed_ % depth_;
+  float* dRe = re_.data() + static_cast<size_t>(slot) * nbDf_;
+  float* dIm = im_.data() + static_cast<size_t>(slot) * nbDf_;
+  for (int b = 0; b < nbDf_; ++b) { dRe[b] = re481[b]; dIm[b] = im481[b]; }
+  const size_t coefStride = static_cast<size_t>(nbDf_) * order_ * 2;
+  float* dCf = cf_.data() + static_cast<size_t>(slot) * coefStride;
+  for (size_t i = 0; i < coefStride; ++i) dCf[i] = coefs_nbDf_order2[i];
+  ++pushed_;
+
+  const int ready = pushed_ - 1 - future_;          // newest emittable frame
+  if (ready < 0) return false;
+  outT = ready;
+  emit(ready, outRe, outIm);
+  emitted_ = ready + 1;
+  return true;
+}
+
+bool DeepFilterRing::flush(int& outT, float* outRe, float* outIm) noexcept {
+  if (emitted_ >= pushed_) return false;             // all frames drained
+  outT = emitted_;
+  emit(emitted_, outRe, outIm);
+  ++emitted_;
+  return true;
+}
+
 }  // namespace vc

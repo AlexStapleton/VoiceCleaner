@@ -10,12 +10,14 @@
 #include "resampler.h"
 #include "drift_control.h"
 #include "dropout.h"
+#include "frame_time_stats.h"
 #include "logger.h"
 #include "wasapi_capture.h"
 #include "wasapi_render.h"
 #include "inoise_filter.h"
 #include "passthrough_filter.h"
 #include "rnnoise_filter.h"
+#include "dfn3_stream_adapter.h"
 #include "dsp_chain.h"
 namespace vc {
 class Bridge {
@@ -42,6 +44,7 @@ private:
   Frame                         proc_;      // processed-frame scratch (relay RT)
   std::atomic<double> ratioPpm_{0.0};
   std::atomic<double> filtOcc_{0.0};
+  FrameTimeStats     frameStats_;   // per-hop engine+chain compute times (written by relay thread only)
   FrameAccumulator   accum_;      // capture side only
   FrameDistributor   dist_;       // render (onFill) side only
   std::vector<float> mono_;       // capture ch0 scratch

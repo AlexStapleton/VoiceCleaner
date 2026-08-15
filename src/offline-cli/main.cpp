@@ -6,6 +6,7 @@
 
 #include "channel.h"
 #include "dfn3_offline.h"
+#include "dfn3_streaming.h"
 #include "dsp_chain.h"
 #include "frame.h"
 #include "passthrough_filter.h"
@@ -16,6 +17,8 @@ int main(int argc, char** argv) {
   bool useChain = false;
   bool useRnnoise = false;
   bool useDfn3 = false;
+  bool useDfn3Ll = false;
+  bool useDfn3Stream = false;
   int argi = 1;
   // Optional flags in any order: --chain and --engine <name> (default passthrough).
   while (argi < argc) {
@@ -24,7 +27,9 @@ int main(int argc, char** argv) {
       ++argi;
     } else if (std::strcmp(argv[argi], "--engine") == 0) {
       if (argi + 1 >= argc) {
-        std::fprintf(stderr, "error: --engine requires a value (passthrough|rnnoise|dfn3)\n");
+        std::fprintf(stderr,
+                     "error: --engine requires a value "
+                     "(passthrough|rnnoise|dfn3|dfn3-ll|dfn3-stream)\n");
         return 2;
       }
       const char* eng = argv[argi + 1];
@@ -32,10 +37,17 @@ int main(int argc, char** argv) {
         useRnnoise = true;
       } else if (std::strcmp(eng, "dfn3") == 0) {
         useDfn3 = true;
+      } else if (std::strcmp(eng, "dfn3-ll") == 0) {
+        useDfn3Ll = true;
+      } else if (std::strcmp(eng, "dfn3-stream") == 0) {
+        useDfn3Stream = true;
       } else if (std::strcmp(eng, "passthrough") == 0) {
         useRnnoise = false;
       } else {
-        std::fprintf(stderr, "error: unknown engine '%s' (expected passthrough|rnnoise|dfn3)\n", eng);
+        std::fprintf(stderr,
+                     "error: unknown engine '%s' "
+                     "(expected passthrough|rnnoise|dfn3|dfn3-ll|dfn3-stream)\n",
+                     eng);
         return 2;
       }
       argi += 2;
@@ -46,7 +58,8 @@ int main(int argc, char** argv) {
 
   if (argc - argi != 2) {
     std::fprintf(stderr,
-                 "usage: offline-cli [--chain] [--engine passthrough|rnnoise|dfn3] <in.wav> <out.wav>\n");
+                 "usage: offline-cli [--chain] "
+                 "[--engine passthrough|rnnoise|dfn3|dfn3-ll|dfn3-stream] <in.wav> <out.wav>\n");
     return 2;
   }
 
@@ -84,6 +97,68 @@ int main(int argc, char** argv) {
     }
     std::printf("engine=dfn3 chain=n/a: processed %zu samples at %u Hz -> %s\n",
                 enhanced.size(), outDfn3.sampleRate, outPath);
+    return 0;
+  }
+
+  // DeepFilterNet3 `_ll` whole-utterance golden (deep-filter offset 4 for the
+  // causal _ll model). Reference for Gate B.
+  if (useDfn3Ll) {
+    std::vector<float> enhanced;
+    try {
+      vc::Dfn3Offline dfn3("models/dfn3-ll", /*dfLeftPad=*/4);
+      enhanced = dfn3.process(mono);
+    } catch (const std::exception& e) {
+      std::fprintf(stderr, "error: dfn3-ll failed: %s\n", e.what());
+      return 1;
+    }
+    vc::WavData outLl;
+    outLl.sampleRate = in.sampleRate;
+    outLl.channels = 1;
+    outLl.samples = enhanced;
+    if (!vc::wav_write(outPath, outLl, /*asFloat=*/false)) {
+      std::fprintf(stderr, "error: failed to write %s\n", outPath);
+      return 1;
+    }
+    std::printf("engine=dfn3-ll chain=n/a: processed %zu samples at %u Hz -> %s\n",
+                enhanced.size(), outLl.sampleRate, outPath);
+    return 0;
+  }
+
+  // DeepFilterNet3 real-time streaming: drive Dfn3Streaming hop-by-hop over
+  // 480-sample blocks, padding the tail with latencySamples() zeros to flush.
+  if (useDfn3Stream) {
+    std::vector<float> enhanced;
+    try {
+      vc::Dfn3Streaming stream("models/dfn3-ll");
+      const size_t hop = 480;
+      const size_t flush = stream.latencySamples();
+      const size_t total = frames + flush;
+      const size_t blocks = (total + hop - 1) / hop;
+      enhanced.assign(blocks * hop, 0.0f);
+      std::vector<float> inBlk(hop), outBlk(hop);
+      for (size_t b = 0; b < blocks; ++b) {
+        const size_t off = b * hop;
+        for (size_t i = 0; i < hop; ++i) {
+          const size_t idx = off + i;
+          inBlk[i] = idx < frames ? mono[idx] : 0.0f;
+        }
+        stream.process(inBlk.data(), outBlk.data());
+        for (size_t i = 0; i < hop; ++i) enhanced[off + i] = outBlk[i];
+      }
+    } catch (const std::exception& e) {
+      std::fprintf(stderr, "error: dfn3-stream failed: %s\n", e.what());
+      return 1;
+    }
+    vc::WavData outStream;
+    outStream.sampleRate = in.sampleRate;
+    outStream.channels = 1;
+    outStream.samples = enhanced;
+    if (!vc::wav_write(outPath, outStream, /*asFloat=*/false)) {
+      std::fprintf(stderr, "error: failed to write %s\n", outPath);
+      return 1;
+    }
+    std::printf("engine=dfn3-stream chain=n/a: processed %zu samples at %u Hz -> %s\n",
+                enhanced.size(), outStream.sampleRate, outPath);
     return 0;
   }
 

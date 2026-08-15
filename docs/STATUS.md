@@ -2,9 +2,16 @@
 
 _Last updated: 2026-08-14_
 
-**Active work:** unblocking **live/real-time DeepFilterNet3** (the blueprint's default engine, D9).
-Offline DFN3 is complete and validated (r=0.9946); the remaining barrier is recurrent-state streaming —
-the current ONNX export runs whole-utterance only. See "What remains (DFN3)" below.
+**Active work:** **live/real-time DeepFilterNet3** (blueprint default engine, D9) — engine BUILT, one
+hardware gate remaining. On branch `feat/live-dfn3-streaming`: streaming ONNX surgery + orchestrator done
+and validated (Gate A frame-by-frame == whole-utterance 1.2e-5; Gate B streaming C++ vs whole-utterance
+`_ll` r=1.000000), RT-hardened (allocation-free hot path), and wired live as `engine="dfn3"`. **Remaining:
+Gate C** — a live K688 run to confirm the `_ll` model fits the 10 ms real-time budget. **Gate C PASSED (2026-08-14, live K688):** frame-time
+mean=1.56 ms, p99.9=2.76 ms, max=4.19 ms, **0.00% over 10 ms**, zero dropouts, Ring B flat — ~3.6×
+tail headroom, so warm-standby (both engines) is viable. **Live DFN3 is complete and validated
+end-to-end.** Next: Phase 4 (warm-standby RNNoise↔DFN3 crossfade) and, per the coherence review, the
+product shell (tray UI + §8.5 command channel + first-run wizard) which is still unbuilt. Approach details: spec §11
+in `docs/superpowers/specs/2026-08-14-live-dfn3-streaming-design.md`.
 
 ## TL;DR
 

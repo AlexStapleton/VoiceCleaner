@@ -10,6 +10,19 @@
 
 **Design spec:** `docs/superpowers/specs/2026-08-14-live-dfn3-streaming-design.md`
 
+> **PLAN REVISION (2026-08-14) — read spec §11 first.** Gate A on the original Phase 1 failed:
+> GRU-state surgery alone is insufficient (the encoder has **temporal convolutions** whose per-frame
+> history must also be carried), and `_ll` is not a shortcut. **Phase 1 below is REPLACED** by the
+> windowed-encoder-split approach in spec §11 (conv sub-graph fed a rolling frame window + slice-last;
+> GRU sub-graph made stateful `h0`→`h1`; decoders GRU-state-only; deep-filter FIR stays in host C++).
+> **Target model = `_ll`** (512-wide, 3 decoder GRU layers, ~10 ms latency), vendored under
+> `models/dfn3-ll/`. Downstream changes to Phases 2–4: (a) `DeepFilterRing`/`apply_deep_filter` use the
+> causal offset `order−lookahead−1 = 4` for `_ll` (not 2); (b) `Dfn3Streaming` feeds `enc_conv` a
+> rolling window and `enc_gru` one frame/hop, and carries stacked decoder GRU state; (c) model dir is
+> `models/dfn3-ll`; (d) Gate B's golden reference is a whole-utterance `_ll` run (not the standard
+> r=0.9946 output); (e) `AlgorithmicDelaySamples()` ≈ 480. The gated build order and Phases 3–4
+> (`SwitchableEngine`, live wiring) are otherwise unchanged.
+
 ---
 
 ## Conventions (read once)

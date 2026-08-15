@@ -63,8 +63,9 @@ struct Dfn3Offline::Impl {
   Ort::Env env{ORT_LOGGING_LEVEL_WARNING, "dfn3-offline"};
   Ort::MemoryInfo mem = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
   NamedSession enc, erbDec, dfDec;
+  int dfLeftPad = 2;
 
-  explicit Impl(const std::string& modelDir) {
+  explicit Impl(const std::string& modelDir, int dfLeftPad_) : dfLeftPad(dfLeftPad_) {
     std::string dir = modelDir;
     if (!dir.empty() && dir.back() != '/' && dir.back() != '\\') dir += '/';
 
@@ -126,7 +127,8 @@ struct Dfn3Offline::Impl {
   }
 };
 
-Dfn3Offline::Dfn3Offline(const std::string& modelDir) : p_(new Impl(modelDir)) {}
+Dfn3Offline::Dfn3Offline(const std::string& modelDir, int dfLeftPad)
+    : p_(new Impl(modelDir, dfLeftPad)) {}
 Dfn3Offline::~Dfn3Offline() { delete p_; }
 
 std::vector<float> Dfn3Offline::process(const std::vector<float>& mono48k) {
@@ -138,7 +140,7 @@ std::vector<float> Dfn3Offline::process(const std::vector<float>& mono48k) {
   constexpr int kErb = 32;
   constexpr int kDf = 96;
   constexpr int kOrder = 5;
-  constexpr int kLookahead = 2;
+  const int kLookahead = p_->dfLeftPad;  // deep-filter past pad (standard: 2; _ll: 4)
 
   // ---- 1. Frame the NOISY spectrogram. T = frames to cover N, plus one flush
   // frame so that after trimming the 480-sample STFT latency the output still

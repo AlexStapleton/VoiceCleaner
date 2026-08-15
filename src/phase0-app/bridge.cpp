@@ -1,5 +1,6 @@
 #include "bridge.h"
 #include <windows.h>
+#include <chrono>
 #include <cstdio>
 #include <string>
 #include "channel.h"
@@ -38,8 +39,9 @@ bool Bridge::start() {
   for (size_t i = 0; i < ringB_.capacity() / 2; ++i) ringB_.try_push(silent);  // prime half-full
 
   // Engine + optional DSP chain: constructed here (non-RT) before any thread starts.
-  if (cfg_.engine == "rnnoise") engine_ = std::make_unique<RnnoiseFilter>();
-  else                          engine_ = std::make_unique<PassthroughFilter>();
+  if      (cfg_.engine == "rnnoise") engine_ = std::make_unique<RnnoiseFilter>();
+  else if (cfg_.engine == "dfn3")    engine_ = std::make_unique<Dfn3StreamAdapter>("models/dfn3-ll");
+  else                               engine_ = std::make_unique<PassthroughFilter>();
   if (cfg_.dspChain) chain_ = std::make_unique<DspChain>(engine_.get(), DspChain::Config{});
 
   frameReady_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
@@ -88,8 +90,11 @@ void Bridge::relayLoop() {
     if (!running_.load(std::memory_order_acquire)) break;
     while (ringA_.try_pop(f)) {
       const float* src = f.data();
+      const auto t0 = std::chrono::steady_clock::now();   // time ONLY engine+chain compute (Gate C)
       if (chain_)       { chain_->process_frame(f.data(), proc_.data()); src = proc_.data(); }
       else if (engine_) { engine_->ProcessFrame(f.data(), proc_.data()); src = proc_.data(); }
+      const auto t1 = std::chrono::steady_clock::now();
+      frameStats_.record(std::chrono::duration<double, std::milli>(t1 - t0).count());
       if (cfg_.driftCompensation) {
         const double ratio = controller_.update((double)ringB_.size());
         resampler_.set_ratio(ratio);
@@ -120,7 +125,18 @@ void Bridge::stop() {
   capture_.stop();
   running_.store(false, std::memory_order_release);
   if (frameReady_) SetEvent(static_cast<HANDLE>(frameReady_));
-  if (relay_.joinable()) relay_.join();
+  if (relay_.joinable()) {
+    relay_.join();
+    // Relay (sole writer of frameStats_) is now joined -> read with no data race.
+    // Print inside this branch so the summary emits exactly once (stop() also runs from ~Bridge).
+    if (frameStats_.count() > 0) {
+      std::printf("frame-time (engine+chain, ms): n=%llu mean=%.2f max=%.2f p50=%.2f p99=%.2f p99.9=%.2f  over_10ms=%.2f%%\n",
+                  (unsigned long long)frameStats_.count(),
+                  frameStats_.meanMs(), frameStats_.maxMs(),
+                  frameStats_.percentileMs(50.0), frameStats_.percentileMs(99.0), frameStats_.percentileMs(99.9),
+                  frameStats_.fractionOverMs(10.0) * 100.0);
+    }
+  }
   render_.stop();
   logger_.stop();
   if (frameReady_) { CloseHandle(static_cast<HANDLE>(frameReady_)); frameReady_ = nullptr; }
