@@ -2,9 +2,13 @@
 #include <cstdint>
 #include <string>
 namespace vc {
-// Real-time DFN3. Loads the *_streaming ONNX models from modelDir (e.g. "models/dfn3-ll") and
-// processes one 480-sample hop per call, carrying GRU + normalization + window state.
-// Output for hop t is the enhanced hop t (causal _ll model; algorithmic latency = STFT one hop).
+// Real-time DFN3. Loads the *_streaming ONNX models from modelDir and processes one
+// 480-sample hop per call, carrying GRU + normalization + window state. ONE class drives
+// BOTH the causal `_ll` set (models/dfn3-ll) and the standard set (models/dfn3); all
+// model-specific numbers (hidden size, GRU layer counts, conv/df lookahead) are read at
+// construction from the model state shapes + config.ini. Algorithmic latency is
+// latencySamples(): STFT one hop for the causal _ll model (480), or one hop plus the
+// encoder lookahead for the standard model (1440 == 30 ms).
 class Dfn3Streaming {
 public:
   explicit Dfn3Streaming(const std::string& modelDir);  // throws std::runtime_error on load failure
@@ -16,7 +20,7 @@ public:
   // one-off resync (a reset() before the next hop) -- that resync reallocates, so a single
   // post-failure hop is not RT-safe, but steady-state processing is.
   void process(const float* in480, float* out480) noexcept;  // exactly 480 in/out
-  uint32_t latencySamples() const noexcept;                  // ~kHop (480) for _ll
+  uint32_t latencySamples() const noexcept;                  // 480 (_ll) / 1440 (standard)
   float lastLsnr() const noexcept;
   bool lastHopFailed() const noexcept;    // true if the last process() hop threw (silenced)
   uint64_t failedHops() const noexcept;   // sticky count of silenced hops since construction
