@@ -6,7 +6,8 @@ namespace vc {
 // (the export has no recurrent-state I/O, so the whole sequence is run at once).
 class Dfn3Offline {
 public:
-  explicit Dfn3Offline(const std::string& modelDir);   // throws std::runtime_error on load failure
+  // dfLeftPad = deep-filter left/past pad = order - df_lookahead - 1 (standard model: 2; _ll: 4).
+  explicit Dfn3Offline(const std::string& modelDir, int dfLeftPad = 2);  // throws on load failure
   ~Dfn3Offline();
   std::vector<float> process(const std::vector<float>& mono48k);  // returns enhanced mono
 private:
