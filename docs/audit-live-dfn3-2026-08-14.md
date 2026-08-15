@@ -21,6 +21,12 @@ self-consistent," not "the output is correct," and not "the output is good."
 
 **The single most important next step is to validate that live DFN3 actually removes keyboard noise.**
 
+> **Update (2026-08-14, applied on master `678b22f`):** the verified code defects are **FIXED** —
+> ORT-failure resync + surfacing (2.1), `requestActive` bounds check (2.3), crossfade endpoint (2.4),
+> explicit/documented VAD mapping (3.2), `reset()` non-RT doc (2.2). **Still open** (their own efforts,
+> not code fixes): **P1 correctness/quality validation** (1.1–1.3 — the headline gap), **aggression
+> wire-or-delete** (3.1), the **A/B dry tap** (3.3), and the hygiene items (P4/P5).
+
 ## What is actually proven vs. assumed
 
 | Claim | Status |
