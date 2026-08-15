@@ -15,6 +15,7 @@ struct Config {
   double filterAlpha    = 0.02;
   std::string engine   = "none";   // "none" (passthrough) | "rnnoise" | "dfn3"
   bool        dspChain = false;     // wrap engine in DC->HPF->AGC->limiter chain
+  bool        warmStandby = false;  // run rnnoise+dfn3, live switch
   static Config load(const std::string& tomlPath);
   void apply_cli(int argc, char** argv);
   void validate();

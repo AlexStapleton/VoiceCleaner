@@ -9,8 +9,13 @@ and validated (Gate A frame-by-frame == whole-utterance 1.2e-5; Gate B streaming
 Gate C** — a live K688 run to confirm the `_ll` model fits the 10 ms real-time budget. **Gate C PASSED (2026-08-14, live K688):** frame-time
 mean=1.56 ms, p99.9=2.76 ms, max=4.19 ms, **0.00% over 10 ms**, zero dropouts, Ring B flat — ~3.6×
 tail headroom, so warm-standby (both engines) is viable. **Live DFN3 is complete and validated
-end-to-end.** Next: Phase 4 (warm-standby RNNoise↔DFN3 crossfade) and, per the coherence review, the
-product shell (tray UI + §8.5 command channel + first-run wizard) which is still unbuilt. Approach details: spec §11
+end-to-end.** **Phase 4 DONE** (warm-standby RNNoise↔DFN3 crossfade): `SwitchableEngine` runs both
+engines warm, equal-power delay-aligned crossfade, live switch via keys 1/2 (`warm_standby=true`,
+e.g. `drift-warmstandby.toml`). Smoke (live K688, both engines): mean 2.07 ms, p99.9 4.61 ms, 0% over
+budget, zero dropouts, clean switches. (Crossfade *audible* smoothness not yet ear-checked; equal-power
+may add a brief ~+3 dB bump — swap to linear if audible.) **Next: the product shell** (tray UI + §8.5
+command channel + first-run wizard) — the remaining "make it a real program" work, still unbuilt;
+warrants its own design pass. Approach details: spec §11
 in `docs/superpowers/specs/2026-08-14-live-dfn3-streaming-design.md`.
 
 ## TL;DR

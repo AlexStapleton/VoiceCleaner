@@ -1,0 +1,10 @@
+# drift-warmstandby.toml — Phase 4 smoke: RNNoise + DFN3 both warm, live switch (keys 1/2).
+# warm_standby overrides `engine`: the bridge builds both engines and a SwitchableEngine.
+capture_device_id = "{0.0.1.00000000}.{5fbcc184-0d7f-4ddc-81ed-7218eda75f1d}"   # Microphone (fifine Microphone), 48k mono
+render_device_id  = "{0.0.0.00000000}.{59cf8297-d805-4b98-8233-ea97c8076b4d}"   # CABLE Input (VB-Audio Virtual Cable), 48k
+ring_frames       = 1024
+csv_path          = "warmstandby_drift.csv"
+
+warm_standby       = true       # run RNNoise (engine 0) + DFN3 (engine 1) warm; switch with keys 1/2
+dsp_chain          = true
+drift_compensation = true

@@ -39,7 +39,15 @@ bool Bridge::start() {
   for (size_t i = 0; i < ringB_.capacity() / 2; ++i) ringB_.try_push(silent);  // prime half-full
 
   // Engine + optional DSP chain: constructed here (non-RT) before any thread starts.
-  if      (cfg_.engine == "rnnoise") engine_ = std::make_unique<RnnoiseFilter>();
+  if (cfg_.warmStandby) {
+    // Both leaves run warm; SwitchableEngine crossfades between them on request_engine().
+    leafA_ = std::make_unique<RnnoiseFilter>();
+    leafB_ = std::make_unique<Dfn3StreamAdapter>("models/dfn3-ll");
+    auto sw = std::make_unique<SwitchableEngine>(leafA_.get(), leafB_.get());
+    switch_ = sw.get();
+    engine_ = std::move(sw);
+  }
+  else if (cfg_.engine == "rnnoise") engine_ = std::make_unique<RnnoiseFilter>();
   else if (cfg_.engine == "dfn3")    engine_ = std::make_unique<Dfn3StreamAdapter>("models/dfn3-ll");
   else                               engine_ = std::make_unique<PassthroughFilter>();
   if (cfg_.dspChain) chain_ = std::make_unique<DspChain>(engine_.get(), DspChain::Config{});
@@ -65,9 +73,17 @@ bool Bridge::start() {
   }
 
   capDev->Release(); renDev->Release();   // WASAPI classes Activated their own client; device no longer needed
-  std::printf("bridge running: ring=%zu frames (primed %zu), engine=%s, dsp_chain=%s, csv=%s\n",
-              ringB_.capacity(), ringB_.capacity()/2,
-              cfg_.engine.c_str(), cfg_.dspChain ? "on" : "off", cfg_.csvPath.c_str());
+  if (cfg_.warmStandby) {
+    std::printf("bridge running: ring=%zu frames (primed %zu), warm_standby=on "
+                "(active=%s [idx %d]; keys 1=RNNoise 2=DFN3), dsp_chain=%s, csv=%s\n",
+                ringB_.capacity(), ringB_.capacity()/2,
+                switch_->activeIndex() == 0 ? "rnnoise" : "dfn3", switch_->activeIndex(),
+                cfg_.dspChain ? "on" : "off", cfg_.csvPath.c_str());
+  } else {
+    std::printf("bridge running: ring=%zu frames (primed %zu), engine=%s, dsp_chain=%s, csv=%s\n",
+                ringB_.capacity(), ringB_.capacity()/2,
+                cfg_.engine.c_str(), cfg_.dspChain ? "on" : "off", cfg_.csvPath.c_str());
+  }
   return true;
 }
 
