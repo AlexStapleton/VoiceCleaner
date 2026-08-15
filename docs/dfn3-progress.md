@@ -164,3 +164,85 @@ This reproduces the persistent-GRU result exactly (see Gate A). At `W=1` it is t
 
 **WORST = `1.24e-05`  <  TOL `1e-3`  →  GATE A: PASS.** The convs reproduce bit-exactly; the tiny
 residuals are float GRU-accumulation only.
+
+---
+
+## Streaming models (standard) — the 2-frame-lookahead variant (2026-08-15)
+
+Same windowed-surgery design as `_ll`, extended to the **standard** model (`models/dfn3/`), which
+is **not** purely causal: `conv_lookahead=2`, `df_lookahead=2`. The standard model is the externally
+validated one (r=0.9946 vs the `deep-filter` binary). The single tooling
+(`tools/dfn3_make_streaming.py`) now reads the model's `config.ini` and handles `lookahead ≥ 0`, so
+the identical code produces both the `_ll` (lookahead 0) and standard (lookahead 2) streaming sets;
+Gate A (`tools/dfn3_stream_check.py`) auto-detects GRU hidden size and carries the lookahead lag.
+
+### The lookahead change (vs `_ll`)
+
+The encoder convolutions look **2 frames into the future**. When the streaming conv sub-graph is fed
+a window ending at the newest frame, that newest frame's 2 future frames are missing (zero-padded →
+wrong), exactly the original desync. The frame with **FULL** context is `conv_lookahead` positions
+**before** the newest, so the conv sub-graph slices **frame `S-1-conv_lookahead`** instead of
+slice-last. Implemented as a negative-index `Slice` (window-length-independent):
+
+| lookahead `L` | `Slice` starts / ends | selects |
+|:---:|:---:|:---|
+| 0 (`_ll`) | `-1` / `INT64_MAX` | last frame (unchanged) |
+| 2 (standard) | `-3` / `-2` | 3rd-from-last frame |
+
+Consequently the encoder stream **lags the whole-utterance frames by `conv_lookahead=2`**: to emit
+logical encoder frame `t`, the host must already have fed input frame `t+2`. This is the model's
+~30 ms algorithmic latency (expected, fine). The **decoders are unchanged** — DFN3 decoders are
+causal in time, so they stay windowed + stateful with **slice-last (offset 0)**; the DF path's
+`df_lookahead` lives host-side in `DeepFilterRing` (`leftPad = df_order − df_lookahead − 1 = 2`),
+**not** in `df_dec`. Gate A confirms decoders reproduce whole-utterance at offset 0.
+
+### Structural deltas vs `_ll` (auto-detected by the tooling)
+
+- **GRU hidden size = 256** (not 512). Encoder pre-GRU embedding is **256** wide; the post-GRU
+  `emb_out` (and thus the decoders' `emb` input) is still **512**.
+- **`df_dec` has 2 GRU layers** (`df_num_layers=2`, not 3) → `df_h0/df_h1` are `[2,1,256]`.
+- Encoder has a **single** GRU node (as `_ll`); the split point (pre-GRU convs) is unchanged.
+
+### Exact I/O (names + shapes; `S` = streamed time dim, sliced outputs are 1 frame)
+
+- **`enc_conv_streaming.onnx`** — *windowed, stateless, slice offset 2.* **W = 5.**
+  - inputs:  `feat_erb` `[1,1,S,32]`, `feat_spec` `[1,2,S,96]`
+  - outputs (each = the single frame `S-1-2`): `e0` `[1,64,1,32]`, `e1` `[1,64,1,16]`,
+    `e2` `[1,64,1,8]`, `e3` `[1,64,1,8]`, `c0` `[1,64,1,96]`, `emb` `[1,1,256]`
+- **`enc_gru_streaming.onnx`** — *stateful, one frame/hop.*
+  - inputs:  `emb` `[1,S,256]` (= `enc_conv`'s `emb`), `h0` `[1,1,256]`
+  - outputs: `emb_out` `[1,1,512]`, `lsnr` `[1,1,1]`, `h1` `[1,1,256]`
+- **`erb_dec_streaming.onnx`** — *windowed + stateful (2 GRU layers).* **W = 1.**
+  - inputs:  `emb` `[1,S,512]`, `e3` `[1,64,S,8]`, `e2` `[1,64,S,8]`, `e1` `[1,64,S,16]`,
+    `e0` `[1,64,S,32]`, `erb_h0` `[2,1,256]`
+  - outputs: `m` `[1,1,1,32]` (slice-last), `erb_h1` `[2,1,256]`
+- **`df_dec_streaming.onnx`** — *windowed + stateful (2 GRU layers).* **W = 5.**
+  - inputs:  `emb` `[1,S,512]`, `c0` `[1,64,S,96]`, `df_h0` `[2,1,256]`
+  - outputs: `coefs` `[1,1,96,10]` (slice-last), `df_h1` `[2,1,256]`
+
+`erb_dec` needs only **W = 1** (standard `conv_kernel=1,3` → no temporal conv beyond the GRU);
+`df_dec` needs **W = 5** (`df_pathway_kernel_size_t=5`); the encoder needs **W = 5** covering the
+compounded conv receptive field **plus** the 2 lookahead frames.
+
+### Host driving delta vs `_ll`
+
+Identical rolling-window + advance-by-one contract as the `_ll` section, with **one addition**: the
+encoder conv sub-graph now returns the frame **2 behind** the newest fed frame. The host feeds
+`feat_erb`/`feat_spec` for input frame `f` but the `enc_conv` outputs (and everything downstream)
+correspond to **logical frame `f-2`**. During the first 2 hops (`f<2`) the conv sub-graph returns
+**0 frames** (empty) — the host must **not** advance `enc_gru` until a frame appears. State sizes
+change with hidden=256 (`enc_gru h` `[1,1,256]`, `erb_h` `[2,1,256]`, `df_h` `[2,1,256]`). Everything
+else (decoder window buffers, `pending_h1` advance-by-one) is unchanged.
+
+### Gate A result (`python tools/dfn3_stream_check.py models/dfn3`, seed 0, T=40, lag 2)
+
+| model    | window | worst data-output max\|diff\| |
+|----------|:------:|:-----------------------------:|
+| enc      |   5    | `4.77e-06` (`lsnr`; `emb` `2.4e-07`; convs `0.0`) |
+| erb_dec  |   1    | `1.07e-06` (`m`)              |
+| df_dec   |   5    | `2.09e-07` (`coefs`)         |
+
+**WORST = `4.77e-06`  <  TOL `1e-3`  →  GATE A: PASS.** (38 of 40 encoder frames compared — the
+last 2 are the lookahead lag, not emitted from real input.) Convs reproduce bit-exactly; residuals
+are float GRU-accumulation only. The `_ll` regression (`… models/dfn3-ll`) still PASSES unchanged
+(WORST `1.24e-05`).
