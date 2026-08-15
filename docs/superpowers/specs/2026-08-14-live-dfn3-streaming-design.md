@@ -1,7 +1,7 @@
 # Live DeepFilterNet3 (streaming) + warm-standby crossfade — Design
 
 _Date: 2026-08-14_
-_Status: approved (brainstorming) — pending implementation plan_
+_Status: approved; **superseded in part by the Revision section at the bottom** (streaming mechanism + target model changed after Gate A). Read §11 Revision alongside §4.1/§4.2._
 
 ## 1. Problem
 
@@ -174,3 +174,58 @@ Each gate is a hard checkpoint. A failed gate pauses for a decision instead of p
 - Modified: streaming `apply_deep_filter` in `dfn3_postdsp.{h,cpp}`, engine selection in the live
   app / config, `offline-cli` (`--engine dfn3-stream`), `docs/STATUS.md`.
 - Reused unchanged: `stft.h`, `erb.h`, `dfn3_features.{h,cpp}`, `dsp_chain.h`, `inoise_filter.h`.
+
+---
+
+## 11. Revision (2026-08-14) — streaming mechanism + target model
+
+Gate A on the original plan **failed**, exposing two corrections. This section supersedes the
+specifics of §4.1/§4.2 (the phased, gated build order in §5 and everything in §4.3/§4.4 still holds).
+
+**Finding 1 — GRU-state surgery is necessary but not sufficient.** The encoder also contains
+**temporal convolutions** (enc `erb_conv0`/`df_conv0` time-kernel 3; `df_dec` `df_convp.1` time-kernel
+5) whose multi-frame receptive field a per-frame `T=1` call feeds with zero-padded history. Frame 0
+reproduces exactly, every later frame diverges (O(1–10)). So streaming must carry **two** kinds of
+recurrent state: GRU hidden state *and* conv input history.
+
+**Finding 2 — `_ll` is not a shortcut.** The low-latency `_ll` export has the same structure (split,
+no state I/O, temporal convs with past receptive field) and fails the same frame-by-frame test.
+Lookahead=0 removes *future* frames, not the *past* receptive field.
+
+**Chosen mechanism (community-proven: github.com/shimondoodkin/deepfilter-rt, MIT/Apache).** Split the
+encoder at the GRU boundary:
+- **Conv sub-graph** (`enc_conv`): stateless. The **host feeds a rolling window** of the last `W`
+  feature frames each hop; the graph's outputs are `Slice`d to the **last time frame** only
+  (`e0..e3,c0` on axis 2; `emb` on axis 1). Because the conv receptive field is bounded (`W` covers
+  the compounded causal kernel span, ~6 frames), windowing reproduces the whole-utterance result
+  **exactly**, and convs are cheap so recomputing the window is inexpensive.
+- **GRU sub-graph** (`enc_gru`): stateful. GRU `initial_h` → graph input `h0`, `Y_h` → graph output
+  `h1`. Runs one frame per hop.
+- **Decoders**: GRU state only — a stacked `h0[num_layers,1,hidden]` `Slice`d per layer, `Y_h`s
+  `Concat`ed to `h1`. (No conv-cache surgery needed; their temporal coupling is covered by the same
+  host window feeding the decode stage before its GRU/output.)
+- **Deep-filter order-5 FIR**: applied in **host C++** from a rolling spectrum buffer — this is exactly
+  what §4.2's `DeepFilterRing` already does, so that design is unchanged and now validated by the
+  reference project.
+
+**Target model = `_ll`** (user decision 2026-08-14, superseding §8's "out of scope"): 512-wide,
+`df_num_layers=3` (decoder has 3 GRUs), `conv_lookahead=0`/`df_lookahead=0`. **Algorithmic latency ≈
+10 ms** (STFT 480 samples only; no lookahead) vs the standard model's ~30 ms — the reason for the
+choice. Cost: ~3× CPU per frame (bigger GRU), which sharpens the **Gate C** RT-budget risk.
+`AlgorithmicDelaySamples()` therefore reports ~480, and §4.4's crossfade delay-aligns RNNoise (0) to
+~480 — a much smaller offset than the standard model would need.
+
+**DF FIR causal offset.** With `_ll`'s `df_lookahead=0`, the deep-filter tap offset is
+`order − lookahead − 1 = 4` (taps `spec[t−4 … t]`, past-only/causal), NOT the standard model's `2`.
+`DeepFilterRing` must be parameterized with this offset (the `lookahead` argument in
+`apply_deep_filter` is really this left-offset; for the standard model it coincidentally equals
+`df_lookahead`). Causal ⇒ the FIR adds **0** future-frame latency.
+
+**Validation reference change.** The existing r=0.9946 golden is the *standard* model; it does not
+apply to `_ll`. Gate B for `_ll` compares the streaming C++ output against a **whole-utterance `_ll`
+run** (the existing `Dfn3Offline` orchestrator pointed at the vendored `_ll` models, with the DF
+offset set to 4) as the internal golden — same math, only framing/latency differ, so expect r ≈ 0.999.
+
+**Vendoring.** The `_ll` split models (`enc.onnx`, `erb_dec.onnx`, `df_dec.onnx`, `config.ini`) are
+downloaded from `Rikorose/DeepFilterNet` and committed under `models/dfn3-ll/`. The surgery emits
+`models/dfn3-ll/*_streaming.onnx` (plus the `enc_conv`/`enc_gru` split), all committed.
