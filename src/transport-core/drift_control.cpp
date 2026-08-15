@@ -34,6 +34,17 @@ double DriftController::update(double occupancy) noexcept {
   return ratio_;
 }
 
+void DriftController::seedPpm(double ppm) noexcept {
+  const double lo = 1.0 - cfg_.maxPpm * 1e-6;
+  const double hi = 1.0 + cfg_.maxPpm * 1e-6;
+  double r = 1.0 + ppm * 1e-6;
+  ratio_ = r < lo ? lo : (r > hi ? hi : r);
+  // Place the bulk of the seed on the integral term so the very first update reproduces `ratio_`
+  // (err starts ~0 because we prime the occupancy LPF at the setpoint).
+  integ_ = (cfg_.ki != 0.0) ? (ratio_ - 1.0) / cfg_.ki : 0.0;
+  lpf_.set(cfg_.setpoint);
+}
+
 double DriftController::ratioPpm() const noexcept { return (ratio_ - 1.0) * 1e6; }
 double DriftController::filteredOccupancy() const noexcept { return lpf_.value(); }
 

@@ -23,3 +23,21 @@ TEST(DriftController, RatioClampedToMaxPpm) {
   double ratio=1.0; for (int i=0;i<100;++i) ratio = c.update(0.0);
   EXPECT_LE(ratio, 1.0 + 100e-6 + 1e-9);
 }
+
+TEST(DriftController, SeedPpmWarmStartsTheRatio) {
+  DriftController c({512, 1e-6, 1e-8, 150, 0.2});
+  c.seedPpm(-26.0);
+  double ratio = c.update(512.0);          // occupancy exactly at setpoint => err ~ 0
+  EXPECT_NEAR((ratio - 1.0) * 1e6, -26.0, 1.0);   // first output reflects the seed
+}
+TEST(DriftController, SeedIsClampedToMaxPpm) {
+  DriftController c({512, 1e-6, 1e-8, 100, 0.2});
+  c.seedPpm(-9999.0);
+  double ratio = c.update(512.0);
+  EXPECT_GE((ratio - 1.0) * 1e6, -100.0 - 1e-6);  // not below -maxPpm
+}
+TEST(DriftController, NoSeedReproducesColdBehavior) {
+  DriftController c({512, 1e-6, 1e-8, 150, 0.2});   // seedPpm NOT called
+  double ratio = 1.0; for (int i = 0; i < 5000; ++i) ratio = c.update(512.0);
+  EXPECT_NEAR(ratio, 1.0, 5e-6);                     // same as AtSetpointRatioNearOne
+}

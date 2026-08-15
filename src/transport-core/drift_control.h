@@ -15,6 +15,7 @@ public:
   struct Config { double setpoint; double kp; double ki; double maxPpm; double filterAlpha; };
   explicit DriftController(const Config& c);
   double update(double occupancy) noexcept;   // returns ratio (output/input) to apply
+  void   seedPpm(double ppm) noexcept;         // warm-start the integrator/ratio from a cached drift ppm
   double ratioPpm() const noexcept;            // (ratio-1)*1e6
   double filteredOccupancy() const noexcept;
 private:
