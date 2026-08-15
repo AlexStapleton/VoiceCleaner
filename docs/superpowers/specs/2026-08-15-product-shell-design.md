@@ -17,8 +17,8 @@ background audio process. It realizes blueprint §8 (UI architecture), §8.5 (co
 |---|---|---|
 | Audience | Personal now, keep the door open | Build for the author; don't make choices that block a future public release. |
 | Process model | **Two processes** (UI + audio worker) | User priority: a UI crash/hang/kill must never stop audio. Only separate processes guarantee this. |
-| UI surface | **One window** | The user interacts with exactly one window (mic input, engine, settings, meter). No tray menu, no separate settings dialog, no separate wizard window. |
-| UI toolkit | **Raw Win32 + Direct2D** | Zero vendored UI deps, smallest binary, native look, best "looks like normal software" story for anti-cheat hygiene (§3). Tray-less, so just a normal window. |
+| UI surface | **One window + a tray icon** | Full config lives in one window (mic input, engine, settings, meter). The window minimizes/closes **to the tray**; the tray icon gives quick controls (enable/bypass, switch engine) and restore/quit. No separate settings dialog, no separate wizard window. |
+| UI toolkit | **Raw Win32 + Direct2D** | Zero vendored UI deps, smallest binary, native look, best "looks like normal software" story for anti-cheat hygiene (§3). Tray via `Shell_NotifyIcon`, menu via `TrackPopupMenu`. |
 | Tuning depth | **Full tuning panel** | Live aggression / HPF / output-gain sliders — requires exposing `DspChain` params through the §8.3 snapshot. |
 | First-run | **Deferred stub** | First launch opens the window with the mic picker highlighted and the meter live. The full §4.1/§4.3 checklist is deferred. |
 | Packaging | **Portable** | All files (both exes, `onnxruntime.dll`, `models/`, `settings.toml`) live in one self-contained folder; paths resolved relative to the module directory. |
@@ -31,9 +31,9 @@ Two executables in one portable folder:
   and headless** (config-driven, Ctrl+C to stop), no UI required — this headless-correctness is the
   design's acceptance test (blueprint §8.1). Adds a non-RT command thread and a telemetry writer; the
   RT hot path (capture → DSP → drift-comp → render) is unchanged.
-- **`voicecleaner.exe`** — the UI process. A single Win32 window on one message-pump thread: the mic
-  picker, engine selector, enable/bypass, Direct2D level meter, tuning sliders, an Advanced section,
-  the pipe client, and the worker supervisor.
+- **`voicecleaner.exe`** — the UI process. One message-pump thread owning a single config window (the
+  mic picker, engine selector, enable/bypass, Direct2D level meter, tuning sliders, an Advanced
+  section) **plus a tray icon** for quick controls, the pipe client, and the worker supervisor.
 
 Because they are separate processes sharing no address space, a UI crash, hang, or kill cannot touch
 the worker's real-time threads.
@@ -67,6 +67,13 @@ Headline controls, top to bottom:
    toggle, drift-compensation toggle, dry-tap toggle (deferred behavior; see §11), and the telemetry
    readout (frame p50/p99/max, ring occupancy, dropouts, uptime).
 
+**Tray icon (quick controls):** a `Shell_NotifyIcon` icon whose tooltip/icon reflects state
+(active/bypassed, current engine). Left-click restores the window; right-click opens a `TrackPopupMenu`:
+- `☑ Enabled` (toggle enable/bypass — a param update over the pipe)
+- `Engine ▸` submenu (`RNNoise` / `DeepFilterNet3` — instant under warm standby)
+- `Open VoiceCleaner` (restore the window)
+- `Quit` (shut down the worker and exit both processes)
+
 **First-run:** if `settings.toml` has no capture device, open with the mic picker highlighted and the
 meter live; otherwise open normally. No separate wizard window.
 
@@ -75,10 +82,12 @@ meter live; otherwise open normally. No separate wizard window.
   already running (single-instance via a named mutex), it spawns the worker detached with
   `--config settings.toml --ui-pipe <name>`, then connects the pipe. If a worker is already running,
   it attaches instead of spawning a duplicate.
-- **Close window (intentional):** send the worker a `shutdown` command; both processes exit cleanly.
+- **Minimize or Close window:** the window **hides to the tray**; the worker keeps running and audio
+  keeps flowing. Reopen from the tray (left-click or `Open VoiceCleaner`).
+- **Quit (tray menu, or an explicit window menu item):** send the worker a `shutdown` command; both
+  processes exit cleanly. This is the only path that stops the worker.
 - **UI crash:** the worker keeps running (audio survives the session); relaunching the UI re-attaches
   to the still-running worker via the single-instance/pipe check.
-- **Minimize:** to the taskbar (a tray icon is out of scope for v1; see §11).
 
 ## 5. IPC — two directions, two mechanisms (blueprint §8.3–8.5)
 
@@ -123,8 +132,9 @@ expensive aggregates update per-second. No queue, no strings, no logging on the 
   and a device re-select / pipeline-rebuild path. The interim stdin `1`/`2` key reader is replaced by
   pipe commands (kept only as a dev-only fallback behind a flag).
 - **`voicecleaner`** (new UI target): the single Win32 window, Direct2D meter, controls, device
-  enumeration/selection (reuse `win-audio` `DeviceEnumerator`), `settings.toml` read/write, and the
-  spawn/attach/supervise logic.
+  enumeration/selection (reuse `win-audio` `DeviceEnumerator`), the `Shell_NotifyIcon` tray icon +
+  `TrackPopupMenu` quick controls (enable/bypass, engine switch, open, quit), minimize/close-to-tray,
+  `settings.toml` read/write, and the spawn/attach/supervise logic.
 
 **Naming to confirm on review:** rename the `phase0-app` target to `voicecleaner-worker`; introduce
 the `vc-ipc` lib rather than folding the structs into `transport-core`.
@@ -180,11 +190,13 @@ params equal today's hardcoded defaults.
 - Live knob changes (aggression / HPF / gain) are audibly click-free.
 - Engine switch under warm standby is instant and clean; without warm standby, rebuild works.
 - Mic-input change rebuilds the pipeline without crashing.
-- Bypass toggles cleanly.
+- Bypass toggles cleanly (from both the window and the tray menu).
 - Meter tracks real input level and supports gain staging to −18…−12 dBFS.
+- **Tray:** minimize/close hides to tray with audio still flowing; tray enable/bypass and engine
+  switch work; left-click restores the window; the tray icon/tooltip reflects current state.
 - **Headless-correctness:** worker runs and cleans audio with no UI started at all.
 - **Isolation:** killing the UI in Task Manager leaves audio flowing; relaunching re-attaches.
-- Closing the window shuts down both processes cleanly.
+- **Quit** (tray menu) shuts down both processes cleanly.
 
 ## 10. Phased build order
 
@@ -206,7 +218,8 @@ Each phase is independently testable and leaves the worker headless-correct.
 
 - Full §4.1/§4.3 first-run checklist window (VB-Cable install, 48k endpoints, Discord/Windows settings,
   deep links). Scaffolded conceptually; built when/if this ships to others.
-- System tray icon + minimize-to-tray (v1 minimizes to the taskbar).
+- Richer tray features beyond the quick controls (per-parameter tray sliders, notifications feed,
+  jump lists). v1 tray = enable/bypass, engine switch, open, quit.
 - Delay-matched bypass and the dry/wet A/B tap as an audible archival feature (§13); v1 bypass is a
   simple passthrough route, dry-tap is a toggle placeholder.
 - Latency profiles (Minimum/Low/Balanced/Safe) and an "Auto" engine mode — not built in the engine
