@@ -36,3 +36,51 @@ TEST(Dfn3Post, DeepFilterLeavesHighBinsUntouched){
   apply_deep_filter(re.data(), im.data(), coefs.data(), T, nbDf, order, la);
   for(int t=0;t<T;++t) for(int f=nbDf;f<481;++f) EXPECT_NEAR(re[t*481+f], re0[t*481+f], 1e-6f);  // f>=96 unchanged
 }
+TEST(Dfn3Post, StreamingRingMatchesWholeBufferBothOffsets){
+  const int T=12, nbDf=96, order=5, kNFreq=481;
+  // Deterministic pseudo-random spectrum and coefs.
+  std::vector<float> re(T*kNFreq), im(T*kNFreq);
+  for(int i=0;i<T*kNFreq;++i){
+    re[i]=std::sin(0.017f*i+0.3f)*std::cos(0.005f*i);
+    im[i]=std::cos(0.023f*i+1.1f)*std::sin(0.009f*i+0.4f);
+  }
+  std::vector<float> coefs(T*nbDf*order*2);
+  for(size_t i=0;i<coefs.size();++i) coefs[i]=std::sin(0.013f*(float)i+0.7f)*0.5f;
+
+  for(int leftPad : {2,4}){
+    const int future = order-1-leftPad;   // 2 for lp=2, 0 for lp=4
+    // Whole-buffer reference on a copy.
+    std::vector<float> refRe=re, refIm=im;
+    apply_deep_filter(refRe.data(), refIm.data(), coefs.data(), T, nbDf, order, leftPad);
+
+    // Drive the streaming ring; start result as a copy so high bins (>=nbDf)
+    // stay = original and can be asserted untouched by the ring.
+    std::vector<float> resRe=re, resIm=im;
+    DeepFilterRing ring(nbDf, order, leftPad);
+    std::vector<float> oRe(nbDf), oIm(nbDf);
+    int outT=-1;
+    for(int t=0;t<T;++t){
+      if(ring.push(&re[t*kNFreq], &im[t*kNFreq], &coefs[(size_t)t*nbDf*order*2],
+                   outT, oRe.data(), oIm.data())){
+        ASSERT_GE(outT,0); ASSERT_LT(outT,T);
+        for(int b=0;b<nbDf;++b){ resRe[outT*kNFreq+b]=oRe[b]; resIm[outT*kNFreq+b]=oIm[b]; }
+      }
+    }
+    while(ring.flush(outT, oRe.data(), oIm.data())){
+      ASSERT_GE(outT,0); ASSERT_LT(outT,T);
+      for(int b=0;b<nbDf;++b){ resRe[outT*kNFreq+b]=oRe[b]; resIm[outT*kNFreq+b]=oIm[b]; }
+    }
+
+    // Every low bin of every frame matches whole-buffer reference.
+    for(int t=0;t<T;++t) for(int b=0;b<nbDf;++b){
+      EXPECT_NEAR(resRe[t*kNFreq+b], refRe[t*kNFreq+b], 1e-5f) << "lp="<<leftPad<<" t="<<t<<" b="<<b;
+      EXPECT_NEAR(resIm[t*kNFreq+b], refIm[t*kNFreq+b], 1e-5f) << "lp="<<leftPad<<" t="<<t<<" b="<<b;
+    }
+    // High bins (>=nbDf) untouched by the ring (still original spectrum).
+    for(int t=0;t<T;++t) for(int f=nbDf;f<kNFreq;++f){
+      EXPECT_NEAR(resRe[t*kNFreq+f], re[t*kNFreq+f], 1e-6f) << "lp="<<leftPad<<" hi t="<<t<<" f="<<f;
+      EXPECT_NEAR(resIm[t*kNFreq+f], im[t*kNFreq+f], 1e-6f) << "lp="<<leftPad<<" hi t="<<t<<" f="<<f;
+    }
+    (void)future;
+  }
+}
