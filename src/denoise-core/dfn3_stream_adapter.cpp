@@ -19,7 +19,7 @@ Dfn3StreamAdapter::Dfn3StreamAdapter(const std::string& modelDir)
   float in[480] = {0.0f};
   float out[480];
   eng_->reset();
-  for (int i = 0; i < 8; ++i) eng_->process(in, out);  // >= max window W (=6) so all windows fill
+  for (int i = 0; i < 16; ++i) eng_->process(in, out);  // >= standard model prime (2 no-encoder warm-up hops + window fill W~6); 16 is a safe margin
 }
 
 Dfn3StreamAdapter::~Dfn3StreamAdapter() = default;

@@ -1,18 +1,38 @@
-// Real-time DeepFilterNet3 streaming orchestrator (the `_ll` split models).
+// Real-time DeepFilterNet3 streaming orchestrator. ONE class drives BOTH split
+// model sets: the causal `_ll` set (models/dfn3-ll: hidden 512, lookahead 0/0)
+// and the STANDARD set (models/dfn3: hidden 256, conv/df lookahead 2/2). All the
+// model-specific numbers (hidden size, GRU layer counts, lookaheads) are read at
+// construction from the streaming models' state-tensor shapes and config.ini, so
+// the code is not specialized to either.
 //
 // Per 480-sample hop, follows the "Host driving contract" in docs/dfn3-progress.md:
 //   1. Stft::analyze(in480) -> noisy complex spectrum re[481]/im[481].
 //   2. Dfn3Features::process -> feat_erb[32], feat_spec[2*96] (stateful running norm).
-//   3. enc_conv_streaming: rolling W=6 window (stateless, slice-last) -> e0..e3,c0,emb.
+//   3. enc_conv_streaming: rolling window (stateless, negative-index slice) -> e0..e3,c0,emb.
 //   4. enc_gru_streaming: one frame/hop, plain GRU state h<-h1 -> emb_out, lsnr, h1.
-//   5. erb_dec_streaming (W=3, 2-layer GRU) -> ERB mask m[32];
-//      df_dec_streaming  (W=5, 3-layer GRU) -> deep-filter coefs[96*10].
-//      Both use the decoder advance-by-one state rule (see WindowRunner).
-//   6. DeepFilterRing(96,5,4): deep-filter the noisy low bins (<96); ERB-mask the
-//      high bins (>=96). df_lookahead=0 => leftPad=4, future=0 (frame ready now).
+//   5. erb_dec_streaming / df_dec_streaming (windowed + stateful) -> ERB mask m[32],
+//      deep-filter coefs[96*10]. Both use the decoder advance-by-one state rule.
+//   6. DeepFilterRing: deep-filter the noisy low bins (<96); ERB-mask the high bins (>=96).
 //   7. Stft::synthesize -> out480.
 //
-// All GRU hidden = 512. The only algorithmic latency is the STFT's one hop (480).
+// Encoder lookahead + lag (standard model, conv_lookahead=CL>0):
+//   enc_conv_streaming slices the frame CL behind the newest, so its output at hop t
+//   is for input-frame (t-CL). For the first CL hops the slice is EMPTY (window has
+//   < CL+1 frames) -> running the graph would crash ORT, so we feed the enc_conv
+//   window WITHOUT inference during warm-up and emit silence. After warm-up the whole
+//   stream lags input by CL frames.
+//
+// Deep-filter lookahead overlaps the encoder lag (it does NOT stack). The deep filter
+// for logical frame L needs the noisy spectrum up to L+df_lookahead. Because the
+// encoder is already CL frames behind, at the hop we obtain coefs[L] the *current*
+// noisy spectrum is spec[L+CL] -- already df_lookahead frames into L's future when
+// CL>=df_lookahead. So we push the CURRENT spectrum (not a delayed copy) into the ring
+// together with coefs[L], using ring leftPad = (order-1-df_lookahead) + CL. That makes
+// ring future = max(0, df_lookahead-CL) = 0 here, so the ring emits frame L
+// immediately and the deep-filter lookahead costs NO latency beyond the encoder lag.
+// Total algorithmic latency = STFT one hop + max(CL, df_lookahead) frames
+// (480 for _ll; 1440 == 30 ms for the standard model). For _ll (CL=0, df_lookahead=0)
+// every step degenerates to the original behavior: leftPad=4, no warm-up, no delay.
 //
 // RT-safety: process() is the MMCSS/relay-thread hot path. After warm-up (once each
 // rolling window has filled) it performs NO heap allocation in our code -- all
@@ -30,6 +50,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
+#include <fstream>
 #include <initializer_list>
 #include <stdexcept>
 #include <string>
@@ -50,10 +72,29 @@ constexpr int kBins = 481;   // fftSize/2 + 1
 constexpr int kErb = 32;
 constexpr int kDf = 96;
 constexpr int kOrder = 5;
-constexpr int kLeftPad = 4;  // order - df_lookahead(0) - 1  (causal deep filter)
-constexpr int kGru = 512;
 
 std::wstring widen(const std::string& s) { return std::wstring(s.begin(), s.end()); }
+
+// Read one `key = <int>` from a libDF config.ini (the `[df]` section). Returns def if
+// the key is absent. Load-time only (not on the hot path).
+int readIniInt(const std::string& path, const std::string& key, int def) {
+  std::ifstream f(path);
+  if (!f) return def;
+  std::string line;
+  while (std::getline(f, line)) {
+    const auto eq = line.find('=');
+    if (eq == std::string::npos) continue;
+    std::string k = line.substr(0, eq);
+    // trim surrounding whitespace from the key token.
+    const auto a = k.find_first_not_of(" \t");
+    const auto b = k.find_last_not_of(" \t");
+    if (a == std::string::npos) continue;
+    k = k.substr(a, b - a + 1);
+    if (k != key) continue;
+    return std::atoi(line.c_str() + eq + 1);
+  }
+  return def;
+}
 
 // A float tensor we own the backing storage for (so pointers stay valid across Run calls).
 struct OwnedTensor {
@@ -85,6 +126,17 @@ struct NamedSession {
     for (size_t i = 0; i < outNames.size(); ++i)
       if (outNames[i] == name) return static_cast<int>(i);
     return -1;
+  }
+
+  // Static (declared) shape of a named input, e.g. state tensor `[num_layers,1,hidden]`.
+  // Load-time only. Throws if the input is absent.
+  std::vector<int64_t> inputShape(const std::string& name) {
+    for (size_t i = 0; i < inNames.size(); ++i) {
+      if (inNames[i] != name) continue;
+      Ort::TypeInfo ti = session.GetInputTypeInfo(i);
+      return ti.GetTensorTypeAndShapeInfo().GetShape();
+    }
+    throw std::runtime_error("Dfn3Streaming: input \"" + name + "\" not found");
   }
 };
 
@@ -121,7 +173,7 @@ struct WinInput {
 class WindowRunner {
 public:
   void init(Ort::MemoryInfo* mem, NamedSession* ns, int W, std::vector<WinInput> ins,
-            int layers, std::string hIn, std::string hOut) {
+            int layers, std::string hIn, std::string hOut, int hidden) {
     mem_ = mem;
     ns_ = ns;
     W_ = W;
@@ -129,6 +181,7 @@ public:
     layers_ = layers;
     hIn_ = std::move(hIn);
     hOut_ = std::move(hOut);
+    hidden_ = hidden;
 
     const size_t n = ins_.size();
 
@@ -156,9 +209,9 @@ public:
     }
 
     if (layers_ > 0) {
-      h_.assign(static_cast<size_t>(layers_) * kGru, 0.0f);
-      pending_.assign(static_cast<size_t>(layers_) * kGru, 0.0f);
-      hShape_ = {layers_, 1, kGru};
+      h_.assign(static_cast<size_t>(layers_) * hidden_, 0.0f);
+      pending_.assign(static_cast<size_t>(layers_) * hidden_, 0.0f);
+      hShape_ = {layers_, 1, hidden_};
       hOutIdx_ = ns_->outIndex(hOut_);
       if (hOutIdx_ < 0)
         throw std::runtime_error("Dfn3Streaming: state output \"" + hOut_ + "\" not found");
@@ -183,10 +236,10 @@ public:
     // outScratch_/outVals_ (constant shapes) are intentionally kept across resets.
   }
 
-  // srcs: one flat per-frame source pointer per WinInput, in ins_ order. Each points to
-  // perFrame() floats laid out [chan][feat]. Data is copied into the ring immediately.
-  void run(std::initializer_list<const float*> srcs) {
-    // Advance the rolling window (and, for stateful graphs, the carried GRU state).
+  // Advance the rolling window by one frame (drop oldest if full, carrying the GRU
+  // state advance-by-one for stateful graphs) and copy the new frame into the ring.
+  // No inference -- shared by run() and the warm-up store() path.
+  void advance(std::initializer_list<const float*> srcs) {
     if (count_ == W_) {
       if (layers_ > 0) std::copy(pending_.begin(), pending_.end(), h_.begin());
       head_ = (head_ + 1) % W_;  // drop oldest
@@ -199,6 +252,17 @@ public:
       ++i;
     }
     ++count_;
+  }
+
+  // Push a frame into the window WITHOUT running inference. Used during the encoder
+  // warm-up (conv_lookahead>0): the enc_conv graph's Slice returns an empty tensor
+  // until the window holds >= conv_lookahead+1 frames, so we only accumulate frames.
+  void store(std::initializer_list<const float*> srcs) { advance(srcs); }
+
+  // srcs: one flat per-frame source pointer per WinInput, in ins_ order. Each points to
+  // perFrame() floats laid out [chan][feat]. Data is copied into the ring immediately.
+  void run(std::initializer_list<const float*> srcs) {
+    advance(srcs);
     const int S = count_;
 
     // Scatter the S retained frames into each input's window buffer, layout [chan][S][feat].
@@ -279,13 +343,14 @@ private:
   NamedSession* ns_ = nullptr;
   int W_ = 1;
   int layers_ = 0;
+  int hidden_ = 0;
   std::string hIn_, hOut_;
   std::vector<WinInput> ins_;
 
   // Input side (all reused).
   std::vector<std::vector<float>> winStorage_;      // [ins_][perFrame*W]
   std::vector<std::vector<int64_t>> shapeStorage_;  // [ins_] shape vecs (S dim mutable)
-  std::vector<int64_t> hShape_;                     // {layers,1,kGru}
+  std::vector<int64_t> hShape_;                     // {layers,1,hidden}
   std::vector<const char*> inPtrs_;                 // feed order: [ins_ names..., hIn]
   std::vector<Ort::Value> inVals_;                  // reused; persistent once S==W
   bool inBound_ = false;
@@ -313,7 +378,17 @@ struct Dfn3Streaming::Impl {
   Stft stft{960, kHop};
   Dfn3Features feats;
   ErbFilterBank fb{kBins, kErb, 48000.0f, 2};
-  DeepFilterRing ring{kDf, kOrder, kLeftPad};
+
+  // Model-derived parameters (read at construction; see ctor).
+  int hidden = 512;          // GRU hidden width (enc_gru/erb/df state; = enc_conv emb width)
+  int embOut = 512;          // post-GRU emb width fed to the decoders
+  int convLookahead = 0;     // encoder future frames -> stream lag + warm-up hops
+  int dfLookahead = 0;       // deep-filter future frames
+  int leftPad = 4;           // ring past-reach = (order-1-df_lookahead) + conv_lookahead
+  int ringFuture = 0;        // extra frames the ring waits = max(0, df_lookahead-conv_lookahead)
+  int latencyFrames = 0;     // total frame delay = conv_lookahead + ringFuture
+
+  DeepFilterRing ring{kDf, kOrder, 4};  // rebuilt in ctor with the derived leftPad
 
   WindowRunner encConv, encGru, erbDec, dfDec;
 
@@ -324,10 +399,15 @@ struct Dfn3Streaming::Impl {
   int dfCoefs = 0;                                                  // df_dec output
 
   // Per-hop scratch (kept as members to avoid reallocation on the hot path).
-  std::vector<float> re, im;             // noisy spectrum [481]
+  std::vector<float> re, im;             // noisy spectrum [481] (current frame)
   std::vector<float> featErb, featSpec;  // [32], [2*96]
   std::vector<float> outRe, outIm;       // enhanced spectrum [481]
   std::vector<float> lowRe, lowIm;       // deep-filtered low bins [96]
+  // Noisy-spectrum delay line (depth conv_lookahead+1) so the ERB (high-bin) path uses
+  // spec[t-conv_lookahead], aligned with the encoder-delayed mask/coefs. Depth 1 (=no
+  // delay) when conv_lookahead==0, i.e. the _ll path is unchanged.
+  std::vector<std::vector<float>> specHistRe, specHistIm;
+  int hopCount = 0;          // input frames processed since construction/reset
   float lastLsnr = 0.0f;
 
   bool hopFailed = false;      // true if the most recent hop threw (output was silenced)
@@ -355,24 +435,59 @@ struct Dfn3Streaming::Impl {
     load(erbDecS, "erb_dec_streaming.onnx");
     load(dfDecS, "df_dec_streaming.onnx");
 
-    // enc_conv: windowed W=6, stateless.
+    // --- Derive the model-specific shape/lookahead parameters (no hardcoding) ---
+    // GRU hidden width and per-graph layer counts come from the *_h0 state tensors:
+    //   enc_gru h0 [1,1,hidden]; erb_h0/df_h0 [num_layers,1,hidden].
+    const std::vector<int64_t> encH0 = encGruS.inputShape("h0");      // [1,1,hidden]
+    const std::vector<int64_t> erbH0 = erbDecS.inputShape("erb_h0");  // [layers,1,hidden]
+    const std::vector<int64_t> dfH0 = dfDecS.inputShape("df_h0");     // [layers,1,hidden]
+    hidden = static_cast<int>(encH0.back());
+    const int encGruLayers = static_cast<int>(encH0.front());  // 1
+    const int erbLayers = static_cast<int>(erbH0.front());     // 2
+    const int dfLayers = static_cast<int>(dfH0.front());       // 3 (_ll) / 2 (standard)
+    // Post-GRU emb width fed to the decoders (always 512; read from erb_dec's emb input).
+    embOut = static_cast<int>(erbDecS.inputShape("emb").back());
+
+    // Lookaheads from config.ini ([df] section). conv_lookahead drives the encoder
+    // warm-up + stream lag; df_lookahead sets the deep-filter reach.
+    convLookahead = readIniInt(dir + "config.ini", "conv_lookahead", 0);
+    dfLookahead = readIniInt(dir + "config.ini", "df_lookahead", 0);
+    if (convLookahead < 0) convLookahead = 0;
+    if (dfLookahead < 0) dfLookahead = 0;
+
+    // Ring past-reach chosen so the deep-filter lookahead OVERLAPS the encoder lag
+    // instead of stacking after it: feeding the CURRENT noisy spectrum (already
+    // conv_lookahead frames ahead of the coefs' logical frame) with leftPad below makes
+    // the ring's future = max(0, df_lookahead - conv_lookahead). For both shipped models
+    // df_lookahead == conv_lookahead, so future = 0 and the ring emits with no extra lag.
+    leftPad = (kOrder - 1 - dfLookahead) + convLookahead;
+    if (leftPad < 0) leftPad = 0;
+    ringFuture = kOrder - 1 - leftPad;
+    if (ringFuture < 0) ringFuture = 0;
+    latencyFrames = convLookahead + ringFuture;
+    ring = DeepFilterRing(kDf, kOrder, leftPad);
+
+    // Windows: use the union of both models' receptive fields (a larger-than-needed
+    // window is exact -- the graph slices the correct frame; extra past frames only cost
+    // recompute). W=6/3/5 covers _ll (6/3/5) and standard (5/1/5 + lookahead).
     encConv.init(&mem, &encConvS, /*W=*/6,
                  {{"feat_erb", 1, kErb, true}, {"feat_spec", 2, kDf, true}},
-                 /*layers=*/0, "", "");
-    // enc_gru: one frame/hop, plain stateful GRU (advance-by-one at W=1).
-    encGru.init(&mem, &encGruS, /*W=*/1, {{"emb", 1, kGru, false}}, /*layers=*/1, "h0", "h1");
-    // erb_dec: windowed W=3, 2-layer GRU.
+                 /*layers=*/0, "", "", hidden);
+    // enc_gru: one frame/hop, plain stateful GRU. Its emb input is `hidden` wide.
+    encGru.init(&mem, &encGruS, /*W=*/1, {{"emb", 1, hidden, false}},
+                encGruLayers, "h0", "h1", hidden);
+    // erb_dec: windowed, stateful. Its emb input is the post-GRU `embOut` (512) wide.
     erbDec.init(&mem, &erbDecS, /*W=*/3,
-                {{"emb", 1, kGru, false},
+                {{"emb", 1, embOut, false},
                  {"e3", 64, 8, true},
                  {"e2", 64, 8, true},
                  {"e1", 64, 16, true},
                  {"e0", 64, 32, true}},
-                /*layers=*/2, "erb_h0", "erb_h1");
-    // df_dec: windowed W=5, 3-layer GRU.
+                erbLayers, "erb_h0", "erb_h1", hidden);
+    // df_dec: windowed, stateful.
     dfDec.init(&mem, &dfDecS, /*W=*/5,
-               {{"emb", 1, kGru, false}, {"c0", 64, kDf, true}},
-               /*layers=*/3, "df_h0", "df_h1");
+               {{"emb", 1, embOut, false}, {"c0", 64, kDf, true}},
+               dfLayers, "df_h0", "df_h1", hidden);
 
     // Resolve output indices once (no map/string work on the hot path).
     auto idx = [](WindowRunner& r, const char* name) {
@@ -400,16 +515,21 @@ struct Dfn3Streaming::Impl {
     outIm.assign(kBins, 0.0f);
     lowRe.assign(kDf, 0.0f);
     lowIm.assign(kDf, 0.0f);
+    specHistRe.assign(static_cast<size_t>(convLookahead) + 1, std::vector<float>(kBins, 0.0f));
+    specHistIm.assign(static_cast<size_t>(convLookahead) + 1, std::vector<float>(kBins, 0.0f));
   }
 
   void reset() {
     stft.reset();
     feats.reset();
-    ring = DeepFilterRing(kDf, kOrder, kLeftPad);
+    ring = DeepFilterRing(kDf, kOrder, leftPad);
     encConv.reset();
     encGru.reset();
     erbDec.reset();
     dfDec.reset();
+    for (auto& v : specHistRe) std::fill(v.begin(), v.end(), 0.0f);
+    for (auto& v : specHistIm) std::fill(v.begin(), v.end(), 0.0f);
+    hopCount = 0;
     lastLsnr = 0.0f;
     hopFailed = false;
   }
@@ -417,36 +537,58 @@ struct Dfn3Streaming::Impl {
   // The per-hop inference. May throw (ORT Run can raise Ort::Exception); the caller
   // (Dfn3Streaming::process) contains that so the audio thread never terminates.
   void process(const float* in480, float* out480) {
-    // 1. STFT analysis -> noisy spectrum.
+    const int depth = convLookahead + 1;
+
+    // 1. STFT analysis -> current noisy spectrum. Runs EVERY hop (incl. warm-up) so the
+    //    STFT overlap history is correct; store it into the delay line for the ERB path.
     stft.analyze(in480, re.data(), im.data());
+    const int wSlot = hopCount % depth;
+    std::copy(re.begin(), re.end(), specHistRe[wSlot].begin());
+    std::copy(im.begin(), im.end(), specHistIm[wSlot].begin());
 
     // 2. Features (feat_spec layout: [0..95]=real, [96..191]=imag of bins 0..95).
     feats.process(re.data(), im.data(), featErb.data(), featSpec.data());
 
-    // 3. enc_conv (W=6, stateless).
+    // 3a. Encoder warm-up: for the first conv_lookahead hops enc_conv's Slice is empty
+    //     (< conv_lookahead+1 frames) -> only accumulate the window, emit silence.
+    if (hopCount < convLookahead) {
+      encConv.store({featErb.data(), featSpec.data()});
+      std::fill(outRe.begin(), outRe.end(), 0.0f);
+      std::fill(outIm.begin(), outIm.end(), 0.0f);
+      stft.synthesize(outRe.data(), outIm.data(), out480);
+      ++hopCount;
+      return;
+    }
+
+    // 3b. enc_conv (windowed, stateless). Output is for logical frame (hopCount-conv_lookahead).
     encConv.run({featErb.data(), featSpec.data()});
 
     // 4. enc_gru (one frame/hop) -> emb_out, lsnr, h1.
     encGru.run({encConv.outData(ecEmb)});
     const std::vector<float>& lsnr = encGru.out(egLsnr).data;
     lastLsnr = lsnr.empty() ? 0.0f : lsnr[0];
-    const float* embOut = encGru.outData(egEmbOut);
+    const float* embOutPtr = encGru.outData(egEmbOut);
 
-    // 5. Decoders.
-    erbDec.run({embOut, encConv.outData(ecE3), encConv.outData(ecE2),
+    // 5. Decoders -> ERB mask / deep-filter coefs, both for the same logical frame.
+    erbDec.run({embOutPtr, encConv.outData(ecE3), encConv.outData(ecE2),
                 encConv.outData(ecE1), encConv.outData(ecE0)});
     const float* mask = erbDec.outData(erbM);  // [32]
 
-    dfDec.run({embOut, encConv.outData(ecC0)});
+    dfDec.run({embOutPtr, encConv.outData(ecC0)});
     const float* coefs = dfDec.outData(dfCoefs);  // [96*10]
 
-    // 6. Deep filter (low bins) + ERB mask (high bins).
+    // 6. Deep filter (low bins). Push the CURRENT noisy spectrum (which is conv_lookahead
+    //    frames ahead of this coefs' logical frame) with the coefs; leftPad overlaps the
+    //    df lookahead with the encoder lag so the ring emits the logical frame now.
     int outT = 0;
     const bool ready = ring.push(re.data(), im.data(), coefs, outT, lowRe.data(), lowIm.data());
 
-    std::copy(re.begin(), re.end(), outRe.begin());
-    std::copy(im.begin(), im.end(), outIm.begin());
-    apply_erb_mask(fb, mask, outRe.data(), outIm.data());  // masks all bins
+    // 6b. ERB mask (all bins) is applied to the DELAYED noisy spectrum spec[t-conv_lookahead],
+    //     which aligns with the encoder-delayed mask/coefs; low bins then overwritten.
+    const int rSlot = (hopCount - convLookahead) % depth;  // spec[t-conv_lookahead]
+    std::copy(specHistRe[rSlot].begin(), specHistRe[rSlot].end(), outRe.begin());
+    std::copy(specHistIm[rSlot].begin(), specHistIm[rSlot].end(), outIm.begin());
+    apply_erb_mask(fb, mask, outRe.data(), outIm.data());
     if (ready) {                                           // overwrite low bins (<96)
       for (int b = 0; b < kDf; ++b) {
         outRe[b] = lowRe[b];
@@ -456,6 +598,7 @@ struct Dfn3Streaming::Impl {
 
     // 7. ISTFT overlap-add.
     stft.synthesize(outRe.data(), outIm.data(), out480);
+    ++hopCount;
   }
 };
 
@@ -493,7 +636,11 @@ void Dfn3Streaming::process(const float* in480, float* out480) noexcept {
 
 uint64_t Dfn3Streaming::failedHops() const noexcept { return p_->failedHops; }
 
-uint32_t Dfn3Streaming::latencySamples() const noexcept { return kHop; }
+uint32_t Dfn3Streaming::latencySamples() const noexcept {
+  // STFT one hop + the algorithmic frame delay (encoder lag, plus any deep-filter future
+  // frames beyond it). _ll: (1+0)*480 = 480; standard: (1+2)*480 = 1440 (30 ms).
+  return static_cast<uint32_t>(kHop) * static_cast<uint32_t>(1 + p_->latencyFrames);
+}
 float Dfn3Streaming::lastLsnr() const noexcept { return p_->lastLsnr; }
 bool Dfn3Streaming::lastHopFailed() const noexcept { return p_->hopFailed; }
 void Dfn3Streaming::reset() noexcept { p_->reset(); }

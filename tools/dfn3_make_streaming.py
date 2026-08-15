@@ -35,6 +35,7 @@ Pure onnx graph surgery + onnxsim cleanup -- no PyTorch, no retraining.
 Deps: onnx, onnxsim (best-effort), onnxruntime (optional, for the shape print).
 Usage: python tools/dfn3_make_streaming.py [models/dfn3-ll]
 """
+import configparser
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -44,6 +45,42 @@ import onnx
 from onnx import TensorProto, helper, numpy_helper
 
 INT64_MAX = np.iinfo(np.int64).max
+
+
+# --------------------------------------------------------------------------- #
+# config
+# --------------------------------------------------------------------------- #
+def read_config(model_dir):
+    """Return {conv_lookahead, df_lookahead} read from the model's config.ini.
+
+    conv_lookahead is the number of FUTURE frames the encoder convolutions see; it is the
+    number of frames the streaming conv sub-graph must slice BEHIND the newest window frame
+    (the newest frame's future context is missing / zero-padded). For the purely-causal `_ll`
+    model both are 0, so the surgery degrades to plain slice-last -- unchanged behaviour.
+    """
+    cfg = configparser.ConfigParser()
+    ini = model_dir / "config.ini"
+    conv_la = df_la = 0
+    if ini.exists():
+        cfg.read(str(ini))
+        if cfg.has_option("deepfilternet", "conv_lookahead"):
+            conv_la = cfg.getint("deepfilternet", "conv_lookahead")
+        if cfg.has_option("df", "df_lookahead"):
+            df_la = cfg.getint("df", "df_lookahead")
+    print(f"  config.ini: conv_lookahead={conv_la}  df_lookahead={df_la}")
+    return {"conv_lookahead": conv_la, "df_lookahead": df_la}
+
+
+def _slice_bounds(offset):
+    """Slice starts/ends selecting the single time frame `offset` positions before the newest.
+
+    offset=0 -> the LAST frame (slice-last): starts=[-1], ends=[INT64_MAX].
+    offset=L -> the frame with FULL context under an L-frame lookahead: starts=[-(L+1)],
+                ends=[-L] (negative bounds keep it independent of the window length S).
+    """
+    if offset <= 0:
+        return -1, INT64_MAX
+    return -(offset + 1), -offset
 
 
 # --------------------------------------------------------------------------- #
@@ -119,16 +156,26 @@ def _shape(vi):
 # --------------------------------------------------------------------------- #
 # ENCODER SPLIT
 # --------------------------------------------------------------------------- #
-def split_encoder(model_dir):
+def split_encoder(model_dir, conv_lookahead=0):
     enc_path = model_dir / "enc.onnx"
     model = onnx.load(str(enc_path))
     graph = model.graph
 
-    gru_node = next((n for n in graph.node if n.op_type == "GRU"), None)
-    if gru_node is None:
+    grus = [n for n in graph.node if n.op_type == "GRU"]
+    if not grus:
         raise SystemExit("enc.onnx: no GRU found")
+    # The encoder split assumes a SINGLE emb GRU (pre-GRU convs -> GRU -> lsnr). Both the `_ll`
+    # and the standard exports have exactly one encoder GRU (emb_num_layers is realised as a
+    # single ONNX GRU node here). If a future export stacks encoder GRUs, the split point below
+    # (pre-GRU convs) still holds, but enc_gru would need the decoders' stacked-state treatment.
+    if len(grus) != 1:
+        raise SystemExit(
+            f"enc.onnx: expected 1 encoder GRU, found {len(grus)} -- the encoder split "
+            f"assumes a single GRU; stacked encoder GRUs need the decoder stacked-state path")
+    gru_node = grus[0]
     hidden_size = next(a.i for a in gru_node.attribute if a.name == "hidden_size")
-    print(f"  Encoder GRU: {gru_node.name}, hidden_size={hidden_size}")
+    print(f"  Encoder GRU: {gru_node.name}, hidden_size={hidden_size}, "
+          f"conv_lookahead={conv_lookahead} (conv slice offset)")
 
     # GRU X comes from a Transpose whose input is the pre-GRU embedding tensor.
     transpose_node = get_node_by_output(graph, gru_node.input[0])
@@ -173,12 +220,13 @@ def split_encoder(model_dir):
                     if p not in pre_gru_names:
                         gru_const_names.add(p)
 
-    _build_enc_conv(enc_path, pre_gru_emb, model_dir / "enc_conv_streaming.onnx")
+    _build_enc_conv(enc_path, pre_gru_emb, model_dir / "enc_conv_streaming.onnx",
+                    conv_lookahead)
     _build_enc_gru(enc_path, gru_node, hidden_size, pre_gru_emb, gru_const_names,
                    post_gru_names, model_dir / "enc_gru_streaming.onnx")
 
 
-def _build_enc_conv(enc_path, pre_gru_emb, out_path):
+def _build_enc_conv(enc_path, pre_gru_emb, out_path, conv_lookahead=0):
     model = onnx.load(str(enc_path))
     graph = model.graph
     keep = get_all_predecessors(graph, [pre_gru_emb])
@@ -186,8 +234,10 @@ def _build_enc_conv(enc_path, pre_gru_emb, out_path):
         if graph.node[i].name not in keep:
             del graph.node[i]
 
-    graph.initializer.append(numpy_helper.from_array(np.array([-1], np.int64), "_sl_starts"))
-    graph.initializer.append(numpy_helper.from_array(np.array([INT64_MAX], np.int64), "_sl_ends"))
+    sl_starts, sl_ends = _slice_bounds(conv_lookahead)
+    print(f"  enc_conv slice offset = {conv_lookahead}  (starts={sl_starts}, ends={sl_ends})")
+    graph.initializer.append(numpy_helper.from_array(np.array([sl_starts], np.int64), "_sl_starts"))
+    graph.initializer.append(numpy_helper.from_array(np.array([sl_ends], np.int64), "_sl_ends"))
     graph.initializer.append(numpy_helper.from_array(np.array([2], np.int64), "_sl_axis2"))
     graph.initializer.append(numpy_helper.from_array(np.array([1], np.int64), "_sl_axis1"))
 
@@ -314,10 +364,16 @@ def _build_enc_gru(enc_path, gru_ref, hidden_size, pre_gru_emb, gru_const_names,
 # --------------------------------------------------------------------------- #
 # DECODER (windowed + stateful, advance-by-one)
 # --------------------------------------------------------------------------- #
-def patch_decoder(model_dir, filename, prefix, slice_specs):
+def patch_decoder(model_dir, filename, prefix, slice_specs, data_slice_offset=0):
     """Windowed + stateful decoder surgery.
 
-    slice_specs: {output_name: time_axis} for data outputs sliced to the last frame.
+    slice_specs: {output_name: time_axis} for data outputs sliced to a single frame.
+    data_slice_offset: frames behind the newest window frame to slice as the valid output
+        (0 = slice-last, as for the causal `_ll` decoders). The DFN3 decoders are causal in
+        time -- the model's lookahead lives in the encoder convs and, for the DF path, in the
+        host-side DeepFilterRing (leftPad), NOT in these graphs -- so this stays 0. It is
+        plumbed through only so the surgery is uniform with the encoder and Gate A can prove
+        the choice.
     Emits *_streaming.onnx with:
         input  <prefix>_h0 [num_layers,1,hidden]  (GRU state BEFORE the window)
         output <prefix>_h1 [num_layers,1,hidden]  (GRU state AFTER the FIRST window frame)
@@ -392,9 +448,10 @@ def patch_decoder(model_dir, filename, prefix, slice_specs):
         post_nodes.append(helper.make_node("Concat", h1_parts, [h1_name],
                                            name=f"_{prefix}_h1_concat", axis=0))
 
-    # slice-last on data outputs
-    graph.initializer.append(numpy_helper.from_array(np.array([-1], np.int64), f"_{prefix}_sl_starts"))
-    graph.initializer.append(numpy_helper.from_array(np.array([INT64_MAX], np.int64), f"_{prefix}_sl_ends"))
+    # slice a single valid frame from data outputs (offset frames behind the newest)
+    sl_starts, sl_ends = _slice_bounds(data_slice_offset)
+    graph.initializer.append(numpy_helper.from_array(np.array([sl_starts], np.int64), f"_{prefix}_sl_starts"))
+    graph.initializer.append(numpy_helper.from_array(np.array([sl_ends], np.int64), f"_{prefix}_sl_ends"))
     axis_inits = {}
     for out_name, axis in slice_specs.items():
         ai = axis_inits.get(axis)
@@ -428,8 +485,9 @@ def patch_decoder(model_dir, filename, prefix, slice_specs):
 
 def main():
     model_dir = Path(sys.argv[1] if len(sys.argv) > 1 else "models/dfn3-ll")
+    cfg = read_config(model_dir)
     print(f"=== enc split ===")
-    split_encoder(model_dir)
+    split_encoder(model_dir, conv_lookahead=cfg["conv_lookahead"])
     print(f"=== erb_dec ===")
     patch_decoder(model_dir, "erb_dec.onnx", "erb", {"m": 2})
     print(f"=== df_dec ===")

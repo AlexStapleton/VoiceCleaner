@@ -42,7 +42,7 @@ bool Bridge::start() {
   if (cfg_.warmStandby) {
     // Both leaves run warm; SwitchableEngine crossfades between them on request_engine().
     leafA_ = std::make_unique<RnnoiseFilter>();
-    leafB_ = std::make_unique<Dfn3StreamAdapter>("models/dfn3-ll");
+    leafB_ = std::make_unique<Dfn3StreamAdapter>("models/dfn3");
     dfn3Adapter_ = static_cast<Dfn3StreamAdapter*>(leafB_.get());
     auto sw = std::make_unique<SwitchableEngine>(leafA_.get(), leafB_.get());
     switch_ = sw.get();
@@ -50,7 +50,7 @@ bool Bridge::start() {
   }
   else if (cfg_.engine == "rnnoise") engine_ = std::make_unique<RnnoiseFilter>();
   else if (cfg_.engine == "dfn3") {
-    auto adapter = std::make_unique<Dfn3StreamAdapter>("models/dfn3-ll");
+    auto adapter = std::make_unique<Dfn3StreamAdapter>("models/dfn3");
     dfn3Adapter_ = adapter.get();
     engine_ = std::move(adapter);
   }
