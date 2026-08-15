@@ -45,6 +45,7 @@ private:
   std::unique_ptr<INoiseFilter> leafA_, leafB_;  // warm-standby leaves (owned; borrowed by switch_)
   std::unique_ptr<INoiseFilter> engine_;   // constructed in start() (non-RT)
   SwitchableEngine*             switch_ = nullptr;  // non-owning; points into engine_ when warm-standby
+  Dfn3StreamAdapter*            dfn3Adapter_ = nullptr;  // non-owning; set whenever a DFN3 adapter is live (observability)
   std::unique_ptr<DspChain>     chain_;     // optional DC->HPF->AGC->limiter wrap
   Frame                         proc_;      // processed-frame scratch (relay RT)
   std::atomic<double> ratioPpm_{0.0};

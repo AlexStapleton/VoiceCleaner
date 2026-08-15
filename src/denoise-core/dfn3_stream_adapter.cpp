@@ -29,14 +29,22 @@ void Dfn3StreamAdapter::ProcessFrame(const float* in, float* out) noexcept {
 }
 
 float Dfn3StreamAdapter::LastVadProbability() const noexcept {
-  // Map local SNR (lsnr, dB-ish) to [0,1] via a logistic. The slope/offset are a
-  // rough default; tuning against real VAD is future work.
+  // Map the model's local-SNR-in-dB estimate (lsnr) to a speech probability in [0,1] via a
+  // logistic. PROVISIONAL heuristic: 0 dB -> 0.5 is a defensible speech/noise boundary and
+  // the slope gives a roughly +/-7 dB transition, but these constants are not calibrated.
+  // Proper calibration against a labeled speech/noise corpus is future work (audit finding).
+  constexpr float kVadBoundaryDb = 0.0f;  // lsnr at the speech/noise 50% point
+  constexpr float kVadSlope = 0.3f;       // logistic slope (~+/-7 dB transition)
   const float lsnr = eng_->lastLsnr();
-  return std::clamp(1.0f / (1.0f + std::exp(-0.3f * lsnr)), 0.0f, 1.0f);
+  return std::clamp(1.0f / (1.0f + std::exp(-kVadSlope * (lsnr - kVadBoundaryDb))), 0.0f, 1.0f);
 }
 
 uint32_t Dfn3StreamAdapter::AlgorithmicDelaySamples() const noexcept {
   return eng_->latencySamples();
+}
+
+uint64_t Dfn3StreamAdapter::failedHops() const noexcept {
+  return eng_->failedHops();
 }
 
 }  // namespace vc

@@ -36,8 +36,13 @@ void SwitchableEngine::ProcessFrame(const float* in, float* out) noexcept {
     const float target = (cur_==0) ? d0 : d1;
     if (fadeLeft_ > 0) {
       const float src = (from_==0) ? d0 : d1;
-      // progress goes 0 -> 1 across the fade (equal power)
-      const float p = 1.0f - (static_cast<float>(fadeLeft_) - 1.0f) / static_cast<float>(fadeFrames_);
+      // progress p spans 0..1 INCLUSIVE across the fade: frame 0 -> p=0 (all source, so the
+      // first fade frame equals the pre-switch value -> continuous); last fade frame -> p=1
+      // (all target). fadeFrames_<=1 is an instant switch (p=1) and avoids a divide-by-zero.
+      const int frameIndex = fadeFrames_ - fadeLeft_;
+      const float p = (fadeFrames_ <= 1)
+                          ? 1.0f
+                          : static_cast<float>(frameIndex) / static_cast<float>(fadeFrames_ - 1);
       const float th = p * 1.5707963f;   // 0..pi/2
       out[i] = std::cos(th)*src + std::sin(th)*target;
     } else {

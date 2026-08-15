@@ -14,7 +14,11 @@ public:
   float    LastVadProbability() const noexcept override;
   void     SetAggression(float z) noexcept override;
   uint32_t AlgorithmicDelaySamples() const noexcept override;            // == max(a,b)
-  void     requestActive(int idx) noexcept { want_.store(idx, std::memory_order_relaxed); }
+  // Clamp to {0,1}: cur_ is used to index eng_[2], so an out-of-range request must not
+  // propagate to a later dereference.
+  void     requestActive(int idx) noexcept {
+    want_.store(idx < 0 ? 0 : (idx > 1 ? 1 : idx), std::memory_order_relaxed);
+  }
   int      activeIndex() const noexcept { return cur_; }
 private:
   INoiseFilter* eng_[2];
