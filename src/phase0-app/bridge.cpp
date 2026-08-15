@@ -44,7 +44,10 @@ bool Bridge::start() {
     leafA_ = std::make_unique<RnnoiseFilter>();
     leafB_ = std::make_unique<Dfn3StreamAdapter>("models/dfn3");
     dfn3Adapter_ = static_cast<Dfn3StreamAdapter*>(leafB_.get());
-    auto sw = std::make_unique<SwitchableEngine>(leafA_.get(), leafB_.get());
+    // In warm-standby, `engine` selects which engine is active at startup: "dfn3" -> idx 1 (leafB),
+    // anything else -> idx 0 (RNNoise, leafA). Both stay warm; switch live with keys 1/2.
+    const int initialActive = (cfg_.engine == "dfn3") ? 1 : 0;
+    auto sw = std::make_unique<SwitchableEngine>(leafA_.get(), leafB_.get(), /*fadeFrames=*/15, initialActive);
     switch_ = sw.get();
     engine_ = std::move(sw);
   }
