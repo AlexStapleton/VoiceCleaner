@@ -9,7 +9,8 @@ namespace vc {
 // requestActive() is safe to call from a non-RT thread; ProcessFrame reads it once per frame.
 class SwitchableEngine : public INoiseFilter {
 public:
-  SwitchableEngine(INoiseFilter* a, INoiseFilter* b, int fadeFrames = 15);
+  // initialActive selects which engine is active at startup (0 = a, 1 = b), clamped to {0,1}.
+  SwitchableEngine(INoiseFilter* a, INoiseFilter* b, int fadeFrames = 15, int initialActive = 0);
   void     ProcessFrame(const float* in, float* out) noexcept override;  // 480 in/out
   float    LastVadProbability() const noexcept override;
   void     SetAggression(float z) noexcept override;

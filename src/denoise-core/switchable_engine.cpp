@@ -2,13 +2,16 @@
 #include <algorithm>
 #include <cmath>
 namespace vc {
-SwitchableEngine::SwitchableEngine(INoiseFilter* a, INoiseFilter* b, int fadeFrames)
+SwitchableEngine::SwitchableEngine(INoiseFilter* a, INoiseFilter* b, int fadeFrames, int initialActive)
     : eng_{a,b}, fadeFrames_(fadeFrames) {
   const uint32_t da = a->AlgorithmicDelaySamples(), db = b->AlgorithmicDelaySamples();
   const uint32_t mx = std::max(da, db);
   delaySamples_[0] = static_cast<int>(mx - da);
   delaySamples_[1] = static_cast<int>(mx - db);
   for (int e=0;e<2;++e) dline_[e].assign(static_cast<size_t>(delaySamples_[e]) + 1, 0.0f);
+  const int init = initialActive < 0 ? 0 : (initialActive > 1 ? 1 : initialActive);  // clamp {0,1}
+  cur_ = from_ = init;
+  want_.store(init, std::memory_order_relaxed);   // start active without a startup crossfade
 }
 float SwitchableEngine::pushDelay(int e, float x) noexcept {
   if (delaySamples_[e] == 0) return x;

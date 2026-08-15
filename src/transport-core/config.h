@@ -15,7 +15,8 @@ struct Config {
   double filterAlpha    = 0.02;
   std::string engine   = "none";   // "none" (passthrough) | "rnnoise" | "dfn3" = standard DeepFilterNet3 (models/dfn3), ~30 ms latency
   bool        dspChain = false;     // wrap engine in DC->HPF->AGC->limiter chain
-  bool        warmStandby = false;  // run rnnoise+dfn3, live switch
+  bool        warmStandby = false;  // run rnnoise+dfn3 both warm, live switch (keys 1/2). In this mode
+                                    // `engine` selects the DEFAULT-active engine at startup: "dfn3" -> DFN3, else RNNoise.
   static Config load(const std::string& tomlPath);
   void apply_cli(int argc, char** argv);
   void validate();
