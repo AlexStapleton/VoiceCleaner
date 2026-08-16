@@ -21,10 +21,11 @@ int main(int argc, char** argv) {
   bool useDfn3Ll = false;
   bool useDfn3Stream = false;
   bool useDfn3StdStream = false;
-  float aggression = 0.0f;  // 0 = disabled; only affects whole-utterance dfn3 / dfn3-ll
+  float aggression = 0.0f;  // 0 = disabled; ERB-mask shaping for dfn3/dfn3-ll AND the streaming engines
   int argi = 1;
   // Optional flags in any order: --chain, --engine <name> (default passthrough),
-  // --aggression <0..1> (ERB-mask shaping for dfn3 / dfn3-ll only).
+  // --aggression <0..1> (ERB-mask shaping for dfn3 / dfn3-ll, and for dfn3-stream /
+  // dfn3-std-stream).
   while (argi < argc) {
     if (std::strcmp(argv[argi], "--chain") == 0) {
       useChain = true;
@@ -147,6 +148,7 @@ int main(int argc, char** argv) {
     std::vector<float> enhanced;
     try {
       vc::Dfn3Streaming stream(modelDir);
+      stream.setAggression(aggression);
       const size_t hop = 480;
       const size_t flush = stream.latencySamples();
       const size_t total = frames + flush;

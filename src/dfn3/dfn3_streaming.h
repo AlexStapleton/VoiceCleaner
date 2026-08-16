@@ -27,6 +27,7 @@ public:
   // reset() reallocates (ring + ORT re-bind) -- NOT real-time-safe; call only off the audio
   // thread (e.g. before streaming starts). process() is the RT-safe hot path.
   void reset() noexcept;
+  void setAggression(float slider) noexcept;   // 0..1; shapes the ERB mask (DFN3-only). 0 = off (identity).
 private:
   struct Impl; Impl* p_;
 };

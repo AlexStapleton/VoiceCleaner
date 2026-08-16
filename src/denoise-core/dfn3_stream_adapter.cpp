@@ -39,6 +39,8 @@ float Dfn3StreamAdapter::LastVadProbability() const noexcept {
   return std::clamp(1.0f / (1.0f + std::exp(-kVadSlope * (lsnr - kVadBoundaryDb))), 0.0f, 1.0f);
 }
 
+void Dfn3StreamAdapter::SetAggression(float z) noexcept { eng_->setAggression(z); }
+
 uint32_t Dfn3StreamAdapter::AlgorithmicDelaySamples() const noexcept {
   return eng_->latencySamples();
 }

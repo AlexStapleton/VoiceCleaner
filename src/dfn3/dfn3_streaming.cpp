@@ -58,6 +58,7 @@
 #include <utility>
 #include <vector>
 
+#include "aggression.h"
 #include "dfn3_features.h"
 #include "dfn3_postdsp.h"
 #include "erb.h"
@@ -415,6 +416,9 @@ struct Dfn3Streaming::Impl {
   bool needsResync = false;    // set on failure; triggers a reset() before the next hop
   bool warnedFail = false;     // one-time stderr warning has been emitted
 
+  float aggressionSlider_ = 0.0f;
+  float aggMask_[32];   // scratch: shaped copy of the 32-band mask (RT-safe, no alloc)
+
   explicit Impl(const std::string& modelDir) {
     std::string dir = modelDir;
     if (!dir.empty() && dir.back() != '/' && dir.back() != '\\') dir += '/';
@@ -574,6 +578,15 @@ struct Dfn3Streaming::Impl {
                 encConv.outData(ecE1), encConv.outData(ecE0)});
     const float* mask = erbDec.outData(erbM);  // [32]
 
+    // Optional aggression: shape the ERB gain mask (g' = max(gMin, g^gamma)), identical to the offline
+    // path. Gate slider>0 so aggression 0 stays byte-identical to the native mask. ERB bins only;
+    // deep-filtered low bins are untouched.
+    if (aggressionSlider_ > 0.0f) {
+      std::copy(mask, mask + 32, aggMask_);
+      apply_aggression(aggMask_, 32, aggression_gamma(aggressionSlider_), 0.1f);  // 0.1 = -20 dB floor
+      mask = aggMask_;
+    }
+
     dfDec.run({embOutPtr, encConv.outData(ecC0)});
     const float* coefs = dfDec.outData(dfCoefs);  // [96*10]
 
@@ -644,5 +657,9 @@ uint32_t Dfn3Streaming::latencySamples() const noexcept {
 float Dfn3Streaming::lastLsnr() const noexcept { return p_->lastLsnr; }
 bool Dfn3Streaming::lastHopFailed() const noexcept { return p_->hopFailed; }
 void Dfn3Streaming::reset() noexcept { p_->reset(); }
+
+void Dfn3Streaming::setAggression(float slider) noexcept {
+  p_->aggressionSlider_ = slider < 0.0f ? 0.0f : (slider > 1.0f ? 1.0f : slider);
+}
 
 }  // namespace vc
