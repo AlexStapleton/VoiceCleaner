@@ -108,3 +108,22 @@ TEST(DynamicEngine, LeanSwitchLoadsCrossfadesRetires) {
   EXPECT_EQ(pr[0].live(), 0);              // now freed
   EXPECT_EQ(pr[0].dtorCount, 1);           // exactly once — no double free
 }
+
+TEST(DynamicEngine, ReclaimIsIndependentOfFurtherCommands) {
+  EngineProbe pr[2]; pr[0] = {1.0f, 0}; pr[1] = {2.0f, 0};
+  DynamicEngine::Config c; c.mode = DynamicEngine::Mode::Lean; c.initialActive = 0;
+  c.fadeFrames = 2; c.delaySamples[0] = 0; c.delaySamples[1] = 0;
+  DynamicEngine eng(probeLoader(pr), c);
+  std::vector<float> in(FRAME_SAMPLES, 1.0f), out(FRAME_SAMPLES);
+
+  eng.requestActive(1);
+  for (int f = 0; f < 2; ++f) eng.ProcessFrame(in.data(), out.data());   // fade completes, idx0 retired
+  // No further requestActive. Keep processing frames (steady on idx1).
+  for (int f = 0; f < 50; ++f) eng.ProcessFrame(in.data(), out.data());
+  EXPECT_EQ(pr[0].live(), 1);   // still queued (reclaim not yet called)
+
+  int freed = 0;
+  eng.reclaim([&](INoiseFilter*, int idx) { if (idx == 0) ++freed; });
+  EXPECT_EQ(freed, 1);
+  EXPECT_EQ(pr[0].live(), 0);
+}
