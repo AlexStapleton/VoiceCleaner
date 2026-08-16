@@ -131,8 +131,8 @@ void Bridge::relayLoop() {
       if (telemetryOn_) {
         float rms = 0.0f, peak = 0.0f;
         for (size_t i = 0; i < FRAME_SAMPLES; ++i) {
-          const float a = src[i] < 0 ? -src[i] : src[i];
-          rms += src[i] * src[i];
+          const float a = f[i] < 0 ? -f[i] : f[i];
+          rms += f[i] * f[i];
           if (a > peak) peak = a;
         }
         rms = std::sqrt(rms / (float)FRAME_SAMPLES);
