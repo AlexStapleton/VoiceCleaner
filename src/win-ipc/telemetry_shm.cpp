@@ -1,0 +1,41 @@
+#include "telemetry_shm.h"
+#include <windows.h>
+#include <cstring>
+namespace vc::ipc {
+
+TelemetryWriter::~TelemetryWriter() {
+  if (view_) UnmapViewOfFile(view_);
+  if (handle_) CloseHandle(static_cast<HANDLE>(handle_));
+}
+bool TelemetryWriter::create(const std::wstring& name) {
+  HANDLE h = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE,
+                                0, sizeof(Telemetry), name.c_str());
+  if (!h) return false;
+  void* v = MapViewOfFile(h, FILE_MAP_WRITE, 0, 0, sizeof(Telemetry));
+  if (!v) { CloseHandle(h); return false; }
+  handle_ = h; view_ = static_cast<Telemetry*>(v);
+  std::memset(view_, 0, sizeof(Telemetry));
+  return true;
+}
+void TelemetryWriter::write(const Telemetry& t) noexcept {
+  if (view_) std::memcpy(view_, &t, sizeof(Telemetry));
+}
+
+TelemetryReader::~TelemetryReader() {
+  if (view_) UnmapViewOfFile(const_cast<Telemetry*>(view_));
+  if (handle_) CloseHandle(static_cast<HANDLE>(handle_));
+}
+bool TelemetryReader::open(const std::wstring& name) {
+  HANDLE h = OpenFileMappingW(FILE_MAP_READ, FALSE, name.c_str());
+  if (!h) return false;
+  void* v = MapViewOfFile(h, FILE_MAP_READ, 0, 0, sizeof(Telemetry));
+  if (!v) { CloseHandle(h); return false; }
+  handle_ = h; view_ = static_cast<const Telemetry*>(v);
+  return true;
+}
+Telemetry TelemetryReader::read() const noexcept {
+  Telemetry t{};
+  if (view_) std::memcpy(&t, view_, sizeof(Telemetry));
+  return t;
+}
+}  // namespace vc::ipc
