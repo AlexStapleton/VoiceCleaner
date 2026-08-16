@@ -35,7 +35,7 @@ checkbox (Phase 4), latency profiles, and switching to/from passthrough (`engine
 | Reclaim trigger | Non-RT, **independent of command arrival** — a small reclaim step the bridge runs periodically / when signalled, never on the RT thread and never only-on-command. |
 | Switch smoothness | **Gap-free, click-free** — reuse the equal-power cos/sin crossfade (`fadeFrames = 15`, ~150 ms) and delay-alignment. The load happens off the RT thread before the fade begins. |
 | Modes | **warm** = both preloaded, **run both every frame**, retirement **off**. **lean** = active-only when not fading, on-demand load, eager retire. A single mode flag; warm behavior stays byte-identical to today (§7 golden). |
-| Output delay | **Pinned constant** = `max(RNNoise, DFN3)` algorithmic delay for the whole session (even when lean), so a switch never shifts output timing (the drift controller/downstream never see a step). Obtained by a one-time both-engines probe at startup. |
+| Output delay | **Pinned constant** = `max(RNNoise, DFN3)` algorithmic delay for the whole session (even when lean), so a switch never shifts output timing (the drift controller/downstream never see a step). The per-engine delays are **known constants** — RNNoise 0, DFN3 480 (`AlgorithmicDelaySamples()` in their headers) — so no runtime probe is needed; the bridge passes them into the container's `Config`. |
 | Index convention | **0 = RNNoise, 1 = DFN3** everywhere (matches `Params.engine`, `telemetry.activeEngine`, today's leafA/leafB). |
 | Regression guard | The warm-standby crossfade output must not change. Capture a golden output vector from today's `SwitchableEngine` **before** refactoring and assert the generalized container reproduces it bit-for-bit. |
 | Trigger for headless test | Reuse `--dev-keys` (keys `1`/`2` → `request_engine`), which now drives the container in lean mode too. |
@@ -92,9 +92,12 @@ work (loads/installs, frees). No locks on the RT path.
    because this thread observed `want_ == t` via the acquire that synchronizes-with the installer's release.
 2. If `fadeLeft_ > 0` **or** mode is warm: run **both** leaves; crossfade when `fadeLeft_ > 0`, else emit `cur_`.
    If lean and `fadeLeft_ == 0`: run **only** `eng_[cur_]`.
-3. On the frame `fadeLeft_` reaches 0 **and** mode is lean: `p = eng_[from_].exchange(nullptr)`; `retiredQ_.push(p)`.
-   From here the RT will not touch that pointer again — a later switch back to `from_`'s index finds `eng_[idx] ==
-   nullptr` and triggers a **fresh install**, so the queued pointer is never reused.
+3. On the frame `fadeLeft_` reaches 0 **and** mode is lean: **unless `want_` has meanwhile re-targeted `from_`** (a
+   switch-back that arrived mid-fade — then keep it resident and let the next frame fade `cur_ → from_`), retire it:
+   `p = eng_[from_].exchange(nullptr)`; `retiredQ_.push(p)` (if the push fails, re-store `p` — never leak). This
+   retire-or-keep decision is made **entirely on the RT thread**, so there is no cross-thread free race. From a
+   retirement onward the RT will not touch that pointer again — a later switch back finds `eng_[idx] == nullptr` and
+   triggers a **fresh install**, so the queued pointer is never reused.
 
 **Reclaim (non-RT, command/reclaim context — not the RT thread):** drain `retiredQ_`, `delete` each leaf. Runs
 independently of command arrival (a periodic tick or a signalled step), so a single switch followed by silence still
@@ -108,9 +111,9 @@ most two leaves are resident (transient, during a switch).
 
 ## 5. Bridge integration (`voicecleaner-worker`)
 
-- **`Bridge::start`** builds the container for any real-engine config (`rnnoise`/`dfn3`): probe both engines once to
-  compute `maxDelay_` (construct both, read `AlgorithmicDelaySamples`); `warm_standby = true` → keep both, mode warm;
-  `false` → keep only the configured engine (free the probe's other leaf), mode lean. This replaces the current
+- **`Bridge::start`** builds the container for any real-engine config (`rnnoise`/`dfn3`), passing
+  `Config.delaySamples = {0, 480}` (RNNoise, DFN3 — known constants, no probe); `warm_standby = true` → mode warm
+  (loader builds both); `false` → mode lean (loader builds only the configured engine). This replaces the current
   `switch_`-only-under-warm-standby branch and the single-engine branches for rnnoise/dfn3. `engine = none` stays a
   static `PassthroughFilter` with no container (no switching).
 - **`request_engine(int idx)`** routes to the container: under the command mutex, install `idx` if absent, then
