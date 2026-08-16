@@ -10,8 +10,8 @@ struct Params {
   float    limiterCeilingDbfs;  // brickwall ceiling
   uint32_t engine;              // 0 = RNNoise, 1 = DFN3
   uint32_t bypass;              // 0 / 1
-  uint32_t dspChain;            // 0 / 1
-  uint32_t driftComp;           // 0 / 1
+  uint32_t dspChain;            // 0 / 1 — set at worker start via Config; relay does not consume live yet (deferred)
+  uint32_t driftComp;           // 0 / 1 — set at worker start via Config; relay does not consume live yet (deferred)
   uint32_t dryTap;              // 0 / 1 (placeholder; behavior deferred)
 
   static constexpr Params defaults() {

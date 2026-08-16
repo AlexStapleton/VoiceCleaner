@@ -8,6 +8,8 @@ TelemetryWriter::~TelemetryWriter() {
   if (handle_) CloseHandle(static_cast<HANDLE>(handle_));
 }
 bool TelemetryWriter::create(const std::wstring& name) {
+  if (view_)   { UnmapViewOfFile(view_); view_ = nullptr; }
+  if (handle_) { CloseHandle(static_cast<HANDLE>(handle_)); handle_ = nullptr; }
   HANDLE h = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE,
                                 0, sizeof(Telemetry), name.c_str());
   if (!h) return false;

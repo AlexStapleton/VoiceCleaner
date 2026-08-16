@@ -144,7 +144,9 @@ int main(int argc, char** argv) {
           bridge.request_engine((int)c.params.engine);   // no-op unless warm-standby
           break;
         case vc::ipc::CmdType::SetWarmStandby:
-          break;   // build-time toggle; handled on a future rebuild (Task 7)
+          break;   // deferred: toggling warm-standby requires a pipeline rebuild; not yet wired
+        case vc::ipc::CmdType::ResetCounters:
+          break;   // deferred: no counter-reset path yet (DropoutCounter/FrameTimeStats have no reset())
         case vc::ipc::CmdType::Shutdown:
           g_stop.store(true);
           break;

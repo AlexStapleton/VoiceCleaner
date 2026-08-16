@@ -13,13 +13,13 @@ struct Telemetry {
   float    frameP50Ms;
   float    frameP99Ms;
   float    frameMaxMs;
-  uint32_t ringAOcc;
+  uint32_t ringAOcc;       // not yet populated by the worker (deferred)
   uint32_t ringBOcc;
-  uint32_t ringBHigh;
+  uint32_t ringBHigh;      // not yet populated by the worker (deferred)
   uint32_t dropouts;
   uint32_t activeEngine;   // 0 = RNNoise, 1 = DFN3
   double   driftRatioPpm;
-  uint64_t uptimeMs;
+  uint64_t uptimeMs;       // not yet populated by the worker (deferred)
   uint32_t workerState;    // WorkerState
   uint32_t seq;            // increments each aggregate publish
 };
