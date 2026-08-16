@@ -72,5 +72,7 @@ private:
   bool                     telemetryOn_ = false;
   uint32_t                 telemetrySeq_ = 0;
   int                      hopsSincePublish_ = 0;
+  float                    winPeak_ = 0.0f;
+  double                   winSumSq_ = 0.0;
 };
 }

@@ -129,17 +129,19 @@ void Bridge::relayLoop() {
       const auto t1 = std::chrono::steady_clock::now();
       frameStats_.record(std::chrono::duration<double, std::milli>(t1 - t0).count());
       if (telemetryOn_) {
-        float rms = 0.0f, peak = 0.0f;
+        float framePeak = 0.0f; double frameSumSq = 0.0;
         for (size_t i = 0; i < FRAME_SAMPLES; ++i) {
           const float a = f[i] < 0 ? -f[i] : f[i];
-          rms += f[i] * f[i];
-          if (a > peak) peak = a;
+          frameSumSq += (double)f[i] * (double)f[i];
+          if (a > framePeak) framePeak = a;
         }
-        rms = std::sqrt(rms / (float)FRAME_SAMPLES);
+        if (framePeak > winPeak_) winPeak_ = framePeak;
+        winSumSq_ += frameSumSq;
         if (++hopsSincePublish_ >= 100) {   // ~1 s at 10 ms/hop
-          hopsSincePublish_ = 0;
+          const double n = (double)hopsSincePublish_ * (double)FRAME_SAMPLES;
           vc::ipc::Telemetry t{};
-          t.inputRms = rms; t.inputPeak = peak;
+          t.inputRms = (float)std::sqrt(winSumSq_ / n);
+          t.inputPeak = winPeak_;
           t.vadActive = (chain_ && chain_->vadActive()) ? 1u : 0u;
           t.frameP50Ms = (float)frameStats_.percentileMs(50.0);
           t.frameP99Ms = (float)frameStats_.percentileMs(99.0);
@@ -152,6 +154,7 @@ void Bridge::relayLoop() {
           t.workerState = (uint32_t)vc::ipc::WorkerState::Running;
           t.seq = ++telemetrySeq_;
           telemetry_.write(t);
+          hopsSincePublish_ = 0; winPeak_ = 0.0f; winSumSq_ = 0.0;
         }
       }
       if (cfg_.driftCompensation) {
