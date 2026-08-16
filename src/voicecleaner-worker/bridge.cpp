@@ -122,6 +122,7 @@ void Bridge::relayLoop() {
         chain_->setLimiterCeilingDb(sp.limiterCeilingDbfs);
         chain_->setBypass(sp.bypass != 0);
       }
+      if (engine_) engine_->SetAggression(sp.aggression);   // DFN3-only; RNNoise/passthrough no-op
       const float* src = f.data();
       const auto t0 = std::chrono::steady_clock::now();   // time ONLY engine+chain compute (Gate C)
       if (chain_)       { chain_->process_frame(f.data(), proc_.data()); src = proc_.data(); }
