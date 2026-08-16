@@ -5,6 +5,11 @@ _Date: 2026-08-16 · Status: draft for review_
 Parent design: [`2026-08-15-product-shell-design.md`](2026-08-15-product-shell-design.md) (§4 window, §5 IPC,
 §10 phase 3). This spec realizes that plan's **Phase 3 (UI skeleton)** and nothing beyond it.
 
+**Depends on Phase 2c** ([`2026-08-16-product-shell-phase2c-lean-engine-swap-design.md`](2026-08-16-product-shell-phase2c-lean-engine-swap-design.md)):
+the on-demand lean engine swap. With 2c landed, **engine switching works in both warm and lean modes** (gap-free),
+so the engine control is always available and needs no capability gating — only bypass does (it requires the DSP
+chain). Build 2c first; this phase assumes it.
+
 ## 1. Problem & scope
 
 The worker (`voicecleaner-worker.exe`) is UI-ready: it serves a named-pipe command channel and publishes a
@@ -13,8 +18,8 @@ shared-memory telemetry block. What is missing is the thing you click. This phas
 bypass over the pipe.** It proves the end-to-end control loop and the crash-isolation guarantee.
 
 **In scope:** the window shell, the tray, the spawn/attach/supervise lifecycle, engine switch, bypass, and one
-small worker-side telemetry addition (`bypass` + `warmStandby`/`dspChain` capability flags) that lets the UI
-reflect true state and disable controls the worker cannot honor.
+small worker-side telemetry addition (`bypass` + `dspChain` capability flag) that lets the UI reflect true bypass
+state and disable the bypass control when the worker has no DSP chain.
 
 **Out of scope (Phase 4+):** the Direct2D level meter, the microphone picker, tuning sliders (aggression/HPF/
 gain/limiter), the Advanced section, `settings.toml` per-mic profiles and drift-ppm persistence, and rich
@@ -27,29 +32,25 @@ boundary; they are not built.
 |---|---|
 | Increment | Parent spec's **Phase 3 exactly** — skeleton only. No meter, sliders, mic picker, or persistence. |
 | UI toolkit | **Direct2D from the start** — `ID2D1HwndRenderTarget` + `WM_PAINT`/`InvalidateRect`, custom-drawn controls. Not a DXGI swap chain. |
-| Launch config | UI reads `settings.toml` next to its module and spawns the worker **against it, with no forced overrides** — the worker honors the file's `warm_standby`/`dsp_chain`/`engine`. Controls are **capability-gated** (§3, §6), not forced. Missing/incomplete config → clear message, no spawn. |
-| Warm standby | **Respected from `settings.toml`, never forced.** Off = only the chosen engine runs (lean); the engine-switch control shows disabled with a reason. The live toggle checkbox and the switch-while-lean rebuild path are **Phase 4** (§14). |
+| Launch config | UI reads `settings.toml` next to its module and spawns the worker **against it, with no forced overrides** — the worker honors the file's `warm_standby`/`dsp_chain`/`engine`. Missing/incomplete config → clear message, no spawn. |
+| Warm standby | **Respected from `settings.toml`, never forced.** Thanks to Phase 2c, engine switch works either way (warm = instant, lean = gap-free on-demand load), so the engine control is **always enabled**. Warm standby is a resource/latency policy, not a gate. The live toggle checkbox + persistence are **Phase 4** (§14). |
 | Params baseline | UI seeds `current_` from `Params::defaults()` (which equals the worker's actual runtime values); continuously syncs `current_.engine`/`current_.bypass` from telemetry (§5). |
 | Lifecycle | **Spawn + attach + detect.** Single-instance UI; probe for a live worker → attach or spawn; **readiness gated on the first telemetry `seq` advance** (§10); detect worker death and surface it with a manual **Relaunch**. Auto-restart/backoff deferred to Phase 5. |
-| Telemetry additions | **Add `uint32_t bypass` + capability flags (`warmStandby`, `dspChain`) to the `Telemetry` POD** so the UI reflects true bypass state and disables any control the worker cannot honor. |
+| Telemetry additions | **Add `uint32_t bypass` + a `dspChain` capability flag to the `Telemetry` POD** so the UI reflects true bypass state and disables the bypass control when the worker has no DSP chain. (Engine switch is never gated — Phase 2c makes it always available.) |
 
-## 3. Why the controls depend on worker configuration (and are capability-gated, not forced)
+## 3. Control availability
 
-The worker's two headline capabilities are gated by how it was configured from `settings.toml`:
+- **Engine switch — always enabled.** Phase 2c makes `request_engine` work in both modes: warm standby switches
+  instantly (both leaves resident), lean loads the target on demand (~16-39 ms, off the RT thread) and crossfades it
+  in gap-free. So the UI never disables the engine control for warm-standby reasons; warm standby is a resource
+  policy the user sets in `settings.toml`, not a gate. (The ~40 ms lean load is imperceptible; the UI need not even
+  show a "loading" state.)
+- **Bypass — gated by the DSP chain.** Bypass is applied via `chain_->setBypass(...)`; with no chain there is nothing
+  to bypass. The chain exists only when `dsp_chain = true`, reported as the `dspChain` telemetry flag (§6); the UI
+  disables the bypass control with its reason when the worker has no chain.
 
-- **Engine switch** is instant only under **warm standby** — `Bridge::request_engine` is a no-op unless the
-  both-engines-warm `switch_` object exists, built only when `warm_standby = true`. When warm standby is off, only
-  the chosen engine loads and runs (**lean**), and there is currently **no live engine-switch path at all**.
-- **Bypass** is applied via `chain_->setBypass(...)`; with no DSP chain there is nothing to bypass. The chain exists
-  only when `dsp_chain = true`.
-
-Rather than **force** these on (which would override a user's deliberate `warm_standby = false` and burn ~3× the
-per-hop compute + a second model in RAM for someone who rarely switches), Phase 3 **respects `settings.toml`** and
-reports each capability in telemetry (`warmStandby`/`dspChain`, §6). The UI enables each control only when the
-worker can honor it, and otherwise shows it **disabled with the reason**. This keeps a lean "pick one engine, rarely
-switch" configuration first-class: set `warm_standby = false`, only the chosen engine runs, and the engine control
-reads disabled ("enable warm standby to switch live"). The live checkbox to flip warm standby without editing the
-file — and the switch-while-lean rebuild path — are **Phase 4** (§14).
+Phase 3 spawns the worker against `settings.toml` with **no forced overrides** — it honors the file's
+`warm_standby`/`dsp_chain`/`engine`.
 
 Because `ParamStore` initializes to `Params::defaults()`, the worker's effective runtime values for
 aggression/HPF/AGC/limiter/bypass already equal `Params::defaults()` from the first hop. The UI seeding its
@@ -91,34 +92,32 @@ to the already-active engine). Likewise `current_.bypass` is reconciled from `te
 A `WM_TIMER` at ~10 Hz reads `TelemetryReader` and, each tick:
 - `activeEngine` → sets both the engine display **and** `current_.engine` (authoritative; see above).
 - `bypass` (new field, §6) → sets the bypass display and `current_.bypass`, notably on **attach**.
-- `warmStandby`/`dspChain` (new capability flags, §6) → enable/disable the engine and bypass controls; a disabled
-  control shows why (e.g. "engine switch unavailable — worker not in warm standby").
+- `dspChain` (new capability flag, §6) → enables/disables the **bypass** control; a disabled control shows why
+  ("no DSP chain — bypass unavailable"). The engine control is never gated (§3).
 - `seq` → liveness/readiness (see §10; advancing = alive, first advance = ready).
 - `workerState` → reflects `DeviceLost`/`Stopping` as "Worker not running".
 
-## 6. Telemetry additions (`bypass` + capability flags)
+## 6. Telemetry additions (`bypass` + `dspChain`)
 
-Widen the shared `vc::ipc::Telemetry` POD (`src/vc-ipc/telemetry.h`) with three `uint32_t` fields:
+Widen the shared `vc::ipc::Telemetry` POD (`src/vc-ipc/telemetry.h`) with two `uint32_t` fields:
 
 - `bypass` — current bypass state. The relay writes `sp.bypass` on each ~1 Hz publish
   (`src/voicecleaner-worker/bridge.cpp`). On **attach** to an already-running worker (whose bypass state the UI did
   not set and otherwise could not know), this lets the toggle show the true state instead of defaulting to Active.
-- `warmStandby`, `dspChain` — **capability flags**: whether the worker was built with the switchable engine and the
-  DSP chain. The relay writes `cfg_.warmStandby ? 1 : 0` and `chain_ != nullptr ? 1 : 0`. On attach, the UI uses
-  these to **disable the controls the worker cannot honor** — engine switch requires `warmStandby`, bypass requires
-  `dspChain` (§3). Without them, a worker started headless (no flags) would present live-looking but inert controls.
+- `dspChain` — capability flag: whether the worker has a DSP chain. The relay writes `chain_ != nullptr ? 1 : 0`.
+  The UI disables the bypass control when it is 0 (a `dsp_chain = false` worker can't bypass). Engine switch needs no
+  such flag — Phase 2c makes switching always available.
 
-These flags drive control enable/disable in **every** path (not just attach), since Phase 3 no longer forces warm
-standby / dsp chain on — the UI must reflect whatever the worker was actually configured with. Update the two
-`win-ipc` telemetry tests for the widened struct.
+Both fields are read every tick (normal path and attach). Update the two `win-ipc` telemetry tests for the widened
+struct. (A `warmStandby` flag is deliberately **not** added here — nothing in Phase 3 gates on it; if Phase 4's
+warm-standby checkbox wants a lean/warm readout, it can add one then.)
 
 ## 7. Worker-side change (stays headless-correct)
 
-**No new CLI flags.** The worker already reads `warm_standby`, `dsp_chain`, and `engine` from `settings.toml`
-([config.cpp](../../../src/transport-core/config.cpp)), and Phase 3 respects them as-is rather than overriding them
-— so the earlier "forced-flags" plan and its `Config::apply_cli` additions are dropped. The **only** worker change
-this phase is the telemetry writes in §6 (bypass + capability flags). The worker still runs standalone headless,
-otherwise unchanged; no RT-path change.
+**No new CLI flags, and no engine-switch work** — Phase 2c already delivered lean/warm switching, and the worker
+reads `warm_standby`/`dsp_chain`/`engine` from `settings.toml` ([config.cpp](../../../src/transport-core/config.cpp)),
+which Phase 3 respects as-is. The **only** worker change this phase is the two telemetry writes in §6
+(`bypass` + `dspChain`). The worker still runs standalone headless; no RT-path change.
 
 ## 8. The window (skeleton)
 
@@ -128,9 +127,9 @@ repainted on state change.
 1. **Status line** — `● Active · <engine> · → CABLE Input`, `○ Bypassed · <engine> · → CABLE Input`, or
    `✕ Worker not running`. Colored status dot.
 2. **Engine segmented control** — `[ RNNoise │ DeepFilterNet3 ]`; click sends `SetParams` with the chosen `engine`.
-   Disabled (greyed, with a reason) when the attached worker reports `warmStandby == 0` (§6).
+   Always enabled (Phase 2c makes switching work warm or lean); reflects `telemetry.activeEngine`.
 3. **Bypass toggle** — prominent Enabled/Bypass button; click flips `current_.bypass` and sends `SetParams`.
-   Disabled when the attached worker reports `dspChain == 0` (§6).
+   Disabled (greyed, with a reason) when the worker reports `dspChain == 0` (§6).
 4. **Relaunch worker** button — visible only when the worker is down; click re-runs the spawn path.
 
 **First-run/behavior:** if `settings.toml` is absent or lacks capture/render IDs (checked via `Config::load`), the
@@ -152,8 +151,8 @@ distinct from a **launch failure** (§11), where the config was valid but the wo
 - **Single-instance UI:** `CreateMutex(Local\voicecleaner-ui)`. On `ERROR_ALREADY_EXISTS`, broadcast a registered
   "restore" window message (`RegisterWindowMessage`) so the running instance shows itself, then exit.
 - **Present vs running (telemetry cadence matters):** the shared-memory block is created partway through
-  `Bridge::start()` — *after* both warm-standby models load, and *before* the pipe server comes up and the relay
-  begins publishing. `seq` then advances only at the relay's **~1 Hz** publish cadence. So the two signals are
+  `Bridge::start()` — *after* engine construction and device init, and *before* the pipe server comes up and the
+  relay begins publishing. `seq` then advances only at the relay's **~1 Hz** publish cadence. So the two signals are
   distinct: **shm opens = worker "present"**; **first `seq` advance = worker "running/ready"**, and by then
   `start()` has returned, so the **pipe server is guaranteed up**. The UI enables controls and declares spawn
   success on the **first `seq` advance**, never merely on shm existence — this also avoids sending a command into a
@@ -163,8 +162,9 @@ distinct from a **launch failure** (§11), where the config was valid but the wo
   + pipe results). `open` fails ⇒ **spawn**. Reuses the existing shm — no worker change for the probe itself.
 - **Spawn:** resolve `<moduleDir>` via `GetModuleFileName(NULL)`. `CreateProcess` with `CREATE_NO_WINDOW` on
   `<moduleDir>\voicecleaner-worker.exe --config "<moduleDir>\settings.toml"` (no forced flags — the worker honors
-  the file). Keep the process handle. Bounded-wait **~10 s** for the first `seq` advance (dual-model warm-standby
-  load is the slow path); on timeout, report a launch failure and offer Relaunch.
+  the file). Keep the process handle. Bounded-wait **~5 s** for the first `seq` advance — startup is dominated by
+  device/COM init and the first ~1 s telemetry window, **not** model load (measured ~16-39 ms even for DFN3's four
+  graphs); 5 s is generous headroom. On timeout, report a launch failure and offer Relaunch.
 - **Death detection:** spawned → `WaitForSingleObject(handle, 0) == WAIT_OBJECT_0` (immediate, authoritative);
   attached → shm gone, or `seq` stalled across **~3 publish intervals (~3 s at 1 Hz)**, or `workerState` ≠ `Running`.
   A failed `PipeClient::send` only **corroborates** — never the sole trigger, since it also fails transiently during
@@ -178,7 +178,7 @@ distinct from a **launch failure** (§11), where the config was valid but the wo
 ## 11. Error handling
 
 - **No config / no devices:** detected pre-spawn via `Config::load`; window shows a clear message, does not spawn.
-- **Launch failure (no `seq` advance within ~10 s):** the worker was spawned but never became ready — most likely a
+- **Launch failure (no `seq` advance within ~5 s):** the worker was spawned but never became ready — most likely a
   device that no longer resolves, or missing models. Distinct from "no config"; surfaces its own message + Relaunch.
 - **Pipe send fails:** **not** treated as death on its own (it also fails transiently before the worker's pipe
   server is up). Only a corroborating signal (§10); do not crash the UI.
@@ -190,28 +190,27 @@ distinct from a **launch failure** (§11), where the config was valid but the wo
 ## 12. Testing
 
 **Pure units — new `tests/voicecleaner` gtest target (no Windows, no audio):**
-- `ui_state`: given telemetry + events, computes the status string, control **enabled/disabled** state (from the
-  `warmStandby`/`dspChain` capability flags), the engine display, the bypass display, and alive/dead — including the
-  attach case where `bypass` and the capability flags come from telemetry.
+- `ui_state`: given telemetry + events, computes the status string, the **bypass** control's enabled/disabled state
+  (from the `dspChain` flag), the engine display, the bypass display, and alive/dead — including the attach case
+  where `bypass` and `dspChain` come from telemetry.
 - **`current_.engine` sync invariant:** a bypass-only toggle emits a `SetParams` whose `engine` equals the last
   `telemetry.activeEngine` (never a stale value) — the guard against gap-#1's spurious engine switch.
 - Spawn-arg construction: `(moduleDir, configPath)` → the exact worker command line.
 - Liveness/readiness policy: a sequence of `(shmOpen, seq)` samples → present / ready (first `seq` advance) /
   dead (`seq` stalled ~3 intervals or shm gone) decisions.
 
-**Worker unit tests:** widened `Telemetry` (bypass + capability flags) round-trips in the two `win-ipc` telemetry
-tests.
+**Worker unit tests:** widened `Telemetry` (bypass + dspChain) round-trips in the two `win-ipc` telemetry tests.
 
-**Regression (must stay green):** all existing tests (100) and the DFN3 offline golden — the only worker change is
-three telemetry fields, which do not touch DSP output.
+**Regression (must stay green):** all existing tests (100 + Phase 2c's) and the DFN3 offline golden — the only
+Phase 3 worker change is two telemetry fields, which do not touch DSP output.
 
-**Manual / integration (real hardware):** exercised against a `settings.toml` with `warm_standby = true` and
-`dsp_chain = true` unless noted.
+**Manual / integration (real hardware):** exercised against a `settings.toml` with `dsp_chain = true` unless noted.
 - UI launches → worker spawns (no console window) → audio flows to CABLE Input.
-- Engine switch (RNNoise ↔ DeepFilterNet3) via the window **and** the tray is instant and clean; status reflects it.
+- Engine switch (RNNoise ↔ DeepFilterNet3) via the window **and** the tray: **instant** under `warm_standby = true`,
+  **gap-free on-demand** under `warm_standby = false` (Phase 2c) — clean either way; status reflects it.
 - Bypass toggles cleanly from the window and the tray.
-- **Lean config:** with `warm_standby = false`, the engine-switch control is disabled with its reason and only the
-  chosen engine runs; with `dsp_chain = false`, the bypass control is disabled. (Capability-gating, §3/§6.)
+- **No-chain config:** with `dsp_chain = false`, the bypass control is disabled with its reason; the engine control
+  still works. (Bypass gating, §3/§6.)
 - Minimize/close hides to the tray with audio still flowing; tray left-click restores the window.
 - **Isolation:** killing the UI in Task Manager leaves audio flowing; relaunching re-attaches (no second worker)
   and shows the true engine and bypass state.
@@ -223,17 +222,16 @@ three telemetry fields, which do not touch DSP output.
 
 - New `src/voicecleaner/` target (5 source units above) wired into `CMakeLists.txt`.
 - New `tests/voicecleaner/` gtest target wired into `CMakeLists.txt`.
-- `Telemetry` widened with `bypass` + `warmStandby` + `dspChain`; worker relay writes them; updated `win-ipc`
-  telemetry tests.
-- No regression in the existing 100 tests or the DFN3 golden.
+- `Telemetry` widened with `bypass` + `dspChain`; worker relay writes them; updated `win-ipc` telemetry tests.
+- No regression in the existing tests (100 + Phase 2c's) or the DFN3 golden.
 
 ## 14. Forward notes for Phase 4 (not built here)
 
-- **Live warm-standby toggle.** Add the warm-standby checkbox and make it live: wire the currently-deferred
-  `SetWarmStandby` pipe command to a pipeline rebuild (reusing the hardened `reselect*` stop→rebuild→start path).
-  Decide there: the default (**lean/off** vs on) and, when lean, whether the engine control does a **rebuild-to-
-  switch** or stays **locked until restart**. Phase 3 deliberately leaves warm standby a `settings.toml` choice with
-  the control capability-gated, so no throwaway machinery is built now.
+- **Live warm-standby toggle.** Add the warm-standby checkbox and make it live. Phase 2c already built the
+  mechanism — warm/lean is a retirement+preload policy on the dynamic engine container — so Phase 4 wires the
+  currently-deferred `SetWarmStandby` pipe command to flip that policy (and persists it per-mic). No engine-switch
+  machinery remains to build; this is the checkbox + persistence + the policy flip. Decide the default (lean vs warm)
+  there.
 - **Slider seeding on attach.** When Phase 4 adds the tuning sliders (aggression/HPF/gain/limiter), the attach path
   must **not** keep seeding those fields from `Params::defaults()` — that would stomp a running worker's live tuning
   on every UI relaunch. Carry those values in telemetry (or read `settings.toml`, its owner-of-record) and seed
