@@ -165,3 +165,33 @@ TEST(DynamicEngine, ReswitchMidFadeKeepsOutgoingResident) {
   EXPECT_EQ(pr[0].live(), 1);      // idx0 still the resident engine
   EXPECT_EQ(pr[1].live(), 0);      // idx1 retired + freed
 }
+
+TEST(DynamicEngine, LoaderFailureAbortsSwitchCleanly) {
+  EngineProbe pr[2]; pr[0] = {1.0f, 0}; pr[1] = {2.0f, 0};
+  DynamicEngine::Config c; c.mode = DynamicEngine::Mode::Lean; c.initialActive = 0;
+  c.fadeFrames = 4; c.delaySamples[0] = 0; c.delaySamples[1] = 0;
+  // Loader throws for idx1 (simulates model-load failure).
+  DynamicEngine::Loader loader = [&](int idx) -> std::unique_ptr<INoiseFilter> {
+    if (idx == 1) throw std::runtime_error("boom");
+    return std::make_unique<ProbeEngine>(&pr[idx]);
+  };
+  DynamicEngine eng(loader, c);
+  std::vector<float> in(FRAME_SAMPLES, 1.0f), out(FRAME_SAMPLES);
+
+  EXPECT_THROW(eng.requestActive(1), std::runtime_error);
+  EXPECT_EQ(eng.activeIndex(), 0);          // switch abandoned; still on idx0
+  EXPECT_FALSE(eng.resident(1));            // no half-published slot
+  eng.ProcessFrame(in.data(), out.data());  // still runs idx0, no crash
+  for (size_t i = 0; i < FRAME_SAMPLES; ++i) EXPECT_NEAR(out[i], 1.0f, 1e-4f);
+}
+
+TEST(DynamicEngine, SetAggressionIsNullSafeAndAppliedOnInstall) {
+  EngineProbe pr[2]; pr[0] = {1.0f, 0}; pr[1] = {1.0f, 0};
+  DynamicEngine::Config c; c.mode = DynamicEngine::Mode::Lean; c.initialActive = 0;
+  c.fadeFrames = 2; c.delaySamples[0] = 0; c.delaySamples[1] = 0;
+  DynamicEngine eng(probeLoader(pr), c);
+  eng.SetAggression(0.7f);                  // idx1 not resident -> must not crash
+  EXPECT_FLOAT_EQ(pr[0].lastAggression, 0.7f);
+  eng.requestActive(1);
+  EXPECT_FLOAT_EQ(pr[1].lastAggression, 0.7f);   // freshly installed leaf gets the stored value
+}
