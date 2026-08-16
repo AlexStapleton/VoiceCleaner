@@ -46,3 +46,10 @@ TEST(Config, ClampsNegativeRingFromCli) {
   EXPECT_GE(c.ringFrames, 3u);
   EXPECT_LE(c.ringFrames, 1048576u);
 }
+TEST(Config, ApplyCliHandlesValuelessFlagBeforeDevicePairs) {
+  const char* argv[] = {"exe", "--dev-keys", "--capture", "CAP", "--render", "REN"};
+  vc::Config c;
+  c.apply_cli(6, const_cast<char**>(argv));
+  EXPECT_EQ(c.captureDeviceId, "CAP");
+  EXPECT_EQ(c.renderDeviceId, "REN");
+}

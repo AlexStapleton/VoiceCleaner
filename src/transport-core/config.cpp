@@ -27,14 +27,16 @@ Config Config::load(const std::string& path) {
   return c;
 }
 void Config::apply_cli(int argc, char** argv) {
-  for (int i = 1; i + 1 < argc; i += 2) {
-    if (!std::strcmp(argv[i], "--capture")) captureDeviceId = argv[i+1];
-    else if (!std::strcmp(argv[i], "--render")) renderDeviceId = argv[i+1];
-    else if (!std::strcmp(argv[i], "--csv")) csvPath = argv[i+1];
-    else if (!std::strcmp(argv[i], "--ring")) {
-      long long v = std::atoll(argv[i+1]);
+  for (int i = 1; i < argc; ++i) {
+    if (!std::strcmp(argv[i], "--capture") && i + 1 < argc) captureDeviceId = argv[++i];
+    else if (!std::strcmp(argv[i], "--render") && i + 1 < argc) renderDeviceId = argv[++i];
+    else if (!std::strcmp(argv[i], "--csv") && i + 1 < argc) csvPath = argv[++i];
+    else if (!std::strcmp(argv[i], "--ring") && i + 1 < argc) {
+      long long v = std::atoll(argv[++i]);
       ringFrames = v < 0 ? 0 : (size_t)v;   // 0/low -> validate() floors; huge -> validate() caps
     }
+    // Any other token (valueless flags like --dev-keys/--list-devices, or flags handled in main
+    // such as --config/--seconds/--record and their values) is skipped without desyncing.
   }
   validate();
 }
