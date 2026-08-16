@@ -148,7 +148,13 @@ int main(int argc, char** argv) {
         case vc::ipc::CmdType::Shutdown:
           g_stop.store(true);
           break;
-        default: break;   // Select*Device handled in Task 7
+        case vc::ipc::CmdType::SelectCaptureDevice:
+          bridge.reselectCapture(c.deviceId, c.driftSeedPpm);
+          break;
+        case vc::ipc::CmdType::SelectRenderDevice:
+          bridge.reselectRender(c.deviceId);
+          break;
+        default: break;
       }
     });
 

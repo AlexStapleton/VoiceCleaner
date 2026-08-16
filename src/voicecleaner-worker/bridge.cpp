@@ -210,6 +210,20 @@ void Bridge::stop() {
   if (lockedB_) { rt_unlock(ringB_.data(), ringB_.byte_size()); lockedB_ = false; }
 }
 
+bool Bridge::reselectCapture(const std::string& deviceId, double driftSeedPpm) {
+  stop();
+  cfg_.captureDeviceId = deviceId;
+  bool ok = start();
+  if (ok && cfg_.driftCompensation) controller_.seedPpm(driftSeedPpm);
+  return ok;
+}
+
+bool Bridge::reselectRender(const std::string& deviceId) {
+  stop();
+  cfg_.renderDeviceId = deviceId;
+  return start();
+}
+
 Bridge::~Bridge() { stop(); }
 
 }

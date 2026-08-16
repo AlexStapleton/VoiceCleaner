@@ -30,6 +30,10 @@ public:
   bool start();   // resolves devices, locks+primes rings, starts render/relay/capture/logger
   void stop();
   ~Bridge();
+  // Live device re-selection (non-RT): stop() -> swap device id -> start(). controller_ is a
+  // member (not rebuilt by start()/stop()), so seeding after start() warm-starts the resumed run.
+  bool reselectCapture(const std::string& deviceId, double driftSeedPpm);
+  bool reselectRender(const std::string& deviceId);
   bool device_lost() const noexcept { return deviceLost_.load(std::memory_order_acquire); }
   // Non-RT switch trigger (warm-standby only). idx 0 = rnnoise, 1 = dfn3. No-op otherwise.
   void request_engine(int idx) noexcept { if (switch_) switch_->requestActive(idx); }
