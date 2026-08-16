@@ -83,3 +83,28 @@ TEST(DynamicEngine, LeanSteadyStateRunsOnlyActive) {
   for (size_t i = 0; i < FRAME_SAMPLES; ++i) EXPECT_NEAR(out[i], 2.0f, 1e-4f);  // engine 0, delay-aligned
   EXPECT_EQ(pr[1].processCount, 0);         // idx1 never constructed, never run
 }
+
+TEST(DynamicEngine, LeanSwitchLoadsCrossfadesRetires) {
+  EngineProbe pr[2]; pr[0] = {1.0f, 0}; pr[1] = {0.0f, 0};   // from passes input, to outputs 0
+  DynamicEngine::Config c; c.mode = DynamicEngine::Mode::Lean; c.initialActive = 0;
+  c.fadeFrames = 4; c.delaySamples[0] = 0; c.delaySamples[1] = 0;
+  DynamicEngine eng(probeLoader(pr), c);
+  std::vector<float> in(FRAME_SAMPLES, 1.0f), out(FRAME_SAMPLES);
+
+  eng.requestActive(1);                     // loads idx1 on demand (off-RT here: same thread, serialized)
+  EXPECT_TRUE(eng.resident(1));
+  EXPECT_EQ(pr[1].lastAggression, 0.0f);    // stored aggression (default 0) applied on install
+
+  const float expect[4] = {1.0f, 0.86603f, 0.5f, 0.0f};
+  for (int f = 0; f < 4; ++f) {
+    eng.ProcessFrame(in.data(), out.data());
+    for (size_t i = 0; i < FRAME_SAMPLES; ++i) EXPECT_NEAR(out[i], expect[f], 1e-4f) << "fade frame " << f;
+  }
+  EXPECT_EQ(eng.activeIndex(), 1);
+  EXPECT_FALSE(eng.resident(0));            // idx0 retired out of the live slot at fade end
+  EXPECT_EQ(pr[0].live(), 1);              // ...but not yet freed — sitting in the reclaim queue
+
+  eng.reclaim();                            // non-RT drain
+  EXPECT_EQ(pr[0].live(), 0);              // now freed
+  EXPECT_EQ(pr[0].dtorCount, 1);           // exactly once — no double free
+}
