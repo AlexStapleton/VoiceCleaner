@@ -3,6 +3,8 @@
 #include <condition_variable>
 #include <vector>
 #include <chrono>
+#include <windows.h>
+#include <atomic>
 #include "pipe.h"
 using namespace vc::ipc;
 
@@ -30,4 +32,22 @@ TEST(PipeServer, ReceivesEncodedCommandFromClient) {
   EXPECT_EQ(got[0].deviceId, "{dev-id}");
   EXPECT_DOUBLE_EQ(got[0].driftSeedPpm, -26.0);
   srv.stop();
+}
+
+TEST(PipeServer, StopDoesNotHangWithIdleConnectedClient) {
+  const std::wstring name = L"\\\\.\\pipe\\voicecleaner-test-2";
+  PipeServer srv;
+  ASSERT_TRUE(srv.start(name, [](const Command&){}));
+  HANDLE h = INVALID_HANDLE_VALUE;
+  for (int i = 0; i < 50 && h == INVALID_HANDLE_VALUE; ++i) {
+    h = CreateFileW(name.c_str(), GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr);
+    if (h == INVALID_HANDLE_VALUE) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  ASSERT_NE(h, INVALID_HANDLE_VALUE);          // client connected, then stays idle (no writes)
+  std::atomic<bool> stopped{false};
+  std::thread t([&]{ srv.stop(); stopped.store(true); });
+  for (int i = 0; i < 300 && !stopped.load(); ++i) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  EXPECT_TRUE(stopped.load());                  // stop() returned promptly (no deadlock)
+  CloseHandle(h);
+  t.join();
 }
