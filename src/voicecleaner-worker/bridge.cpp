@@ -1,6 +1,7 @@
 #include "bridge.h"
 #include <windows.h>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <string>
 #include "channel.h"
@@ -64,6 +65,7 @@ bool Bridge::start() {
   running_.store(true, std::memory_order_release);
   deviceLost_.store(false, std::memory_order_release);   // reset any prior fatal state
   logger_.start();
+  telemetryOn_ = telemetry_.create(L"Local\\voicecleaner-telemetry");
 
   auto errCb = [this](const char* w){
     std::fprintf(stderr, "audio error: %s\n", w);
@@ -113,12 +115,45 @@ void Bridge::relayLoop() {
     WaitForSingleObject(static_cast<HANDLE>(frameReady_), 200);
     if (!running_.load(std::memory_order_acquire)) break;
     while (ringA_.try_pop(f)) {
+      const vc::ipc::Params sp = params_.snapshot();
+      if (chain_) {
+        chain_->setHpfCutoffHz(sp.hpfCutoffHz);
+        chain_->setAgcTargetDb(sp.agcTargetDbfs);
+        chain_->setLimiterCeilingDb(sp.limiterCeilingDbfs);
+        chain_->setBypass(sp.bypass != 0);
+      }
       const float* src = f.data();
       const auto t0 = std::chrono::steady_clock::now();   // time ONLY engine+chain compute (Gate C)
       if (chain_)       { chain_->process_frame(f.data(), proc_.data()); src = proc_.data(); }
       else if (engine_) { engine_->ProcessFrame(f.data(), proc_.data()); src = proc_.data(); }
       const auto t1 = std::chrono::steady_clock::now();
       frameStats_.record(std::chrono::duration<double, std::milli>(t1 - t0).count());
+      if (telemetryOn_) {
+        float rms = 0.0f, peak = 0.0f;
+        for (size_t i = 0; i < FRAME_SAMPLES; ++i) {
+          const float a = src[i] < 0 ? -src[i] : src[i];
+          rms += src[i] * src[i];
+          if (a > peak) peak = a;
+        }
+        rms = std::sqrt(rms / (float)FRAME_SAMPLES);
+        if (++hopsSincePublish_ >= 100) {   // ~1 s at 10 ms/hop
+          hopsSincePublish_ = 0;
+          vc::ipc::Telemetry t{};
+          t.inputRms = rms; t.inputPeak = peak;
+          t.vadActive = (chain_ && chain_->vadActive()) ? 1u : 0u;
+          t.frameP50Ms = (float)frameStats_.percentileMs(50.0);
+          t.frameP99Ms = (float)frameStats_.percentileMs(99.0);
+          t.frameMaxMs = (float)frameStats_.maxMs();
+          t.ringBOcc = (uint32_t)ringB_.size();
+          t.dropouts = (uint32_t)dropouts_.overruns();
+          t.activeEngine = switch_ ? (uint32_t)switch_->activeIndex()
+                                   : (cfg_.engine == "dfn3" ? 1u : 0u);
+          t.driftRatioPpm = ratioPpm_.load(std::memory_order_relaxed);
+          t.workerState = (uint32_t)vc::ipc::WorkerState::Running;
+          t.seq = ++telemetrySeq_;
+          telemetry_.write(t);
+        }
+      }
       if (cfg_.driftCompensation) {
         const double ratio = controller_.update((double)ringB_.size());
         resampler_.set_ratio(ratio);

@@ -1,5 +1,6 @@
 #pragma once
 #include <atomic>
+#include <cstdint>
 #include <memory>
 #include <thread>
 #include <vector>
@@ -20,6 +21,8 @@
 #include "dfn3_stream_adapter.h"
 #include "switchable_engine.h"
 #include "dsp_chain.h"
+#include "param_store.h"
+#include "telemetry_shm.h"
 namespace vc {
 class Bridge {
 public:
@@ -30,6 +33,7 @@ public:
   bool device_lost() const noexcept { return deviceLost_.load(std::memory_order_acquire); }
   // Non-RT switch trigger (warm-standby only). idx 0 = rnnoise, 1 = dfn3. No-op otherwise.
   void request_engine(int idx) noexcept { if (switch_) switch_->requestActive(idx); }
+  vc::ipc::ParamStore& params() noexcept { return params_; }
 private:
   void   relayLoop();
   void   onCapture(const float* interleaved, size_t frames, int channels);
@@ -63,5 +67,10 @@ private:
   Logger             logger_;
   bool               lockedA_ = false;
   bool               lockedB_ = false;
+  vc::ipc::ParamStore      params_;
+  vc::ipc::TelemetryWriter telemetry_;
+  bool                     telemetryOn_ = false;
+  uint32_t                 telemetrySeq_ = 0;
+  int                      hopsSincePublish_ = 0;
 };
 }
