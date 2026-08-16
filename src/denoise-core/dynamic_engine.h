@@ -41,7 +41,7 @@ public:
 
   // Non-RT control (serialize externally):
   void requestActive(int idx);                          // installs idx on demand if absent, then requests the fade
-  int  activeIndex() const noexcept { return cur_; }
+  int  activeIndex() const noexcept { return cur_.load(std::memory_order_relaxed); }
   bool resident(int idx) const noexcept { return eng_[clamp01(idx)].load(std::memory_order_acquire) != nullptr; }
 
   // Non-RT reclaim (serialize externally; never on the RT thread). Drains retired leaves; for each,
@@ -65,7 +65,8 @@ private:
   std::atomic<INoiseFilter*> eng_[2]{nullptr, nullptr};  // owning raw pointers; nullptr = not resident
   std::atomic<int>   want_{0};
   std::atomic<float> lastAggression_{0.0f};
-  int cur_ = 0, from_ = 0, fadeLeft_ = 0;                // RT-owned
+  std::atomic<int> cur_{0};       // published so activeIndex()/LastVadProbability are safe from any thread
+  int from_ = 0, fadeLeft_ = 0;   // RT-owned (only ProcessFrame touches these)
   SpscRing<Retired>  retiredQ_{4};                       // RT producer, reclaim consumer
 };
 }  // namespace vc

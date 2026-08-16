@@ -11,11 +11,18 @@ DynamicEngine::DynamicEngine(Loader loader, const Config& cfg)
     dline_[i].assign(static_cast<size_t>(alignDelay_[i]) + 1, 0.0f);
   }
   const int init = clamp01(cfg.initialActive);
-  cur_ = from_ = init;
+  cur_.store(init, std::memory_order_relaxed); from_ = init;
   want_.store(init, std::memory_order_relaxed);
-  // Build the initial resident leaf(s). Warm: both; Lean: only the active. (May throw -> propagate.)
-  if (mode_ == Mode::Warm) { installLeaf(0); installLeaf(1); }
-  else                     { installLeaf(init); }
+  // Build the initial resident leaf(s). Warm: both; Lean: only the active. If any install throws
+  // (e.g. model load failure), free any already-published slot before propagating — the destructor
+  // does NOT run for a ctor that throws.
+  try {
+    if (mode_ == Mode::Warm) { installLeaf(0); installLeaf(1); }
+    else                     { installLeaf(init); }
+  } catch (...) {
+    for (int i = 0; i < 2; ++i) delete eng_[i].exchange(nullptr, std::memory_order_acq_rel);
+    throw;
+  }
 }
 
 DynamicEngine::~DynamicEngine() {
@@ -33,7 +40,7 @@ float DynamicEngine::pushDelay(int slot, float x) noexcept {
 }
 
 float DynamicEngine::LastVadProbability() const noexcept {
-  INoiseFilter* e = eng_[cur_].load(std::memory_order_acquire);
+  INoiseFilter* e = eng_[cur_.load(std::memory_order_relaxed)].load(std::memory_order_acquire);
   return e ? e->LastVadProbability() : 0.0f;
 }
 
@@ -55,7 +62,8 @@ void DynamicEngine::installLeaf(int idx) {
 
 void DynamicEngine::ProcessFrame(const float* in, float* out) noexcept {
   const int want = want_.load(std::memory_order_acquire);
-  if (want != cur_ && fadeLeft_ == 0) { from_ = cur_; cur_ = want; fadeLeft_ = fadeFrames_; }
+  int cur = cur_.load(std::memory_order_relaxed);
+  if (want != cur && fadeLeft_ == 0) { from_ = cur; cur = want; cur_.store(cur, std::memory_order_relaxed); fadeLeft_ = fadeFrames_; }
 
   INoiseFilter* e0 = eng_[0].load(std::memory_order_acquire);
   INoiseFilter* e1 = eng_[1].load(std::memory_order_acquire);
@@ -69,7 +77,7 @@ void DynamicEngine::ProcessFrame(const float* in, float* out) noexcept {
     for (size_t i = 0; i < FRAME_SAMPLES; ++i) {
       const float d0 = pushDelay(0, o0[i]);
       const float d1 = pushDelay(1, o1[i]);
-      const float target = (cur_ == 0) ? d0 : d1;
+      const float target = (cur == 0) ? d0 : d1;
       if (fadeLeft_ > 0) {
         const int frameIndex = fadeFrames_ - fadeLeft_;
         const float p = (fadeFrames_ <= 1) ? 1.0f
@@ -83,10 +91,10 @@ void DynamicEngine::ProcessFrame(const float* in, float* out) noexcept {
     }
   } else {
     // Lean, not fading: run ONLY the active leaf; keep its delay line advancing.
-    INoiseFilter* ec = (cur_ == 0) ? e0 : e1;
+    INoiseFilter* ec = (cur == 0) ? e0 : e1;
     float tmp[FRAME_SAMPLES];
     if (ec) ec->ProcessFrame(in, tmp); else std::fill(tmp, tmp + FRAME_SAMPLES, 0.0f);
-    for (size_t i = 0; i < FRAME_SAMPLES; ++i) out[i] = pushDelay(cur_, tmp[i]);
+    for (size_t i = 0; i < FRAME_SAMPLES; ++i) out[i] = pushDelay(cur, tmp[i]);
   }
 
   if (fadeLeft_ > 0 && --fadeLeft_ == 0 && mode_ == Mode::Lean) {
