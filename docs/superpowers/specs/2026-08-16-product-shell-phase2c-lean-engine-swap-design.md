@@ -35,7 +35,7 @@ checkbox (Phase 4), latency profiles, and switching to/from passthrough (`engine
 | Reclaim trigger | Non-RT, **independent of command arrival** — a small reclaim step the bridge runs periodically / when signalled, never on the RT thread and never only-on-command. |
 | Switch smoothness | **Gap-free, click-free** — reuse the equal-power cos/sin crossfade (`fadeFrames = 15`, ~150 ms) and delay-alignment. The load happens off the RT thread before the fade begins. |
 | Modes | **warm** = both preloaded, **run both every frame**, retirement **off**. **lean** = active-only when not fading, on-demand load, eager retire. A single mode flag; warm behavior stays byte-identical to today (§7 golden). |
-| Output delay | **Pinned constant** = `max(RNNoise, DFN3)` algorithmic delay for the whole session (even when lean), so a switch never shifts output timing (the drift controller/downstream never see a step). The per-engine delays are **known constants** — RNNoise 0, DFN3 480 (`AlgorithmicDelaySamples()` in their headers) — so no runtime probe is needed; the bridge passes them into the container's `Config`. |
+| Output delay | **Pinned constant** = `max(RNNoise, DFN3)` algorithmic delay for the whole session (even when lean), so a switch never shifts output timing (the drift controller/downstream never see a step). The per-engine delays are **known constants for the shipped model** — RNNoise 0, DFN3 **1440** (standard `models/dfn3`: `Dfn3Streaming::latencySamples()` = `kHop·(1+latencyFrames)` = 480·3 ≈ 30 ms). The bridge passes them into the container's `Config` and **verifies a loaded DFN3 leaf actually reports the pinned value** (warns loudly on mismatch), so a future model swap can't silently misalign the crossfade. (Note: pinning to 1440 adds ~30 ms to RNNoise in lean mode for switch-invariant timing — the accepted trade in §9.) |
 | Index convention | **0 = RNNoise, 1 = DFN3** everywhere (matches `Params.engine`, `telemetry.activeEngine`, today's leafA/leafB). |
 | Regression guard | The warm-standby crossfade output must not change. Capture a golden output vector from today's `SwitchableEngine` **before** refactoring and assert the generalized container reproduces it bit-for-bit. |
 | Trigger for headless test | Reuse `--dev-keys` (keys `1`/`2` → `request_engine`), which now drives the container in lean mode too. |
@@ -112,7 +112,7 @@ most two leaves are resident (transient, during a switch).
 ## 5. Bridge integration (`voicecleaner-worker`)
 
 - **`Bridge::start`** builds the container for any real-engine config (`rnnoise`/`dfn3`), passing
-  `Config.delaySamples = {0, 480}` (RNNoise, DFN3 — known constants, no probe); `warm_standby = true` → mode warm
+  `Config.delaySamples = {0, 1440}` (RNNoise, DFN3 standard-model constants, verified at load); `warm_standby = true` → mode warm
   (loader builds both); `false` → mode lean (loader builds only the configured engine). This replaces the current
   `switch_`-only-under-warm-standby branch and the single-engine branches for rnnoise/dfn3. `engine = none` stays a
   static `PassthroughFilter` with no container (no switching).

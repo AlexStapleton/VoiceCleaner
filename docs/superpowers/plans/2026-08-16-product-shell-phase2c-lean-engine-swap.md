@@ -31,7 +31,7 @@ already configured. Every `cmake`/`ctest` command below maps to:
 | `tests/denoise-core/test_dynamic_engine.cpp` (create) | Full state-machine coverage with a lifetime-tracking fake engine, single-threaded deterministic call sequences. |
 | `tests/denoise-core/CMakeLists.txt` (modify) | Add the new test file. |
 | `src/voicecleaner-worker/bridge.h` (modify) | Replace `leafA_/leafB_/switch_` with `engine_` + `DynamicEngine* dyn_`; add command mutex + retired-DFN3 failedHops counter; `request_engine` non-noexcept; `reclaimRetiredEngines()`. |
-| `src/voicecleaner-worker/bridge.cpp` (modify) | Build `DynamicEngine` in `start()` (loader lambda, `{0,480}` delays); route `request_engine`/`reclaim`; `dfn3Adapter_` dangle fix; telemetry via `dyn_`; final drain in `stop()`. |
+| `src/voicecleaner-worker/bridge.cpp` (modify) | Build `DynamicEngine` in `start()` (loader lambda, `{0,1440}` delays, verified at load); route `request_engine`/`reclaim`; `dfn3Adapter_` dangle fix; telemetry via `dyn_`; final drain in `stop()`. |
 | `src/voicecleaner-worker/main.cpp` (modify) | Call `bridge.reclaimRetiredEngines()` on the existing ~100 ms loop. |
 | `src/denoise-core/switchable_engine.{h,cpp}` (delete, final task) | Superseded by `DynamicEngine`. |
 | `tests/denoise-core/test_switchable_engine.cpp` (delete, final task) | Behavior ported into `test_dynamic_engine.cpp`. |
@@ -706,11 +706,16 @@ Replace the engine-construction block at `bridge.cpp:42-62` — the comment line
 ```cpp
   // Engine: RNNoise (idx 0) / DFN3 (idx 1) live behind a DynamicEngine container that supports
   // warm standby (both resident) and lean on-demand switching. Passthrough ("none") stays static.
-  // Per-engine algorithmic delays are known constants: RNNoise 0 (rnnoise_filter.h), DFN3 480
-  // (dfn3_stream_adapter.h) — pinned so a switch never shifts output timing.
+  // Per-engine algorithmic delays are known constants for the shipped model: RNNoise 0, DFN3 1440
+  // (standard models/dfn3: Dfn3Streaming::latencySamples() = 480*(1+2)) — pinned so a switch never
+  // shifts output timing. The loader verifies a loaded DFN3 actually reports the pinned value.
+  constexpr uint32_t kDfn3DelaySamples = 1440;
   auto loader = [this](int idx) -> std::unique_ptr<INoiseFilter> {
     if (idx == 0) return std::make_unique<RnnoiseFilter>();
     auto a = std::make_unique<Dfn3StreamAdapter>("models/dfn3");   // throws on model load failure
+    if (a->AlgorithmicDelaySamples() != kDfn3DelaySamples)
+      std::fprintf(stderr, "warning: DFN3 delay %u != pinned %u — crossfade timing will be off; update delaySamples\n",
+                   a->AlgorithmicDelaySamples(), kDfn3DelaySamples);
     dfn3Adapter_ = a.get();
     return a;
   };
@@ -719,7 +724,7 @@ Replace the engine-construction block at `bridge.cpp:42-62` — the comment line
     dc.mode = cfg_.warmStandby ? DynamicEngine::Mode::Warm : DynamicEngine::Mode::Lean;
     dc.initialActive = (cfg_.engine == "dfn3") ? 1 : 0;
     dc.fadeFrames = 15;
-    dc.delaySamples[0] = 0; dc.delaySamples[1] = 480;
+    dc.delaySamples[0] = 0; dc.delaySamples[1] = kDfn3DelaySamples;
     auto de = std::make_unique<DynamicEngine>(loader, dc);   // builds initial leaf(s); may throw
     dyn_ = de.get();
     engine_ = std::move(de);
@@ -939,7 +944,7 @@ git commit -m "refactor(denoise-core): remove SwitchableEngine (superseded by Dy
 - Spec §2 modes (warm/lean, retire policy, pinned delay, 0/1 index, fadeFrames=15) → Tasks 1-4, 8.
 - Spec §3 states (lean-at-rest active-only, switching runs both, warm runs both always) → Tasks 1-4.
 - Spec §4 protocol (atomic slots, publication barrier, SPSC retire, RT-local cancel guard, push-fail re-store) → Tasks 1, 4, 6.
-- Spec §5 bridge integration (loader, `{0,480}`, mutex, non-noexcept `request_engine`, reclaim on tick, `dfn3Adapter_` fix, telemetry, stop-order drain) → Tasks 8-10.
+- Spec §5 bridge integration (loader, `{0,1440}` verified at load, mutex, non-noexcept `request_engine`, reclaim on tick, `dfn3Adapter_` fix, telemetry, stop-order drain) → Tasks 8-10.
 - Spec §6 passthrough static → Task 8 (`else` branch).
 - Spec §7 tests (warm golden, lean steady, load/crossfade/retire, rapid re-switch, reclaim independence, loader failure, null-safe aggression, integration) → Tasks 2-7, 10.
 - Spec §8 deliverables + no regression → Tasks 1-11; final suite in Task 11.
