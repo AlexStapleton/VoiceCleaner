@@ -68,3 +68,18 @@ TEST(DynamicEngine, WarmEqualPowerGainLawOnSwitch) {
   EXPECT_EQ(pr[0].live(), 1);   // warm: nothing retired
   EXPECT_EQ(pr[1].live(), 1);
 }
+
+TEST(DynamicEngine, LeanSteadyStateRunsOnlyActive) {
+  EngineProbe pr[2]; pr[0] = {2.0f, 0}; pr[1] = {3.0f, 480};
+  DynamicEngine::Config c; c.mode = DynamicEngine::Mode::Lean; c.initialActive = 0;
+  c.fadeFrames = 15; c.delaySamples[0] = 0; c.delaySamples[1] = 480;
+  DynamicEngine eng(probeLoader(pr), c);
+  EXPECT_EQ(eng.AlgorithmicDelaySamples(), 480u);
+  EXPECT_TRUE(eng.resident(0));
+  EXPECT_FALSE(eng.resident(1));            // lean: only the active engine is loaded
+  EXPECT_EQ(pr[1].live(), 0);
+  std::vector<float> in(FRAME_SAMPLES, 1.0f), out(FRAME_SAMPLES);
+  for (int f = 0; f < 4; ++f) eng.ProcessFrame(in.data(), out.data());
+  for (size_t i = 0; i < FRAME_SAMPLES; ++i) EXPECT_NEAR(out[i], 2.0f, 1e-4f);  // engine 0, delay-aligned
+  EXPECT_EQ(pr[1].processCount, 0);         // idx1 never constructed, never run
+}
