@@ -10,6 +10,15 @@
 
 **Spec:** [`docs/superpowers/specs/2026-08-16-product-shell-phase2c-lean-engine-swap-design.md`](../specs/2026-08-16-product-shell-phase2c-lean-engine-swap-design.md)
 
+**Build environment (this machine):** CMake is **not on PATH** — use the Espressif-bundled toolchain, and the
+generator is **Visual Studio 17 2022** (multi-config → pass `--config Debug` / `-C Debug`). The `build/` dir is
+already configured. Every `cmake`/`ctest` command below maps to:
+
+```bash
+"C:/Espressif/tools/cmake/4.0.3/bin/cmake.exe" --build build --target <target> --config Debug
+"C:/Espressif/tools/cmake/4.0.3/bin/ctest.exe"  --test-dir build -C Debug -R <regex> --output-on-failure
+```
+
 ---
 
 ## File Structure
