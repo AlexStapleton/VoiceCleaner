@@ -127,3 +127,41 @@ TEST(DynamicEngine, ReclaimIsIndependentOfFurtherCommands) {
   EXPECT_EQ(freed, 1);
   EXPECT_EQ(pr[0].live(), 0);
 }
+
+TEST(DynamicEngine, RapidReswitchAfterRetireFreshLoadsNoDoubleFree) {
+  EngineProbe pr[2]; pr[0] = {1.0f, 0}; pr[1] = {2.0f, 0};
+  DynamicEngine::Config c; c.mode = DynamicEngine::Mode::Lean; c.initialActive = 0;
+  c.fadeFrames = 2; c.delaySamples[0] = 0; c.delaySamples[1] = 0;
+  DynamicEngine eng(probeLoader(pr), c);
+  std::vector<float> in(FRAME_SAMPLES, 1.0f), out(FRAME_SAMPLES);
+
+  eng.requestActive(1);
+  for (int f = 0; f < 2; ++f) eng.ProcessFrame(in.data(), out.data());   // idx0 retired to queue (not yet freed)
+  eng.requestActive(0);                                                  // switch back BEFORE reclaim
+  EXPECT_EQ(pr[0].ctorCount, 2);                                         // fresh idx0 built (queued one not reused)
+  for (int f = 0; f < 2; ++f) eng.ProcessFrame(in.data(), out.data());   // fade to fresh idx0; idx1 retired
+  EXPECT_EQ(eng.activeIndex(), 0);
+
+  eng.reclaim();
+  EXPECT_EQ(pr[0].dtorCount, 1);   // only the FIRST idx0 instance was freed
+  EXPECT_EQ(pr[0].live(), 1);      // the fresh idx0 is still resident
+  EXPECT_EQ(pr[1].live(), 0);      // idx1 retired and freed
+}
+
+TEST(DynamicEngine, ReswitchMidFadeKeepsOutgoingResident) {
+  EngineProbe pr[2]; pr[0] = {1.0f, 0}; pr[1] = {2.0f, 0};
+  DynamicEngine::Config c; c.mode = DynamicEngine::Mode::Lean; c.initialActive = 0;
+  c.fadeFrames = 6; c.delaySamples[0] = 0; c.delaySamples[1] = 0;
+  DynamicEngine eng(probeLoader(pr), c);
+  std::vector<float> in(FRAME_SAMPLES, 1.0f), out(FRAME_SAMPLES);
+
+  eng.requestActive(1);
+  for (int f = 0; f < 3; ++f) eng.ProcessFrame(in.data(), out.data());   // partway through the 0->1 fade
+  eng.requestActive(0);                                                  // switch back mid-fade
+  for (int f = 0; f < 20; ++f) eng.ProcessFrame(in.data(), out.data());  // finish, then fade 1->0
+  EXPECT_EQ(eng.activeIndex(), 0);
+  EXPECT_EQ(pr[0].ctorCount, 1);   // idx0 was NEVER retired/reloaded (RT-local cancel kept it resident)
+  eng.reclaim();
+  EXPECT_EQ(pr[0].live(), 1);      // idx0 still the resident engine
+  EXPECT_EQ(pr[1].live(), 0);      // idx1 retired + freed
+}
