@@ -15,6 +15,7 @@
 #include "wasapi_capture.h"
 #include "channel.h"
 #include "wav.h"
+#include "pipe.h"
 
 static std::atomic<bool> g_stop{false};
 static BOOL WINAPI ctrlHandler(DWORD) { g_stop.store(true); return TRUE; }
@@ -98,12 +99,13 @@ static void printList(const char* label, EDataFlow flow, vc::DeviceEnumerator& e
 }
 
 int main(int argc, char** argv) {
-  bool listDevices = false; std::string configPath; int seconds = 0; std::string recordPath;
+  bool listDevices = false; std::string configPath; int seconds = 0; std::string recordPath; bool devKeys = false;
   for (int i = 1; i < argc; ++i) {
     if (!std::strcmp(argv[i], "--list-devices")) listDevices = true;
     else if (!std::strcmp(argv[i], "--config") && i + 1 < argc) configPath = argv[++i];
     else if (!std::strcmp(argv[i], "--seconds") && i + 1 < argc) seconds = std::atoi(argv[++i]);
     else if (!std::strcmp(argv[i], "--record") && i + 1 < argc) recordPath = argv[++i];
+    else if (!std::strcmp(argv[i], "--dev-keys")) devKeys = true;
   }
 
   try {
@@ -131,12 +133,31 @@ int main(int argc, char** argv) {
     SetConsoleCtrlHandler(ctrlHandler, TRUE);
     if (!bridge.start()) return 1;
 
+    // §8.5 command channel: a named-pipe server dispatching worker-control commands (params,
+    // engine selection via SetParams.engine, shutdown). Must outlive the main loop; stopped
+    // explicitly below (its destructor also calls stop(), which is safe/idempotent).
+    vc::ipc::PipeServer pipe;
+    pipe.start(L"\\\\.\\pipe\\voicecleaner", [&bridge](const vc::ipc::Command& c){
+      switch (c.type) {
+        case vc::ipc::CmdType::SetParams:
+          bridge.params().publish(c.params);
+          bridge.request_engine((int)c.params.engine);   // no-op unless warm-standby
+          break;
+        case vc::ipc::CmdType::SetWarmStandby:
+          break;   // build-time toggle; handled on a future rebuild (Task 7)
+        case vc::ipc::CmdType::Shutdown:
+          g_stop.store(true);
+          break;
+        default: break;   // Select*Device handled in Task 7
+      }
+    });
+
     // Interim warm-standby switch trigger (NOT the §8.5 command channel): a non-RT stdin
     // reader that maps 1->engine 0 (RNNoise), 2->engine 1 (DFN3). Only spawned when
-    // warm_standby is set; normal single-engine runs never start this thread. Blocking on
-    // std::cin, so on shutdown we set g_stop and detach (join would block until a keypress).
+    // --dev-keys is passed; normal runs never start this thread. Blocking on std::cin, so on
+    // shutdown we set g_stop and detach (join would block until a keypress).
     std::thread switchThread;
-    if (cfg.warmStandby) {
+    if (devKeys) {
       switchThread = std::thread([&bridge]{
         std::string line;
         while (!g_stop.load() && std::getline(std::cin, line)) {
@@ -162,6 +183,7 @@ int main(int argc, char** argv) {
       }
     }
     std::printf("stopping...\n");
+    pipe.stop();
     bridge.stop();
     // The stdin reader blocks in std::getline; detach so shutdown never waits on a keypress.
     if (switchThread.joinable()) switchThread.detach();
