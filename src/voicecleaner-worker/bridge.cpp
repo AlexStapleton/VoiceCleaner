@@ -50,11 +50,16 @@ bool Bridge::start() {
 
     // Engine: RNNoise (idx 0) / DFN3 (idx 1) live behind a DynamicEngine container that supports
     // warm standby (both resident) and lean on-demand switching. Passthrough ("none") stays static.
-    // Per-engine algorithmic delays are known constants: RNNoise 0 (rnnoise_filter.h), DFN3 480
-    // (dfn3_stream_adapter.h) — pinned so a switch never shifts output timing.
+    // Per-engine algorithmic delays are known constants for the shipped model: RNNoise 0, DFN3 1440
+    // (standard models/dfn3: Dfn3Streaming::latencySamples() = kHop*(1+latencyFrames) = 480*3). Pinned
+    // so a switch never shifts output timing; the loader verifies a loaded DFN3 matches the pinned value.
+    constexpr uint32_t kDfn3DelaySamples = 1440;
     auto loader = [this](int idx) -> std::unique_ptr<INoiseFilter> {
       if (idx == 0) return std::make_unique<RnnoiseFilter>();
       auto a = std::make_unique<Dfn3StreamAdapter>("models/dfn3");   // throws on model load failure
+      if (a->AlgorithmicDelaySamples() != kDfn3DelaySamples)
+        std::fprintf(stderr, "warning: DFN3 delay %u != pinned %u — crossfade timing will be off; update delaySamples\n",
+                     a->AlgorithmicDelaySamples(), kDfn3DelaySamples);
       dfn3Adapter_ = a.get();
       return a;
     };
@@ -63,7 +68,7 @@ bool Bridge::start() {
       dc.mode = cfg_.warmStandby ? DynamicEngine::Mode::Warm : DynamicEngine::Mode::Lean;
       dc.initialActive = (cfg_.engine == "dfn3") ? 1 : 0;
       dc.fadeFrames = 15;
-      dc.delaySamples[0] = 0; dc.delaySamples[1] = 480;
+      dc.delaySamples[0] = 0; dc.delaySamples[1] = kDfn3DelaySamples;
       auto de = std::make_unique<DynamicEngine>(loader, dc);   // builds initial leaf(s); may throw
       dyn_ = de.get();
       engine_ = std::move(de);

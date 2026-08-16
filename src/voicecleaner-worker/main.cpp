@@ -141,7 +141,7 @@ int main(int argc, char** argv) {
       switch (c.type) {
         case vc::ipc::CmdType::SetParams:
           bridge.params().publish(c.params);
-          bridge.request_engine((int)c.params.engine);   // no-op unless warm-standby
+          bridge.request_engine((int)c.params.engine);   // lean: install-on-demand + crossfade; warm: instant crossfade; passthrough: no-op
           break;
         case vc::ipc::CmdType::SetWarmStandby:
           break;   // deferred: toggling warm-standby requires a pipeline rebuild; not yet wired

@@ -12,7 +12,7 @@ public:
   void     ProcessFrame(const float* in, float* out) noexcept override;
   float    LastVadProbability() const noexcept override;      // from lsnr
   void     SetAggression(float z) noexcept override;   // forwards to Dfn3Streaming (DFN3 mask shaping)
-  uint32_t AlgorithmicDelaySamples() const noexcept override; // = Dfn3Streaming::latencySamples() (480)
+  uint32_t AlgorithmicDelaySamples() const noexcept override; // = Dfn3Streaming::latencySamples() (480 for _ll, 1440 for standard)
   uint64_t failedHops() const noexcept;                       // silenced ORT-failure hops (observability)
 private:
   std::unique_ptr<Dfn3Streaming> eng_;
