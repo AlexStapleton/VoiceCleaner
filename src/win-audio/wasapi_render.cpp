@@ -99,13 +99,11 @@ void WasapiRender::stop() {
   if (event_) SetEvent(static_cast<HANDLE>(event_));
   if (thread_.joinable()) thread_.join();
   if (client_) client_->Stop();
-}
-
-WasapiRender::~WasapiRender() {
-  stop();
   if (render_) { render_->Release(); render_ = nullptr; }
   if (client_) { client_->Release(); client_ = nullptr; }
   if (event_)  { CloseHandle(static_cast<HANDLE>(event_)); event_ = nullptr; }
 }
+
+WasapiRender::~WasapiRender() { stop(); }
 
 }

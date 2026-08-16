@@ -95,13 +95,11 @@ void WasapiCapture::stop() {
   if (event_) SetEvent(static_cast<HANDLE>(event_));   // wake the wait
   if (thread_.joinable()) thread_.join();
   if (client_) client_->Stop();
-}
-
-WasapiCapture::~WasapiCapture() {
-  stop();
   if (capture_) { capture_->Release(); capture_ = nullptr; }
   if (client_)  { client_->Release();  client_  = nullptr; }
   if (event_)   { CloseHandle(static_cast<HANDLE>(event_)); event_ = nullptr; }
 }
+
+WasapiCapture::~WasapiCapture() { stop(); }
 
 }

@@ -31,7 +31,8 @@ public:
   void stop();
   ~Bridge();
   // Live device re-selection (non-RT): stop() -> swap device id -> start(). controller_ is a
-  // member (not rebuilt by start()/stop()), so seeding after start() warm-starts the resumed run.
+  // member (not rebuilt by start()/stop()); reselectCapture seeds it after stop() joins the old
+  // relay but before start() spawns a new one, so the warm-start is race-free.
   bool reselectCapture(const std::string& deviceId, double driftSeedPpm);
   bool reselectRender(const std::string& deviceId);
   bool device_lost() const noexcept { return deviceLost_.load(std::memory_order_acquire); }

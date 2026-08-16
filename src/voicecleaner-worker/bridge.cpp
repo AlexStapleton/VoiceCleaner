@@ -213,9 +213,8 @@ void Bridge::stop() {
 bool Bridge::reselectCapture(const std::string& deviceId, double driftSeedPpm) {
   stop();
   cfg_.captureDeviceId = deviceId;
-  bool ok = start();
-  if (ok && cfg_.driftCompensation) controller_.seedPpm(driftSeedPpm);
-  return ok;
+  if (cfg_.driftCompensation) controller_.seedPpm(driftSeedPpm);  // no relay running here -> race-free
+  return start();
 }
 
 bool Bridge::reselectRender(const std::string& deviceId) {
