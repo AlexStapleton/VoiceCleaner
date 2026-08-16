@@ -179,6 +179,7 @@ int main(int argc, char** argv) {
     auto t0 = std::chrono::steady_clock::now();
     while (!g_stop.load()) {
       std::this_thread::sleep_for(std::chrono::milliseconds(100));
+      bridge.reclaimRetiredEngines();   // free engines the RT relay retired after a lean switch
       if (bridge.device_lost()) {
         std::fprintf(stderr, "fatal: audio device lost/invalidated — stopping the run visibly. "
                              "(Automatic reconnect is Phase 1; re-run once the device is back.)\n");

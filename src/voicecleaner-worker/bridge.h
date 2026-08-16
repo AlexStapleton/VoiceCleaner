@@ -19,7 +19,8 @@
 #include "passthrough_filter.h"
 #include "rnnoise_filter.h"
 #include "dfn3_stream_adapter.h"
-#include "switchable_engine.h"
+#include "dynamic_engine.h"
+#include <mutex>
 #include "dsp_chain.h"
 #include "param_store.h"
 #include "telemetry_shm.h"
@@ -36,8 +37,11 @@ public:
   bool reselectCapture(const std::string& deviceId, double driftSeedPpm);
   bool reselectRender(const std::string& deviceId);
   bool device_lost() const noexcept { return deviceLost_.load(std::memory_order_acquire); }
-  // Non-RT switch trigger (warm-standby only). idx 0 = rnnoise, 1 = dfn3. No-op otherwise.
-  void request_engine(int idx) noexcept { if (switch_) switch_->requestActive(idx); }
+  // Non-RT engine switch (idx 0 = rnnoise, 1 = dfn3). Installs the target on demand when lean, then
+  // requests the crossfade. Serialized with reclaim by engMutex_. Catches loader failure internally.
+  void request_engine(int idx);
+  // Non-RT: free engines retired by the RT relay. Call from a non-RT loop (worker main tick).
+  void reclaimRetiredEngines();
   vc::ipc::ParamStore& params() noexcept { return params_; }
 private:
   void   relayLoop();
@@ -51,10 +55,11 @@ private:
   Resampler          resampler_;
   FrameAccumulator   reframe_;    // relay side: re-block resampler output into 480-sample frames
   std::vector<float> rsOut_;      // relay side: resampler output scratch
-  std::unique_ptr<INoiseFilter> leafA_, leafB_;  // warm-standby leaves (owned; borrowed by switch_)
-  std::unique_ptr<INoiseFilter> engine_;   // constructed in start() (non-RT)
-  SwitchableEngine*             switch_ = nullptr;  // non-owning; points into engine_ when warm-standby
-  Dfn3StreamAdapter*            dfn3Adapter_ = nullptr;  // non-owning; set whenever a DFN3 adapter is live (observability)
+  std::unique_ptr<INoiseFilter> engine_;   // constructed in start() (non-RT): DynamicEngine or PassthroughFilter
+  DynamicEngine*                dyn_ = nullptr;  // non-owning; == engine_.get() when engine is rnnoise/dfn3, else null
+  Dfn3StreamAdapter*            dfn3Adapter_ = nullptr;  // non-owning; the live DFN3 leaf, or null (observability)
+  std::mutex                    engMutex_;         // serializes non-RT container mutation: request_engine + reclaim
+  uint64_t                      dfn3FailedHopsRetired_ = 0;  // failedHops folded in before a DFN3 leaf is freed
   std::unique_ptr<DspChain>     chain_;     // optional DC->HPF->AGC->limiter wrap
   Frame                         proc_;      // processed-frame scratch (relay RT)
   std::atomic<double> ratioPpm_{0.0};

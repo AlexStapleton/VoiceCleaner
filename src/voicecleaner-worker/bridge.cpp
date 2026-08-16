@@ -39,26 +39,28 @@ bool Bridge::start() {
   Frame silent{}; silent.fill(0.0f);
   for (size_t i = 0; i < ringB_.capacity() / 2; ++i) ringB_.try_push(silent);  // prime half-full
 
-  // Engine + optional DSP chain: constructed here (non-RT) before any thread starts.
-  if (cfg_.warmStandby) {
-    // Both leaves run warm; SwitchableEngine crossfades between them on request_engine().
-    leafA_ = std::make_unique<RnnoiseFilter>();
-    leafB_ = std::make_unique<Dfn3StreamAdapter>("models/dfn3");
-    dfn3Adapter_ = static_cast<Dfn3StreamAdapter*>(leafB_.get());
-    // In warm-standby, `engine` selects which engine is active at startup: "dfn3" -> idx 1 (leafB),
-    // anything else -> idx 0 (RNNoise, leafA). Both stay warm; switch live with keys 1/2.
-    const int initialActive = (cfg_.engine == "dfn3") ? 1 : 0;
-    auto sw = std::make_unique<SwitchableEngine>(leafA_.get(), leafB_.get(), /*fadeFrames=*/15, initialActive);
-    switch_ = sw.get();
-    engine_ = std::move(sw);
+  // Engine: RNNoise (idx 0) / DFN3 (idx 1) live behind a DynamicEngine container that supports
+  // warm standby (both resident) and lean on-demand switching. Passthrough ("none") stays static.
+  // Per-engine algorithmic delays are known constants: RNNoise 0 (rnnoise_filter.h), DFN3 480
+  // (dfn3_stream_adapter.h) — pinned so a switch never shifts output timing.
+  auto loader = [this](int idx) -> std::unique_ptr<INoiseFilter> {
+    if (idx == 0) return std::make_unique<RnnoiseFilter>();
+    auto a = std::make_unique<Dfn3StreamAdapter>("models/dfn3");   // throws on model load failure
+    dfn3Adapter_ = a.get();
+    return a;
+  };
+  if (cfg_.engine == "rnnoise" || cfg_.engine == "dfn3") {
+    DynamicEngine::Config dc;
+    dc.mode = cfg_.warmStandby ? DynamicEngine::Mode::Warm : DynamicEngine::Mode::Lean;
+    dc.initialActive = (cfg_.engine == "dfn3") ? 1 : 0;
+    dc.fadeFrames = 15;
+    dc.delaySamples[0] = 0; dc.delaySamples[1] = 480;
+    auto de = std::make_unique<DynamicEngine>(loader, dc);   // builds initial leaf(s); may throw
+    dyn_ = de.get();
+    engine_ = std::move(de);
+  } else {
+    engine_ = std::make_unique<PassthroughFilter>();   // "none": static passthrough, no switching
   }
-  else if (cfg_.engine == "rnnoise") engine_ = std::make_unique<RnnoiseFilter>();
-  else if (cfg_.engine == "dfn3") {
-    auto adapter = std::make_unique<Dfn3StreamAdapter>("models/dfn3");
-    dfn3Adapter_ = adapter.get();
-    engine_ = std::move(adapter);
-  }
-  else                               engine_ = std::make_unique<PassthroughFilter>();
   if (cfg_.dspChain) chain_ = std::make_unique<DspChain>(engine_.get(), DspChain::Config{});
 
   frameReady_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
@@ -83,18 +85,31 @@ bool Bridge::start() {
   }
 
   capDev->Release(); renDev->Release();   // WASAPI classes Activated their own client; device no longer needed
-  if (cfg_.warmStandby) {
-    std::printf("bridge running: ring=%zu frames (primed %zu), warm_standby=on "
-                "(active=%s [idx %d]; keys 1=RNNoise 2=DFN3), dsp_chain=%s, csv=%s\n",
-                ringB_.capacity(), ringB_.capacity()/2,
-                switch_->activeIndex() == 0 ? "rnnoise" : "dfn3", switch_->activeIndex(),
-                cfg_.dspChain ? "on" : "off", cfg_.csvPath.c_str());
-  } else {
-    std::printf("bridge running: ring=%zu frames (primed %zu), engine=%s, dsp_chain=%s, csv=%s\n",
-                ringB_.capacity(), ringB_.capacity()/2,
-                cfg_.engine.c_str(), cfg_.dspChain ? "on" : "off", cfg_.csvPath.c_str());
-  }
+  std::printf("bridge running: ring=%zu frames (primed %zu), engine=%s, warm_standby=%s, dsp_chain=%s, csv=%s\n",
+              ringB_.capacity(), ringB_.capacity()/2, cfg_.engine.c_str(),
+              cfg_.warmStandby ? "on" : "off", cfg_.dspChain ? "on" : "off", cfg_.csvPath.c_str());
   return true;
+}
+
+void Bridge::request_engine(int idx) {
+  std::lock_guard<std::mutex> lk(engMutex_);
+  if (!dyn_) return;   // passthrough: no switching
+  try {
+    dyn_->requestActive(idx);
+  } catch (const std::exception& e) {
+    std::fprintf(stderr, "engine switch to %d failed (kept current engine): %s\n", idx, e.what());
+  }
+}
+
+void Bridge::reclaimRetiredEngines() {
+  std::lock_guard<std::mutex> lk(engMutex_);
+  if (!dyn_) return;
+  dyn_->reclaim([this](INoiseFilter* p, int idx) {
+    if (idx == 1) {   // a DFN3 leaf is about to be freed: preserve its failedHops, drop the dangling observer
+      dfn3FailedHopsRetired_ += static_cast<Dfn3StreamAdapter*>(p)->failedHops();
+      if (dfn3Adapter_ == p) dfn3Adapter_ = nullptr;
+    }
+  });
 }
 
 void Bridge::onCapture(const float* interleaved, size_t frames, int channels) {
@@ -149,8 +164,8 @@ void Bridge::relayLoop() {
           t.frameMaxMs = (float)frameStats_.maxMs();
           t.ringBOcc = (uint32_t)ringB_.size();
           t.dropouts = (uint32_t)dropouts_.overruns();
-          t.activeEngine = switch_ ? (uint32_t)switch_->activeIndex()
-                                   : (cfg_.engine == "dfn3" ? 1u : 0u);
+          t.activeEngine = dyn_ ? (uint32_t)dyn_->activeIndex()
+                                : (cfg_.engine == "dfn3" ? 1u : 0u);
           t.driftRatioPpm = ratioPpm_.load(std::memory_order_relaxed);
           t.workerState = (uint32_t)vc::ipc::WorkerState::Running;
           t.seq = ++telemetrySeq_;
@@ -199,11 +214,12 @@ void Bridge::stop() {
                   frameStats_.percentileMs(50.0), frameStats_.percentileMs(99.0), frameStats_.percentileMs(99.9),
                   frameStats_.fractionOverMs(10.0) * 100.0);
     }
-    if (dfn3Adapter_ && dfn3Adapter_->failedHops() > 0) {
-      std::printf("dfn3 engine failures (silenced hops): %llu\n",
-                  (unsigned long long)dfn3Adapter_->failedHops());
+    const uint64_t dfn3Failed = dfn3FailedHopsRetired_ + (dfn3Adapter_ ? dfn3Adapter_->failedHops() : 0);
+    if (dfn3Failed > 0) {
+      std::printf("dfn3 engine failures (silenced hops): %llu\n", (unsigned long long)dfn3Failed);
     }
   }
+  reclaimRetiredEngines();   // RT is joined; free any leaf the final fade retired
   render_.stop();
   logger_.stop();
   if (frameReady_) { CloseHandle(static_cast<HANDLE>(frameReady_)); frameReady_ = nullptr; }
