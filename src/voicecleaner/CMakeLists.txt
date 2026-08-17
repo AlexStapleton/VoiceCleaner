@@ -26,3 +26,14 @@ add_custom_command(TARGET voicecleaner POST_BUILD
 # The UI spawns voicecleaner-worker.exe from its own directory — make sure it is built first
 # and its ORT dependency is available alongside.
 add_dependencies(voicecleaner voicecleaner-worker)
+
+# Co-locate everything the spawned worker resolves relative to the UI's dir (CWD): the worker exe,
+# its ORT dll, and the DFN3 models (bridge.cpp resolves them via the relative path "models/dfn3").
+add_custom_command(TARGET voicecleaner POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    "$<TARGET_FILE:voicecleaner-worker>" "$<TARGET_FILE_DIR:voicecleaner>"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    "$<TARGET_PROPERTY:onnxruntime,IMPORTED_LOCATION>" "$<TARGET_FILE_DIR:voicecleaner>"
+  COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different
+    "${CMAKE_SOURCE_DIR}/models/dfn3" "$<TARGET_FILE_DIR:voicecleaner>/models/dfn3"
+  COMMENT "Co-locating worker + ORT dll + DFN3 models next to voicecleaner.exe")
