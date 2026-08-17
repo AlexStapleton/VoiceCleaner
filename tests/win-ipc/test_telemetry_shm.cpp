@@ -7,7 +7,7 @@ TEST(TelemetryShm, WriterToReaderRoundTrip) {
   TelemetryWriter w; ASSERT_TRUE(w.create(name));
   TelemetryReader r; ASSERT_TRUE(r.open(name));
   Telemetry t{}; t.inputRms = 0.25f; t.dropouts = 3; t.activeEngine = 1;
-  t.driftRatioPpm = -26.0; t.seq = 7;
+  t.driftRatioPpm = -26.0; t.seq = 7; t.bypass = 1; t.dspChain = 1;
   w.write(t);
   Telemetry got = r.read();
   EXPECT_FLOAT_EQ(got.inputRms, 0.25f);
@@ -15,6 +15,8 @@ TEST(TelemetryShm, WriterToReaderRoundTrip) {
   EXPECT_EQ(got.activeEngine, 1u);
   EXPECT_DOUBLE_EQ(got.driftRatioPpm, -26.0);
   EXPECT_EQ(got.seq, 7u);
+  EXPECT_EQ(got.bypass, 1u);
+  EXPECT_EQ(got.dspChain, 1u);
 }
 TEST(TelemetryShm, ReaderFailsWhenMappingAbsent) {
   TelemetryReader r; EXPECT_FALSE(r.open(L"Local\\voicecleaner-test-absent"));

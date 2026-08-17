@@ -22,5 +22,7 @@ struct Telemetry {
   uint64_t uptimeMs;       // not yet populated by the worker (deferred)
   uint32_t workerState;    // WorkerState
   uint32_t seq;            // increments each aggregate publish
+  uint32_t bypass;         // current bypass state (0/1); lets the UI reflect true bypass on attach
+  uint32_t dspChain;       // capability: worker has a DSP chain (0/1); UI disables bypass when 0
 };
 }  // namespace vc::ipc
