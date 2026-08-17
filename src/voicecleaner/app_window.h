@@ -34,6 +34,7 @@ class AppWindow {
   void tick();                 // WM_TIMER: poll supervisor -> UiState -> InvalidateRect
   void layout(D2D1_SIZE_F sz); // recompute control rects
   void sendCurrent(const vc::ipc::Params& p);
+  int  hitControl(int x, int y) const;   // 0=RNNoise 1=DFN3 2=Bypass 3=Relaunch, -1=none
 
   HINSTANCE hInst_;
   HWND hwnd_ = nullptr;
@@ -43,8 +44,12 @@ class AppWindow {
 
   ID2D1Factory* d2dFactory_ = nullptr;
   IDWriteFactory* dwFactory_ = nullptr;
-  IDWriteTextFormat* textFmt_ = nullptr;
+  IDWriteTextFormat* textFmt_ = nullptr;    // status line: left-aligned, wrapped
+  IDWriteTextFormat* centerFmt_ = nullptr;  // control labels: centered both axes
+  IDWriteTextFormat* capFmt_ = nullptr;     // section captions: small, centered
   ID2D1HwndRenderTarget* rt_ = nullptr;
+
+  int hot_ = -1;   // control under the cursor (see hitControl); drives hover highlight
 
   // control rects (client coords), recomputed in layout()
   D2D1_RECT_F rcEngineRnn_{}, rcEngineDfn_{}, rcBypass_{}, rcRelaunch_{};
