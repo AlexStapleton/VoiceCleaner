@@ -17,3 +17,19 @@ TEST(UiState, ActiveStatusLineFromReadyTelemetry) {
             "\xE2\x97\x8F Active \xC2\xB7 DeepFilterNet3 \xC2\xB7 \xE2\x86\x92 CABLE Input");
   EXPECT_EQ(ui.activeEngine(), 1u);
 }
+
+TEST(UiState, BypassedStatusLineAndDisplay) {
+  UiState ui; ui.setRenderLabel("CABLE Input");
+  ui.onTelemetry(tel(/*engine*/0, /*bypass*/1, /*dspChain*/1, /*seq*/1), /*ready*/true);
+  EXPECT_EQ(ui.statusKind(), StatusKind::Bypassed);
+  EXPECT_TRUE(ui.bypassed());
+  EXPECT_EQ(ui.statusLine(),
+            "\xE2\x97\x8B Bypassed \xC2\xB7 RNNoise \xC2\xB7 \xE2\x86\x92 CABLE Input");
+}
+
+TEST(UiState, PreReadyTelemetryDoesNotFlipToActive) {
+  UiState ui;
+  ui.onTelemetry(tel(1, 0, 1, 1), /*ready*/false);   // present but not yet ready
+  EXPECT_EQ(ui.statusKind(), StatusKind::Down);       // stays Down until ready
+  EXPECT_EQ(ui.activeEngine(), 1u);                   // display fields still track telemetry
+}
