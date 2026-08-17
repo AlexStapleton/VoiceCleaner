@@ -144,3 +144,28 @@ TEST(LivenessTracker, StaysReadyWhileSeqKeepsAdvancing) {
   EXPECT_EQ(lt.onSample(true, 7, 2000), S::Ready);
   EXPECT_EQ(lt.onSample(true, 8, 6000), S::Ready);   // advancing resets the stall clock
 }
+
+TEST(LivenessTracker, EverReadyFalseAfterLaunchFailure) {
+  LivenessTracker lt;
+  lt.onSample(true, 5, 0);
+  lt.onSample(true, 5, 5001);   // Down via readyTimeout, never became ready
+  EXPECT_EQ(lt.status(), S::Down);
+  EXPECT_FALSE(lt.everReady());
+}
+
+TEST(LivenessTracker, EverReadyTrueAfterPostReadyDeath) {
+  LivenessTracker lt;
+  lt.onSample(true, 5, 0);
+  lt.onSample(true, 6, 1000);   // Ready
+  lt.onSample(false, 0, 1100);  // Down via shm loss
+  EXPECT_EQ(lt.status(), S::Down);
+  EXPECT_TRUE(lt.everReady());
+}
+
+TEST(LivenessTracker, DownIsTerminalIgnoresFurtherAdvances) {
+  LivenessTracker lt;
+  lt.onSample(true, 5, 0);
+  lt.onSample(true, 5, 5001);   // Down
+  EXPECT_EQ(lt.onSample(true, 6, 6000), S::Down);   // advancing seq after Down: stays Down
+  EXPECT_EQ(lt.onSample(true, 7, 7000), S::Down);
+}
