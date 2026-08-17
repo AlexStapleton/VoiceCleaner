@@ -152,6 +152,12 @@ in this state (design §10 of Phase 3), but a **selection** transitions out of i
 
 The engine segmented control and bypass toggle from Phase 3 remain; they operate on the active mic.
 
+3. **Quit** — a small labeled control in the window footer that runs the **full shutdown path** (the same one the
+   tray "Quit" uses: `sup_->shutdown(3000); DestroyWindow(hwnd_)` → stop the worker, remove the tray icon, exit
+   both processes). It is the first visible in-window way to fully stop everything. The window **X** and
+   **minimize** still hide to the tray (audio keeps running) — unchanged; only a *new, explicit* Quit affordance is
+   added. Reuses the existing `kTrayCmdQuit` handler.
+
 ## 8. Flows
 
 - **First selection (from NoConfig):** user picks capture (and render) →
@@ -192,7 +198,8 @@ The engine segmented control and bypass toggle from Phase 3 remain; they operate
 - `src/transport-core/config.cpp` — `Config::load` → `Settings::load(path).resolveActive()` (keeps signature +
   `validate()`; preserves flat back-compat).
 - `src/voicecleaner/app_window.{h,cpp}` — the two picker fields + overlay paint/hit-test; enumerate on open; wire
-  picks to `Settings` save + pipe commands / spawn.
+  picks to `Settings` save + pipe commands / spawn; a **window Quit control** (§7.3) reusing the existing
+  `kTrayCmdQuit` shutdown path.
 - `src/voicecleaner/worker_supervisor.{h,cpp}` — expose typed helpers to send `SelectCaptureDevice`/
   `SelectRenderDevice` (thin wrappers over `PipeClient::send`), alongside the existing `send`.
 - `src/voicecleaner/main.cpp` — first-run flow: load `Settings`, resolve devices, decide spawn vs. pick state.
@@ -224,6 +231,8 @@ The engine segmented control and bypass toggle from Phase 3 remain; they operate
 - Unplug the saved mic, relaunch → field shows "(not connected)", app waits for a pick, does not crash.
 - Selection persists across a UI relaunch (re-attaches to the running worker and shows the right devices).
 - Headless-correctness: the worker still runs standalone against a `settings.toml` (new or flat schema).
+- The window **Quit** control stops the worker and exits both processes cleanly (tray icon removed) — matching the
+  tray Quit; window X / minimize still hide to the tray with audio running.
 
 ## 12. Forward notes (not built here)
 
