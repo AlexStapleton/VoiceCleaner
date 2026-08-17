@@ -1,16 +1,32 @@
 # VoiceCleaner — Project Status & Resume Guide
 
-_Last updated: 2026-08-14_
+_Last updated: 2026-08-16_
 
-**Active work:** COMPLETE — **live real-time DeepFilterNet3 (STANDARD model), competitive with RNNoise.**
+**Active work:** COMPLETE — **Phase 3 product shell (tray UI + control plane).** `voicecleaner.exe` —
+a single Direct2D window + tray icon — now spawns/attaches/supervises `voicecleaner-worker.exe` and
+drives engine switch + bypass over the named-pipe/shm IPC. Crash isolation holds: killing the UI leaves
+audio running; relaunch re-attaches (no double-spawn). The `Telemetry` POD gained `bypass` + `dspChain`;
+the worker relay publishes them; the UI reflects true bypass and disables the bypass control when the
+worker has no DSP chain (engine switch is never gated — Phase 2c makes it always available). New
+`voicecleaner-core` pure library (Windows-free: `UiState`, `LivenessTracker`, `buildWorkerCommandLine`)
+with a `voicecleaner-tests` gtest target; total test count is now **128 passing** (Debug and Release).
+The shipped `settings.toml` sets `ring_frames = 16` (real-time), NOT the drift-test default 1024
+(avoids ~5 s latency — Phase 2c finding). Phase 3 touched only telemetry plumbing and the new UI/worker-
+supervisor code — no DSP source changed, and the DFN3/RNNoise offline+live paths are unchanged from the
+prior validated state. **What remains for a human:** the manual real-hardware validation checklist (plan
+§12 / Task 15 Step 3 — audio flows, latency, engine switch, bypass, isolation, relaunch, quit, headless
+correctness, on the FIFINE K688 + VB-Cable), and **Phase 4** (Direct2D level meter, mic picker, tuning
+sliders, per-mic settings persistence, live warm-standby toggle, richer error/reconnect UX). Prior stale
+lines below are history.
+
+---
+_(historical)_ **COMPLETE — live real-time DeepFilterNet3 (STANDARD model), competitive with RNNoise.**
 `engine="dfn3"` now runs the standard streaming model (Gates A/B/C all green: streaming==offline
 r=0.999999, live mean 0.71 ms / p99.9 1.06 ms / 0% over budget). On real K688 keyboard audio it
 suppresses **−30.4 dB** (vs `_ll` −5.6, RNNoise −32.1) and **retains voice better than RNNoise**
 (0.891 vs 0.876) — the blueprint D9 premise realized. The `_ll` model was the wrong choice (0-lookahead
 can't bracket transients) and is retired from the live path (kept offline). ~30 ms latency vs RNNoise
-~10 ms; RNNoise still edges peak-click suppression. **Open product call:** default engine (RNNoise vs
-standard DFN3 vs warm-standby both, switch live). Then: product shell (tray UI + §8.5 command channel +
-first-run wizard + level meter). Prior stale line below is history.
+~10 ms; RNNoise still edges peak-click suppression.
 
 ---
 _(historical — superseded by the line above)_ On branch `feat/live-dfn3-streaming`: streaming ONNX surgery + orchestrator done
