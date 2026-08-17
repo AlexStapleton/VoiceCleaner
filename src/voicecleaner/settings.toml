@@ -1,0 +1,17 @@
+# VoiceCleaner settings — shipped default.
+#
+# REAL-TIME latency: ring_frames MUST stay small (~16 = ~15 ms buffered). The repo's drift*.toml
+# files use ring_frames = 1024 for multi-hour drift TESTS, which primes ~5 s of latency — never
+# use that here. (Phase 2c hardware-validation finding, 2026-08-16.)
+ring_frames  = 16
+
+# Engine + chain. The worker honors these; the UI never forces overrides (design §2).
+engine       = "rnnoise"   # "none" | "rnnoise" | "dfn3"
+dsp_chain    = true        # DC->engine->HPF->AGC->limiter; required for the bypass control
+warm_standby = false       # lean by default; engine switch is gap-free either way (Phase 2c)
+
+# Device IDs are filled by the Phase 4 mic picker. Left blank here, the UI shows
+# "No microphone configured" and does NOT spawn the worker (design §8). For manual hardware
+# testing, paste your 48 kHz capture/render IDs (from `voicecleaner-worker --list-devices`):
+capture_device_id = ""
+render_device_id  = ""
