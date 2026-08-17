@@ -18,6 +18,13 @@ bool WorkerSupervisor::openReader() {
 }
 
 bool WorkerSupervisor::startOrAttach() {
+  // Reset any prior (possibly dead) session so Relaunch re-spawns/re-attaches cleanly.
+  reader_.close();
+  readerOpen_ = false;
+  down_ = false;
+  liveness_ = LivenessTracker{};
+  if (process_) { CloseHandle(static_cast<HANDLE>(process_)); process_ = nullptr; }
+
   if (openReader()) return true;   // a worker is already present -> attach (no process handle)
 
   // Spawn. CreateProcessW requires a mutable command-line buffer.
@@ -72,6 +79,8 @@ void WorkerSupervisor::shutdown(uint64_t waitMs) {
     WaitForSingleObject(static_cast<HANDLE>(process_), (DWORD)waitMs);
   } else {
     // Attached: wait for the shm mapping to disappear (best-effort bounded wait).
+    reader_.close();        // release our handle so the worker's section can vanish
+    readerOpen_ = false;
     const uint64_t step = 100;
     for (uint64_t waited = 0; waited < waitMs; waited += step) {
       vc::ipc::TelemetryReader probe;
