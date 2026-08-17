@@ -55,3 +55,19 @@ TEST(UiState, AttachReflectsTrueBypassAndCapability) {
   EXPECT_TRUE(ui.bypassEnabled());
   EXPECT_EQ(ui.statusKind(), StatusKind::Bypassed);
 }
+
+TEST(UiState, WorkerDownStatus) {
+  UiState ui;
+  ui.onTelemetry(tel(1, 0, 1, 1), true);   // was Active
+  ui.onWorkerDown();
+  EXPECT_EQ(ui.statusKind(), StatusKind::Down);
+  EXPECT_EQ(ui.statusLine(), "\xE2\x9C\x95 Worker not running");
+}
+
+TEST(UiState, NoConfigStatus) {
+  UiState ui;
+  ui.onNoConfig();
+  EXPECT_EQ(ui.statusKind(), StatusKind::NoConfig);
+  EXPECT_EQ(ui.statusLine(),
+            "No microphone configured \xE2\x80\x94 the mic picker arrives in Phase 4");
+}
