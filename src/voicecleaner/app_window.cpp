@@ -27,6 +27,8 @@ AppWindow::AppWindow(HINSTANCE hInst, WorkerSupervisor* sup, UiState* state)
 
 AppWindow::~AppWindow() {
   discardRenderTarget();
+  if (capFmt_) capFmt_->Release();
+  if (centerFmt_) centerFmt_->Release();
   if (textFmt_) textFmt_->Release();
   if (dwFactory_) dwFactory_->Release();
   if (d2dFactory_) d2dFactory_->Release();
@@ -36,9 +38,26 @@ bool AppWindow::create(const wchar_t* title) {
   if (FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &d2dFactory_))) return false;
   if (FAILED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory),
                                  reinterpret_cast<IUnknown**>(&dwFactory_)))) return false;
+  // Status line: normal weight, left-aligned, word-wrapped (the NoConfig message is long).
   dwFactory_->CreateTextFormat(L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL,
                                DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
-                               16.0f, L"en-us", &textFmt_);
+                               15.0f, L"en-us", &textFmt_);
+  textFmt_->SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);
+  textFmt_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
+
+  // Control labels: semibold, centered horizontally AND vertically inside their box.
+  dwFactory_->CreateTextFormat(L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_SEMI_BOLD,
+                               DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+                               15.0f, L"en-us", &centerFmt_);
+  centerFmt_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+  centerFmt_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+  centerFmt_->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+
+  // Section captions: small, centered vertically, left-aligned.
+  dwFactory_->CreateTextFormat(L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_SEMI_BOLD,
+                               DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+                               11.0f, L"en-us", &capFmt_);
+  capFmt_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
 
   WNDCLASSW wc{};
   wc.lpfnWndProc = &AppWindow::WndProc;
@@ -47,8 +66,12 @@ bool AppWindow::create(const wchar_t* title) {
   wc.lpszClassName = kClass;
   RegisterClassW(&wc);
 
-  hwnd_ = CreateWindowExW(0, kClass, title, WS_OVERLAPPEDWINDOW & ~WS_MAXIMIZEBOX & ~WS_THICKFRAME,
-                          CW_USEDEFAULT, CW_USEDEFAULT, 460, 260, nullptr, nullptr, hInst_, this);
+  // Fixed, non-resizable window sized so the client area is exactly kClientW x kClientH.
+  const DWORD style = WS_OVERLAPPEDWINDOW & ~WS_MAXIMIZEBOX & ~WS_THICKFRAME;
+  RECT wr{0, 0, 440, 300};
+  AdjustWindowRectEx(&wr, style, FALSE, 0);
+  hwnd_ = CreateWindowExW(0, kClass, title, style, CW_USEDEFAULT, CW_USEDEFAULT,
+                          wr.right - wr.left, wr.bottom - wr.top, nullptr, nullptr, hInst_, this);
   if (!hwnd_) return false;
   SetTimer(hwnd_, kTimerId, 100, nullptr);   // ~10 Hz telemetry poll
   ShowWindow(hwnd_, SW_SHOW);
@@ -77,63 +100,85 @@ void AppWindow::ensureRenderTarget() {
 void AppWindow::discardRenderTarget() { if (rt_) { rt_->Release(); rt_ = nullptr; } }
 
 void AppWindow::layout(D2D1_SIZE_F sz) {
-  const float pad = 16.0f;
-  rcEngineRnn_ = D2D1::RectF(pad,        56, sz.width/2, 92);
-  rcEngineDfn_ = D2D1::RectF(sz.width/2, 56, sz.width - pad, 92);
-  rcBypass_    = D2D1::RectF(pad, 110, sz.width - pad, 150);
-  rcRelaunch_  = D2D1::RectF(pad, 170, sz.width - pad, 206);
+  const float pad = 18.0f, gap = 8.0f, h = 40.0f;
+  const float mid = sz.width * 0.5f;
+  rcEngineRnn_ = D2D1::RectF(pad,           102, mid - gap * 0.5f, 102 + h);
+  rcEngineDfn_ = D2D1::RectF(mid + gap*0.5f, 102, sz.width - pad,  102 + h);
+  rcBypass_    = D2D1::RectF(pad, 170, sz.width - pad, 170 + h);
+  rcRelaunch_  = D2D1::RectF(pad, 224, sz.width - pad, 224 + h);
 }
 
 void AppWindow::paint() {
   ensureRenderTarget();
   if (!rt_) return;
   rt_->BeginDraw();
-  rt_->Clear(D2D1::ColorF(0.12f, 0.12f, 0.14f));
+  rt_->Clear(D2D1::ColorF(0.106f, 0.109f, 0.129f));   // #1B1C21
   D2D1_SIZE_F sz = rt_->GetSize();
   layout(sz);
 
-  ID2D1SolidColorBrush* text = nullptr; rt_->CreateSolidColorBrush(D2D1::ColorF(0.92f,0.92f,0.94f), &text);
-  ID2D1SolidColorBrush* accent = nullptr; rt_->CreateSolidColorBrush(D2D1::ColorF(0.20f,0.55f,0.95f), &accent);
-  ID2D1SolidColorBrush* panel = nullptr; rt_->CreateSolidColorBrush(D2D1::ColorF(0.22f,0.22f,0.26f), &panel);
-  ID2D1SolidColorBrush* dim = nullptr; rt_->CreateSolidColorBrush(D2D1::ColorF(0.45f,0.45f,0.48f), &dim);
-  ID2D1SolidColorBrush* disabledBg = nullptr; rt_->CreateSolidColorBrush(D2D1::ColorF(0.18f,0.18f,0.20f), &disabledBg);
+  ID2D1SolidColorBrush *text=nullptr,*dim=nullptr,*accent=nullptr,*accentHot=nullptr,
+                       *panel=nullptr,*panelHot=nullptr,*disabled=nullptr,*amber=nullptr;
+  rt_->CreateSolidColorBrush(D2D1::ColorF(0.93f,0.93f,0.95f), &text);
+  rt_->CreateSolidColorBrush(D2D1::ColorF(0.53f,0.55f,0.62f), &dim);
+  rt_->CreateSolidColorBrush(D2D1::ColorF(0.16f,0.51f,0.94f), &accent);
+  rt_->CreateSolidColorBrush(D2D1::ColorF(0.30f,0.61f,0.98f), &accentHot);
+  rt_->CreateSolidColorBrush(D2D1::ColorF(0.20f,0.21f,0.25f), &panel);
+  rt_->CreateSolidColorBrush(D2D1::ColorF(0.27f,0.28f,0.33f), &panelHot);
+  rt_->CreateSolidColorBrush(D2D1::ColorF(0.15f,0.15f,0.18f), &disabled);
+  rt_->CreateSolidColorBrush(D2D1::ColorF(0.82f,0.54f,0.16f), &amber);
 
-  auto drawText = [&](const std::wstring& s, D2D1_RECT_F r, ID2D1Brush* b) {
-    rt_->DrawText(s.c_str(), (UINT32)s.size(), textFmt_, r, b);
+  const float pad = 18.0f;
+  auto box = [&](D2D1_RECT_F r, ID2D1Brush* b) {
+    rt_->FillRoundedRectangle(D2D1::RoundedRect(r, 8, 8), b);
   };
-  auto fillBox = [&](D2D1_RECT_F r, ID2D1Brush* b) {
-    rt_->FillRoundedRectangle(D2D1::RoundedRect(r, 6, 6), b);
+  auto label = [&](const std::wstring& s, D2D1_RECT_F r, ID2D1Brush* b, IDWriteTextFormat* f) {
+    rt_->DrawText(s.c_str(), (UINT32)s.size(), f, r, b);
   };
 
-  // 1. status line
-  drawText(toW(state_->statusLine()), D2D1::RectF(16, 16, sz.width-16, 48), text);
+  // 1. status line (wrapped, left-aligned)
+  label(toW(state_->statusLine()), D2D1::RectF(pad, 14, sz.width - pad, 78), text, textFmt_);
 
-  // 2. engine segmented control (highlight the active engine)
-  fillBox(rcEngineRnn_, state_->activeEngine()==0 ? accent : panel);
-  fillBox(rcEngineDfn_, state_->activeEngine()==1 ? accent : panel);
-  drawText(L"  RNNoise", rcEngineRnn_, text);
-  drawText(L"  DeepFilterNet3", rcEngineDfn_, text);
+  // 2. engine segmented control (caption + two buttons; active = accent, hover = lighter panel)
+  label(L"ENGINE", D2D1::RectF(pad, 82, sz.width - pad, 98), dim, capFmt_);
+  const uint32_t ae = state_->activeEngine();
+  box(rcEngineRnn_, ae==0 ? accent : (hot_==0 ? panelHot : panel));
+  box(rcEngineDfn_, ae==1 ? accent : (hot_==1 ? panelHot : panel));
+  label(L"RNNoise",        rcEngineRnn_, text, centerFmt_);
+  label(L"DeepFilterNet3", rcEngineDfn_, text, centerFmt_);
 
-  // 3. bypass toggle (disabled + reason when no chain)
+  // 3. bypass toggle (amber when bypassed; greyed + reason when no DSP chain)
+  label(L"BYPASS", D2D1::RectF(pad, 150, sz.width - pad, 166), dim, capFmt_);
   const bool bEn = state_->bypassEnabled();
-  fillBox(rcBypass_, bEn ? static_cast<ID2D1Brush*>(panel) : static_cast<ID2D1Brush*>(disabledBg));
+  ID2D1Brush* bBox = !bEn ? static_cast<ID2D1Brush*>(disabled)
+                   : state_->bypassed() ? static_cast<ID2D1Brush*>(amber)
+                   : static_cast<ID2D1Brush*>(hot_==2 ? panelHot : panel);
+  box(rcBypass_, bBox);
   std::wstring bLabel = !bEn ? toW(state_->bypassDisabledReason())
-                             : (state_->bypassed() ? L"  Bypassed \xE2\x80\x94 click to enable"
-                                                   : L"  Enabled \xE2\x80\x94 click to bypass");
-  drawText(bLabel, rcBypass_, bEn ? text : dim);
+                       : state_->bypassed() ? L"Bypassed — click to enable"
+                                            : L"Enabled — click to bypass";
+  label(bLabel, rcBypass_, bEn ? text : dim, centerFmt_);
 
   // 4. Relaunch — only when the worker is down
   if (state_->statusKind()==StatusKind::Down) {
-    fillBox(rcRelaunch_, accent);
-    drawText(L"  Relaunch worker", rcRelaunch_, text);
+    box(rcRelaunch_, hot_==3 ? accentHot : accent);
+    label(L"Relaunch worker", rcRelaunch_, text, centerFmt_);
   }
 
-  text->Release(); accent->Release(); panel->Release(); dim->Release(); disabledBg->Release();
+  text->Release(); dim->Release(); accent->Release(); accentHot->Release();
+  panel->Release(); panelHot->Release(); disabled->Release(); amber->Release();
   if (rt_->EndDraw() == D2DERR_RECREATE_TARGET) discardRenderTarget();
 }
 
 static bool hit(D2D1_RECT_F r, int x, int y) {
   return x>=r.left && x<=r.right && y>=r.top && y<=r.bottom;
+}
+
+int AppWindow::hitControl(int x, int y) const {
+  if (hit(rcEngineRnn_, x, y)) return 0;
+  if (hit(rcEngineDfn_, x, y)) return 1;
+  if (hit(rcBypass_,    x, y)) return 2;
+  if (hit(rcRelaunch_,  x, y)) return 3;
+  return -1;
 }
 
 void AppWindow::sendCurrent(const vc::ipc::Params& p) {
@@ -175,13 +220,29 @@ LRESULT AppWindow::handle(UINT msg, WPARAM w, LPARAM l) {
       if (rt_) { RECT rc; GetClientRect(hwnd_, &rc); rt_->Resize(D2D1::SizeU(rc.right, rc.bottom)); }
       return 0;
     case WM_LBUTTONDOWN: {
-      int x = GET_X_LPARAM(l), y = GET_Y_LPARAM(l);
-      if (hit(rcEngineRnn_, x, y)) onCommandEngine(0);
-      else if (hit(rcEngineDfn_, x, y)) onCommandEngine(1);
-      else if (hit(rcBypass_, x, y)) onCommandBypass();
-      else if (state_->statusKind()==StatusKind::Down && hit(rcRelaunch_, x, y)) requestRelaunch();
+      switch (hitControl(GET_X_LPARAM(l), GET_Y_LPARAM(l))) {
+        case 0: onCommandEngine(0); break;
+        case 1: onCommandEngine(1); break;
+        case 2: onCommandBypass(); break;   // onCommandBypass() itself no-ops when disabled
+        case 3: if (state_->statusKind()==StatusKind::Down) requestRelaunch(); break;
+      }
       return 0;
     }
+    case WM_MOUSEMOVE: {
+      int h = hitControl(GET_X_LPARAM(l), GET_Y_LPARAM(l));
+      if (h==2 && !state_->bypassEnabled()) h = -1;                       // disabled bypass: no hover
+      if (h==3 && state_->statusKind()!=StatusKind::Down) h = -1;         // relaunch only when down
+      if (h != hot_) { hot_ = h; InvalidateRect(hwnd_, nullptr, FALSE); }
+      TRACKMOUSEEVENT tme{ sizeof(TRACKMOUSEEVENT), TME_LEAVE, hwnd_, 0 };
+      TrackMouseEvent(&tme);                                             // so WM_MOUSELEAVE fires
+      return 0;
+    }
+    case WM_MOUSELEAVE:
+      if (hot_ != -1) { hot_ = -1; InvalidateRect(hwnd_, nullptr, FALSE); }
+      return 0;
+    case WM_SETCURSOR:
+      if (LOWORD(l)==HTCLIENT && hot_ != -1) { SetCursor(LoadCursor(nullptr, IDC_HAND)); return TRUE; }
+      break;
     case WM_COMMAND:
       switch (LOWORD(w)) {
         case kTrayCmdEnabled:  onCommandBypass(); break;
