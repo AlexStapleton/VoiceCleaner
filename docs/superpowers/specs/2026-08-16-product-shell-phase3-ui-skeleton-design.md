@@ -32,7 +32,7 @@ boundary; they are not built.
 |---|---|
 | Increment | Parent spec's **Phase 3 exactly** — skeleton only. No meter, sliders, mic picker, or persistence. |
 | UI toolkit | **Direct2D from the start** — `ID2D1HwndRenderTarget` + `WM_PAINT`/`InvalidateRect`, custom-drawn controls. Not a DXGI swap chain. |
-| Launch config | UI reads `settings.toml` next to its module and spawns the worker **against it, with no forced overrides** — the worker honors the file's `warm_standby`/`dsp_chain`/`engine`. Missing/incomplete config → clear message, no spawn. |
+| Launch config | UI reads `settings.toml` next to its module and spawns the worker **against it, with no forced overrides** — the worker honors the file's `warm_standby`/`dsp_chain`/`engine`/`ring_frames`. **The shipped/first-written `settings.toml` MUST set `ring_frames = 16` (real-time); the parser default is 1024 = ~5 s latency (§10).** Missing/incomplete config → clear message, no spawn. |
 | Warm standby | **Respected from `settings.toml`, never forced.** Thanks to Phase 2c, engine switch works either way (warm = instant, lean = gap-free on-demand load), so the engine control is **always enabled**. Warm standby is a resource/latency policy, not a gate. The live toggle checkbox + persistence are **Phase 4** (§14). |
 | Params baseline | UI seeds `current_` from `Params::defaults()` (which equals the worker's actual runtime values); continuously syncs `current_.engine`/`current_.bypass` from telemetry (§5). |
 | Lifecycle | **Spawn + attach + detect.** Single-instance UI; probe for a live worker → attach or spawn; **readiness gated on the first telemetry `seq` advance** (§10); detect worker death and surface it with a manual **Relaunch**. Auto-restart/backoff deferred to Phase 5. |
@@ -166,7 +166,8 @@ distinct from a **launch failure** (§11), where the config was valid but the wo
   the repo's `drift*.toml` default of 1024.** A 1024-frame ring primes ~512 frames of render buffer = **~5 s of
   latency** out of the box (each frame is 10 ms); a ~16-frame ring is ~15 ms. Verified during Phase 2c hardware
   validation — see [`docs/superpowers/notes/2026-08-16-phase2c-hardware-validation.md`](../notes/2026-08-16-phase2c-hardware-validation.md).
-  (`ring_frames` = `Config::ringFrames`, CLI `--ring`; if TOML load doesn't yet parse `ring_frames`, wire it.) Keep the process handle. Bounded-wait **~5 s** for the first `seq` advance — startup is dominated by
+  (`Config::load` already parses `ring_frames` — but its default is **1024**, so the shipped/first-written file must
+  set `ring_frames = 16` explicitly; there is no code to wire, only the config value to get right.) Keep the process handle. Bounded-wait **~5 s** for the first `seq` advance — startup is dominated by
   device/COM init and the first ~1 s telemetry window, **not** model load (measured ~16-39 ms even for DFN3's four
   graphs); 5 s is generous headroom. On timeout, report a launch failure and offer Relaunch.
 - **Death detection:** spawned → `WaitForSingleObject(handle, 0) == WAIT_OBJECT_0` (immediate, authoritative);
@@ -183,7 +184,9 @@ distinct from a **launch failure** (§11), where the config was valid but the wo
 
 - **No config / no devices:** detected pre-spawn via `Config::load`; window shows a clear message, does not spawn.
 - **Launch failure (no `seq` advance within ~5 s):** the worker was spawned but never became ready — most likely a
-  device that no longer resolves, or missing models. Distinct from "no config"; surfaces its own message + Relaunch.
+  device that no longer resolves, **a capture/render device not at 48 kHz (the worker requires 48 kHz endpoints and
+  fails fast: `Endpoint is not 48000 Hz`)**, or missing models. Distinct from "no config"; surfaces its own message
+  (worth hinting at the 48 kHz requirement) + Relaunch.
 - **Pipe send fails:** **not** treated as death on its own (it also fails transiently before the worker's pipe
   server is up). Only a corroborating signal (§10); do not crash the UI.
 - **Torn telemetry reads:** tolerated by design (relaxed atomics, `seq`), unchanged from the existing reader.
@@ -208,8 +211,11 @@ distinct from a **launch failure** (§11), where the config was valid but the wo
 **Regression (must stay green):** all existing tests (100 + Phase 2c's) and the DFN3 offline golden — the only
 Phase 3 worker change is two telemetry fields, which do not touch DSP output.
 
-**Manual / integration (real hardware):** exercised against a `settings.toml` with `dsp_chain = true` unless noted.
+**Manual / integration (real hardware):** exercised against a `settings.toml` with `dsp_chain = true` **and
+`ring_frames = 16`** unless noted.
 - UI launches → worker spawns (no console window) → audio flows to CABLE Input.
+- **Latency:** end-to-end delay is low (tens of ms), **not ~5 s** — i.e. the spawned `settings.toml` uses the
+  real-time `ring_frames`, not the 1024 default (§10; Phase 2c finding).
 - Engine switch (RNNoise ↔ DeepFilterNet3) via the window **and** the tray: **instant** under `warm_standby = true`,
   **gap-free on-demand** under `warm_standby = false` (Phase 2c) — clean either way; status reflects it.
 - Bypass toggles cleanly from the window and the tray.
@@ -227,6 +233,8 @@ Phase 3 worker change is two telemetry fields, which do not touch DSP output.
 - New `src/voicecleaner/` target (5 source units above) wired into `CMakeLists.txt`.
 - New `tests/voicecleaner/` gtest target wired into `CMakeLists.txt`.
 - `Telemetry` widened with `bypass` + `dspChain`; worker relay writes them; updated `win-ipc` telemetry tests.
+- The shipped/first-written `settings.toml` sets `ring_frames = 16` (real-time), **not** the parser default 1024 —
+  otherwise the user gets ~5 s of latency out of the box (§10; Phase 2c hardware-validation finding).
 - No regression in the existing tests (100 + Phase 2c's) or the DFN3 golden.
 
 ## 14. Forward notes for Phase 4 (not built here)
