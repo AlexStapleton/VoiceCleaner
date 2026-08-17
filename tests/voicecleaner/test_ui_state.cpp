@@ -95,3 +95,13 @@ TEST(UiState, BypassToggleFlipsBackAndForth) {
   ui.onTelemetry(tel(1, /*bypass*/1, 1, 2), true);   // worker confirms bypassed
   EXPECT_EQ(ui.onToggleBypass().bypass, 0u);   // on -> off
 }
+
+TEST(UiState, ToggleFromAttachedBypassedTurnsItOff) {
+  // Attach to a worker already bypassed (fresh UiState, no prior toggle). The first toggle must
+  // turn bypass OFF, which only works if current_.bypass is synced from telemetry — the mirror of
+  // the engine-sync invariant, on the bypass field.
+  UiState ui;
+  ui.onTelemetry(tel(/*engine*/1, /*bypass*/1, /*dspChain*/1, /*seq*/1), /*ready*/true);
+  vc::ipc::Params sent = ui.onToggleBypass();
+  EXPECT_EQ(sent.bypass, 0u);
+}
