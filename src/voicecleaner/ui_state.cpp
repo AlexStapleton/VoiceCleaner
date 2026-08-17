@@ -20,13 +20,27 @@ void UiState::onTelemetry(const vc::ipc::Telemetry& t, bool ready) {
   dspChain_     = (t.dspChain != 0);
   // Keep the outgoing snapshot synced to live state (design §5): a later bypass-only toggle then
   // carries the live engine, and the embedded request_engine on the worker becomes a no-op.
-  current_.engine = t.activeEngine;
+  // Sticky engine latch: after a user selects an engine, hold current_.engine at that choice and
+  // stop syncing from telemetry until telemetry confirms the switch — otherwise a stale (lagging)
+  // tick would revert a just-selected engine, and a bypass toggle in that window would carry the
+  // old engine (which the worker's per-SetParams request_engine would honor).
+  if (enginePending_) {
+    if (t.activeEngine == pendingEngine_) {   // worker confirmed the switch -> resume normal sync
+      enginePending_ = false;
+      current_.engine = t.activeEngine;
+    }
+    // else: hold current_.engine at the user's pendingEngine_ (do not sync to stale telemetry)
+  } else {
+    current_.engine = t.activeEngine;
+  }
   current_.bypass = t.bypass;
   if (ready) kind_ = bypass_ ? StatusKind::Bypassed : StatusKind::Active;
 }
 
 vc::ipc::Params UiState::onSelectEngine(uint32_t engine) {
   current_.engine = engine;
+  pendingEngine_ = engine;
+  enginePending_ = true;
   return current_;
 }
 

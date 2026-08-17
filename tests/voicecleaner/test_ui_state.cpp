@@ -106,6 +106,30 @@ TEST(UiState, ToggleFromAttachedBypassedTurnsItOff) {
   EXPECT_EQ(sent.bypass, 0u);
 }
 
+TEST(UiState, SwitchThenBypassKeepsSelectedEngineDuringTelemetryLag) {
+  // User is live on RNNoise (0), selects DFN3 (1), but telemetry hasn't caught up yet (still 0).
+  // A bypass toggle in that window must carry engine 1 (the user's choice), not the stale 0.
+  UiState ui;
+  ui.onTelemetry(tel(/*engine*/0, /*bypass*/0, /*dspChain*/1, /*seq*/1), /*ready*/true);
+  ui.onSelectEngine(1u);                                   // click DFN3 (SetParams engine=1 sent)
+  ui.onTelemetry(tel(/*engine*/0, 0, 1, /*seq*/2), true);  // stale tick: worker not yet reporting 1
+  vc::ipc::Params sent = ui.onToggleBypass();
+  EXPECT_EQ(sent.engine, 1u);   // selected engine held, NOT reverted to stale 0
+  EXPECT_EQ(sent.bypass, 1u);
+}
+
+TEST(UiState, EngineSyncResumesAfterTelemetryConfirmsSelection) {
+  // Once telemetry confirms the selected engine, normal telemetry-authoritative sync resumes.
+  UiState ui;
+  ui.onTelemetry(tel(0, 0, 1, 1), true);
+  ui.onSelectEngine(1u);
+  ui.onTelemetry(tel(/*engine*/1, 0, 1, 2), true);   // confirmed -> latch clears
+  // A later genuine change to engine 0 (e.g. reported by the worker) must now sync through again.
+  ui.onTelemetry(tel(/*engine*/0, 0, 1, 3), true);
+  vc::ipc::Params sent = ui.onToggleBypass();
+  EXPECT_EQ(sent.engine, 0u);   // sync resumed after confirmation
+}
+
 using S = LivenessTracker::Status;
 
 TEST(LivenessTracker, PresentThenReadyOnFirstSeqAdvance) {

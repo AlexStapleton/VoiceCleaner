@@ -45,6 +45,8 @@ class UiState {
   StatusKind kind_ = StatusKind::Down;   // pre-ready shows Down until the first ready telemetry
   std::string renderLabel_ = "CABLE Input";
   uint32_t activeEngine_ = 0;
+  uint32_t pendingEngine_ = 0;   // engine the user last selected
+  bool     enginePending_ = false;  // true until telemetry confirms pendingEngine_ is active
   bool bypass_ = false;
   bool dspChain_ = true;
 };
