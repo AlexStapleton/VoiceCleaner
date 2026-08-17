@@ -53,3 +53,19 @@ TEST(Config, ApplyCliHandlesValuelessFlagBeforeDevicePairs) {
   EXPECT_EQ(c.captureDeviceId, "CAP");
   EXPECT_EQ(c.renderDeviceId, "REN");
 }
+TEST(Config, LoadsNewSchemaViaSettings) {
+  auto p = write_tmp(
+    "[global]\n"
+    "active_capture_id = \"cap-1\"\n"
+    "render_id = \"ren-1\"\n"
+    "ring_frames = 16\n"
+    "[mic.\"cap-1\"]\n"
+    "engine = \"dfn3\"\n"
+    "dsp_chain = true\n");
+  Config c = Config::load(p);
+  EXPECT_EQ(c.captureDeviceId, "cap-1");
+  EXPECT_EQ(c.renderDeviceId, "ren-1");
+  EXPECT_EQ(c.ringFrames, 16u);
+  EXPECT_EQ(c.engine, "dfn3");
+  EXPECT_TRUE(c.dspChain);
+}

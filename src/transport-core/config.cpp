@@ -1,4 +1,5 @@
 #include "config.h"
+#include "settings.h"
 #include <toml++/toml.hpp>
 #include <cstring>
 #include <cstdlib>
@@ -9,20 +10,26 @@ Config Config::load(const std::string& path) {
   try { t = toml::parse_file(path); }
   catch (const toml::parse_error& e) { throw std::runtime_error(std::string("config parse: ") + e.description().data()); }
   Config c;
-  c.captureDeviceId = t["capture_device_id"].value_or(std::string(""));
-  c.renderDeviceId  = t["render_device_id"].value_or(std::string(""));
-  int64_t rawRing = t["ring_frames"].value_or((int64_t)1024);
-  c.ringFrames = rawRing < 0 ? 0 : (size_t)rawRing;   // 0 -> validate() floors to 3
-  c.csvPath         = t["csv_path"].value_or(std::string("drift.csv"));
-  c.logLevel        = t["log_level"].value_or(1);
-  c.driftCompensation = t["drift_compensation"].value_or(true);
-  c.kp                = t["drift_kp"].value_or(2e-7);
-  c.ki                = t["drift_ki"].value_or(2e-9);
-  c.driftMaxPpm       = t["drift_max_ppm"].value_or(150.0);
-  c.filterAlpha       = t["drift_filter_alpha"].value_or(0.02);
-  c.engine            = t["engine"].value_or(std::string("none"));
-  c.dspChain          = t["dsp_chain"].value_or(false);
-  c.warmStandby       = t["warm_standby"].value_or(false);
+  if (t.contains("global")) {
+    // New schema (Phase 4a): resolve the active mic's profile (Settings owns the layout).
+    c = Settings::load(path).resolveActive();
+  } else {
+    // Flat schema (Phase-3 + drift*.toml) — unchanged parsing.
+    c.captureDeviceId = t["capture_device_id"].value_or(std::string(""));
+    c.renderDeviceId  = t["render_device_id"].value_or(std::string(""));
+    int64_t rawRing = t["ring_frames"].value_or((int64_t)1024);
+    c.ringFrames = rawRing < 0 ? 0 : (size_t)rawRing;   // 0 -> validate() floors to 3
+    c.csvPath         = t["csv_path"].value_or(std::string("drift.csv"));
+    c.logLevel        = t["log_level"].value_or(1);
+    c.driftCompensation = t["drift_compensation"].value_or(true);
+    c.kp                = t["drift_kp"].value_or(2e-7);
+    c.ki                = t["drift_ki"].value_or(2e-9);
+    c.driftMaxPpm       = t["drift_max_ppm"].value_or(150.0);
+    c.filterAlpha       = t["drift_filter_alpha"].value_or(0.02);
+    c.engine            = t["engine"].value_or(std::string("none"));
+    c.dspChain          = t["dsp_chain"].value_or(false);
+    c.warmStandby       = t["warm_standby"].value_or(false);
+  }
   c.validate();
   return c;
 }
