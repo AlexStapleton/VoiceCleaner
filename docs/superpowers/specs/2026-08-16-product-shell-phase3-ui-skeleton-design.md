@@ -162,7 +162,11 @@ distinct from a **launch failure** (§11), where the config was valid but the wo
   + pipe results). `open` fails ⇒ **spawn**. Reuses the existing shm — no worker change for the probe itself.
 - **Spawn:** resolve `<moduleDir>` via `GetModuleFileName(NULL)`. `CreateProcess` with `CREATE_NO_WINDOW` on
   `<moduleDir>\voicecleaner-worker.exe --config "<moduleDir>\settings.toml"` (no forced flags — the worker honors
-  the file). Keep the process handle. Bounded-wait **~5 s** for the first `seq` advance — startup is dominated by
+  the file). **REQUIRED: the `settings.toml` this ships/writes MUST set a small real-time `ring_frames` (~16), NOT
+  the repo's `drift*.toml` default of 1024.** A 1024-frame ring primes ~512 frames of render buffer = **~5 s of
+  latency** out of the box (each frame is 10 ms); a ~16-frame ring is ~15 ms. Verified during Phase 2c hardware
+  validation — see [`docs/superpowers/notes/2026-08-16-phase2c-hardware-validation.md`](../notes/2026-08-16-phase2c-hardware-validation.md).
+  (`ring_frames` = `Config::ringFrames`, CLI `--ring`; if TOML load doesn't yet parse `ring_frames`, wire it.) Keep the process handle. Bounded-wait **~5 s** for the first `seq` advance — startup is dominated by
   device/COM init and the first ~1 s telemetry window, **not** model load (measured ~16-39 ms even for DFN3's four
   graphs); 5 s is generous headroom. On timeout, report a launch failure and offer Relaunch.
 - **Death detection:** spawned → `WaitForSingleObject(handle, 0) == WAIT_OBJECT_0` (immediate, authoritative);
