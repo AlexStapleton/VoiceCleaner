@@ -4,8 +4,10 @@ _Last updated: 2026-08-16_
 
 **Active work:** COMPLETE — **Phase 3 product shell (tray UI + control plane).** `voicecleaner.exe` —
 a single Direct2D window + tray icon — now spawns/attaches/supervises `voicecleaner-worker.exe` and
-drives engine switch + bypass over the named-pipe/shm IPC. Crash isolation holds: killing the UI leaves
-audio running; relaunch re-attaches (no double-spawn). The `Telemetry` POD gained `bypass` + `dspChain`;
+drives engine switch + bypass over the named-pipe/shm IPC. Crash isolation is by design and code-verified
+(separate process; the attach-probe re-attaches to a live worker without double-spawning) — the end-to-end
+kill-the-UI / relaunch behavior is part of the pending human hardware checklist, not yet run on hardware.
+The `Telemetry` POD gained `bypass` + `dspChain`;
 the worker relay publishes them; the UI reflects true bypass and disables the bypass control when the
 worker has no DSP chain (engine switch is never gated — Phase 2c makes it always available). New
 `voicecleaner-core` pure library (Windows-free: `UiState`, `LivenessTracker`, `buildWorkerCommandLine`)
