@@ -156,6 +156,10 @@ void AppWindow::showRestore() {
 }
 
 void AppWindow::tick() {
+  if (state_->statusKind() == StatusKind::NoConfig) {   // pre-flight NoConfig is terminal this phase — never poll/spawn (design §8)
+    if (tray_) tray_->update(*state_);
+    return;
+  }
   PollResult r = sup_->poll(GetTickCount64());
   if (!r.alive) state_->onWorkerDown();
   else          state_->onTelemetry(r.telemetry, r.ready);
