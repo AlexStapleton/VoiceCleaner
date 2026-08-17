@@ -18,6 +18,7 @@ public:
   ~TelemetryReader();
   bool open(const std::wstring& name);     // false if the mapping doesn't exist
   Telemetry read() const noexcept;         // returns a copy (torn reads tolerated)
+  void close() noexcept;                    // release the mapping; safe to call repeatedly
 private:
   void* handle_ = nullptr;
   const Telemetry* view_ = nullptr;

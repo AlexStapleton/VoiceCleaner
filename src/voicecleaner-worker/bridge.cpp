@@ -184,6 +184,8 @@ void Bridge::relayLoop() {
                                 : (cfg_.engine == "dfn3" ? 1u : 0u);
           t.driftRatioPpm = ratioPpm_.load(std::memory_order_relaxed);
           t.workerState = (uint32_t)vc::ipc::WorkerState::Running;
+          t.bypass   = (chain_ && sp.bypass != 0) ? 1u : 0u;   // true bypass only meaningful with a chain
+          t.dspChain = chain_ ? 1u : 0u;                        // capability flag for the UI
           t.seq = ++telemetrySeq_;
           telemetry_.write(t);
           hopsSincePublish_ = 0; winPeak_ = 0.0f; winSumSq_ = 0.0;
