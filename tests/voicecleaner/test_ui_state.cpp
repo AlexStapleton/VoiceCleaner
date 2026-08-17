@@ -105,3 +105,42 @@ TEST(UiState, ToggleFromAttachedBypassedTurnsItOff) {
   vc::ipc::Params sent = ui.onToggleBypass();
   EXPECT_EQ(sent.bypass, 0u);
 }
+
+using S = LivenessTracker::Status;
+
+TEST(LivenessTracker, PresentThenReadyOnFirstSeqAdvance) {
+  LivenessTracker lt;   // defaults: readyTimeout 5000, stallTimeout 3000
+  EXPECT_EQ(lt.onSample(/*shmOpen*/false, /*seq*/0, /*now*/0),   S::Connecting);  // shm not up yet
+  EXPECT_EQ(lt.onSample(/*shmOpen*/true,  /*seq*/5, /*now*/900), S::Connecting);  // baseline
+  EXPECT_EQ(lt.onSample(/*shmOpen*/true,  /*seq*/6, /*now*/1900), S::Ready);      // first advance
+}
+
+TEST(LivenessTracker, LaunchFailureWhenNeverReady) {
+  LivenessTracker lt;
+  EXPECT_EQ(lt.onSample(true, 5, 0),    S::Connecting);   // baseline, no advance
+  EXPECT_EQ(lt.onSample(true, 5, 4000), S::Connecting);   // still within readyTimeout
+  EXPECT_EQ(lt.onSample(true, 5, 5001), S::Down);         // exceeded readyTimeout -> launch failure
+}
+
+TEST(LivenessTracker, DiesWhenSeqStallsAfterReady) {
+  LivenessTracker lt;
+  lt.onSample(true, 5, 0);          // baseline
+  lt.onSample(true, 6, 1000);       // Ready (lastAdvance = 1000)
+  EXPECT_EQ(lt.onSample(true, 6, 2000), S::Ready);   // stalled but within stallTimeout
+  EXPECT_EQ(lt.onSample(true, 6, 4001), S::Down);    // > 3000 since last advance -> dead
+}
+
+TEST(LivenessTracker, DiesWhenShmLostAfterReady) {
+  LivenessTracker lt;
+  lt.onSample(true, 5, 0);
+  lt.onSample(true, 6, 1000);       // Ready
+  EXPECT_EQ(lt.onSample(/*shmOpen*/false, 0, 1100), S::Down);
+}
+
+TEST(LivenessTracker, StaysReadyWhileSeqKeepsAdvancing) {
+  LivenessTracker lt;
+  lt.onSample(true, 5, 0);
+  lt.onSample(true, 6, 1000);
+  EXPECT_EQ(lt.onSample(true, 7, 2000), S::Ready);
+  EXPECT_EQ(lt.onSample(true, 8, 6000), S::Ready);   // advancing resets the stall clock
+}

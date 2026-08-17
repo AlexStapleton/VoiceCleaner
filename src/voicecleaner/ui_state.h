@@ -49,4 +49,25 @@ class UiState {
   bool dspChain_ = true;
 };
 
+// Pure liveness/readiness policy over (shmOpen, seq, nowMs) samples (design §10). Terminal at Down.
+class LivenessTracker {
+ public:
+  enum class Status : uint32_t { Connecting, Ready, Down };
+  explicit LivenessTracker(uint64_t readyTimeoutMs = 5000, uint64_t stallTimeoutMs = 3000);
+  Status onSample(bool shmOpen, uint32_t seq, uint64_t nowMs);
+  Status status() const { return status_; }
+  bool everReady() const { return everReady_; }   // distinguishes launch failure from later death
+
+ private:
+  uint64_t readyTimeoutMs_;
+  uint64_t stallTimeoutMs_;
+  Status status_ = Status::Connecting;
+  bool started_ = false;        // startMs_ initialized
+  bool haveBaseline_ = false;   // baseline seq captured
+  bool everReady_ = false;
+  uint64_t startMs_ = 0;
+  uint64_t lastAdvanceMs_ = 0;
+  uint32_t lastSeq_ = 0;
+};
+
 }  // namespace vc::ui

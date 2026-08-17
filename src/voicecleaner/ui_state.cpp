@@ -55,4 +55,30 @@ std::string UiState::statusLine() const {
   }
 }
 
+LivenessTracker::LivenessTracker(uint64_t readyTimeoutMs, uint64_t stallTimeoutMs)
+    : readyTimeoutMs_(readyTimeoutMs), stallTimeoutMs_(stallTimeoutMs) {}
+
+LivenessTracker::Status LivenessTracker::onSample(bool shmOpen, uint32_t seq, uint64_t nowMs) {
+  if (!started_) { started_ = true; startMs_ = nowMs; }
+  if (status_ == Status::Down) return status_;   // terminal
+
+  if (status_ == Status::Ready) {
+    if (!shmOpen) { status_ = Status::Down; return status_; }        // shm lost
+    if (seq != lastSeq_) { lastSeq_ = seq; lastAdvanceMs_ = nowMs; } // still advancing
+    else if (nowMs - lastAdvanceMs_ > stallTimeoutMs_) status_ = Status::Down;  // stalled
+    return status_;
+  }
+
+  // Connecting.
+  if (shmOpen) {
+    if (!haveBaseline_) { haveBaseline_ = true; lastSeq_ = seq; }
+    else if (seq != lastSeq_) {
+      lastSeq_ = seq; lastAdvanceMs_ = nowMs; everReady_ = true;
+      status_ = Status::Ready; return status_;
+    }
+  }
+  if (nowMs - startMs_ > readyTimeoutMs_) status_ = Status::Down;    // never became ready
+  return status_;
+}
+
 }  // namespace vc::ui
