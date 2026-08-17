@@ -70,4 +70,8 @@ class LivenessTracker {
   uint32_t lastSeq_ = 0;
 };
 
+// Exact worker command line (design §10): "<dir>\voicecleaner-worker.exe" --config "<configPath>".
+// No forced flags — the worker honors settings.toml (warm_standby / dsp_chain / engine / ring_frames).
+std::wstring buildWorkerCommandLine(const std::wstring& moduleDir, const std::wstring& configPath);
+
 }  // namespace vc::ui

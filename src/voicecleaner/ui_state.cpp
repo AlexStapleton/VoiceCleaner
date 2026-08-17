@@ -81,4 +81,8 @@ LivenessTracker::Status LivenessTracker::onSample(bool shmOpen, uint32_t seq, ui
   return status_;
 }
 
+std::wstring buildWorkerCommandLine(const std::wstring& moduleDir, const std::wstring& configPath) {
+  return L"\"" + moduleDir + L"\\voicecleaner-worker.exe\" --config \"" + configPath + L"\"";
+}
+
 }  // namespace vc::ui

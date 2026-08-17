@@ -169,3 +169,8 @@ TEST(LivenessTracker, DownIsTerminalIgnoresFurtherAdvances) {
   EXPECT_EQ(lt.onSample(true, 6, 6000), S::Down);   // advancing seq after Down: stays Down
   EXPECT_EQ(lt.onSample(true, 7, 7000), S::Down);
 }
+
+TEST(SpawnArgs, ExactWorkerCommandLine) {
+  std::wstring cmd = buildWorkerCommandLine(L"C:\\app", L"C:\\app\\settings.toml");
+  EXPECT_EQ(cmd, L"\"C:\\app\\voicecleaner-worker.exe\" --config \"C:\\app\\settings.toml\"");
+}
