@@ -33,3 +33,25 @@ TEST(UiState, PreReadyTelemetryDoesNotFlipToActive) {
   EXPECT_EQ(ui.statusKind(), StatusKind::Down);       // stays Down until ready
   EXPECT_EQ(ui.activeEngine(), 1u);                   // display fields still track telemetry
 }
+
+TEST(UiState, BypassControlDisabledWhenNoChain) {
+  UiState ui;
+  ui.onTelemetry(tel(/*engine*/0, /*bypass*/0, /*dspChain*/0, /*seq*/1), /*ready*/true);
+  EXPECT_FALSE(ui.bypassEnabled());
+  EXPECT_EQ(ui.bypassDisabledReason(), "no DSP chain \xE2\x80\x94 bypass unavailable");
+}
+
+TEST(UiState, BypassControlEnabledWithChain) {
+  UiState ui;
+  ui.onTelemetry(tel(0, 0, /*dspChain*/1, 1), /*ready*/true);
+  EXPECT_TRUE(ui.bypassEnabled());
+}
+
+TEST(UiState, AttachReflectsTrueBypassAndCapability) {
+  // Attach to a worker already bypassed, with a chain: the very first telemetry must show it.
+  UiState ui;
+  ui.onTelemetry(tel(/*engine*/1, /*bypass*/1, /*dspChain*/1, /*seq*/42), /*ready*/true);
+  EXPECT_TRUE(ui.bypassed());
+  EXPECT_TRUE(ui.bypassEnabled());
+  EXPECT_EQ(ui.statusKind(), StatusKind::Bypassed);
+}
