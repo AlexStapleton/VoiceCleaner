@@ -66,3 +66,43 @@ TEST(Settings, ResolveWithNoActiveProfileUsesDefaults) {
   EXPECT_TRUE(c.captureDeviceId.empty());
   EXPECT_EQ(c.ringFrames, 16u);   // Settings default ring
 }
+
+TEST(Settings, EnsureProfileCreatesDefaultThenReuses) {
+  Settings s;
+  vc::MicProfile& a = s.ensureProfile("cap-1", "K688");
+  EXPECT_EQ(a.engine, "rnnoise");
+  EXPECT_TRUE(a.dspChain);
+  EXPECT_EQ(s.mics.size(), 1u);
+  vc::MicProfile& b = s.ensureProfile("cap-1", "K688");  // same id -> no new entry
+  EXPECT_EQ(s.mics.size(), 1u);
+  EXPECT_EQ(&a, &b);
+}
+
+TEST(Settings, ActiveProfileFollowsActiveId) {
+  Settings s;
+  s.ensureProfile("cap-1", "A");
+  s.ensureProfile("cap-2", "B");
+  s.activeCaptureId = "cap-2";
+  ASSERT_NE(s.activeProfile(), nullptr);
+  EXPECT_EQ(s.activeProfile()->name, "B");
+  s.activeCaptureId = "cap-none";
+  EXPECT_EQ(s.activeProfile(), nullptr);
+}
+
+TEST(Settings, SaveLoadRoundTripIsIdentity) {
+  Settings s;
+  s.activeCaptureId = "cap-1"; s.renderId = "ren-1"; s.ringFrames = 16;
+  vc::MicProfile& m = s.ensureProfile("cap-1", "K688");
+  m.engine = "dfn3"; m.warmStandby = true; m.dspChain = true;
+  auto p = (std::filesystem::temp_directory_path() / "vc_tmp_settings_rt.toml").string();
+  s.save(p);
+  Settings r = Settings::load(p);
+  EXPECT_EQ(r.activeCaptureId, "cap-1");
+  EXPECT_EQ(r.renderId, "ren-1");
+  EXPECT_EQ(r.ringFrames, 16u);
+  ASSERT_EQ(r.mics.size(), 1u);
+  EXPECT_EQ(r.mics[0].id, "cap-1");
+  EXPECT_EQ(r.mics[0].name, "K688");
+  EXPECT_EQ(r.mics[0].engine, "dfn3");
+  EXPECT_TRUE(r.mics[0].warmStandby);
+}

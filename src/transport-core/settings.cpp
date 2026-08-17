@@ -59,4 +59,42 @@ Settings Settings::load(const std::string& path) {
   return s;
 }
 
+MicProfile* Settings::activeProfile() {
+  for (auto& m : mics) if (m.id == activeCaptureId) return &m;
+  return nullptr;
+}
+
+MicProfile& Settings::ensureProfile(const std::string& id, const std::string& name) {
+  for (auto& m : mics) {
+    if (m.id == id) { if (!name.empty()) m.name = name; return m; }
+  }
+  MicProfile m; m.id = id; m.name = name;
+  mics.push_back(std::move(m));
+  return mics.back();
+}
+
+void Settings::save(const std::string& path) const {
+  toml::table g;
+  g.insert_or_assign("active_capture_id", activeCaptureId);
+  g.insert_or_assign("render_id", renderId);
+  g.insert_or_assign("ring_frames", (int64_t)ringFrames);
+
+  toml::table micTbl;
+  for (const auto& m : mics) {
+    toml::table p;
+    p.insert_or_assign("name", m.name);
+    p.insert_or_assign("engine", m.engine);
+    p.insert_or_assign("warm_standby", m.warmStandby);
+    p.insert_or_assign("dsp_chain", m.dspChain);
+    micTbl.insert_or_assign(m.id, std::move(p));
+  }
+
+  toml::table root;
+  root.insert_or_assign("global", std::move(g));
+  root.insert_or_assign("mic", std::move(micTbl));
+
+  std::ofstream out(path);
+  out << root;   // toml++ serializes [global] + [mic."<id>"] sections
+}
+
 }  // namespace vc
