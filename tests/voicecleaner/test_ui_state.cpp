@@ -71,3 +71,27 @@ TEST(UiState, NoConfigStatus) {
   EXPECT_EQ(ui.statusLine(),
             "No microphone configured \xE2\x80\x94 the mic picker arrives in Phase 4");
 }
+
+TEST(UiState, BypassToggleCarriesLiveEngineNotStaleDefault) {
+  // Params::defaults().engine == 1 (DFN3). Worker is live on engine 0 (RNNoise).
+  UiState ui;
+  ui.onTelemetry(tel(/*engine*/0, /*bypass*/0, /*dspChain*/1, /*seq*/1), /*ready*/true);
+  vc::ipc::Params sent = ui.onToggleBypass();
+  EXPECT_EQ(sent.engine, 0u);   // synced to live engine, NOT the stale default 1
+  EXPECT_EQ(sent.bypass, 1u);
+}
+
+TEST(UiState, SelectEngineSetsOutgoingEngine) {
+  UiState ui;
+  ui.onTelemetry(tel(/*engine*/1, 0, 1, 1), true);
+  vc::ipc::Params sent = ui.onSelectEngine(0u);
+  EXPECT_EQ(sent.engine, 0u);
+}
+
+TEST(UiState, BypassToggleFlipsBackAndForth) {
+  UiState ui;
+  ui.onTelemetry(tel(1, /*bypass*/0, 1, 1), true);
+  EXPECT_EQ(ui.onToggleBypass().bypass, 1u);   // off -> on
+  ui.onTelemetry(tel(1, /*bypass*/1, 1, 2), true);   // worker confirms bypassed
+  EXPECT_EQ(ui.onToggleBypass().bypass, 0u);   // on -> off
+}
