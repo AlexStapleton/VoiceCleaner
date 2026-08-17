@@ -23,11 +23,13 @@ void TelemetryWriter::write(const Telemetry& t) noexcept {
   if (view_) std::memcpy(view_, &t, sizeof(Telemetry));
 }
 
-TelemetryReader::~TelemetryReader() {
-  if (view_) UnmapViewOfFile(const_cast<Telemetry*>(view_));
-  if (handle_) CloseHandle(static_cast<HANDLE>(handle_));
+void TelemetryReader::close() noexcept {
+  if (view_)   { UnmapViewOfFile(const_cast<Telemetry*>(view_)); view_ = nullptr; }
+  if (handle_) { CloseHandle(static_cast<HANDLE>(handle_)); handle_ = nullptr; }
 }
+TelemetryReader::~TelemetryReader() { close(); }
 bool TelemetryReader::open(const std::wstring& name) {
+  close();   // idempotent: release any prior mapping before re-binding (fixes reopen leak)
   HANDLE h = OpenFileMappingW(FILE_MAP_READ, FALSE, name.c_str());
   if (!h) return false;
   void* v = MapViewOfFile(h, FILE_MAP_READ, 0, 0, sizeof(Telemetry));
