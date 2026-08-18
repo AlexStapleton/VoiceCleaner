@@ -1,25 +1,26 @@
 # VoiceCleaner — Project Status & Resume Guide
 
-_Last updated: 2026-08-16_
+_Last updated: 2026-08-17_
 
-**Active work:** COMPLETE — **Phase 3 product shell (tray UI + control plane).** `voicecleaner.exe` —
-a single Direct2D window + tray icon — now spawns/attaches/supervises `voicecleaner-worker.exe` and
-drives engine switch + bypass over the named-pipe/shm IPC. Crash isolation is by design and code-verified
-(separate process; the attach-probe re-attaches to a live worker without double-spawning) — the end-to-end
-kill-the-UI / relaunch behavior is part of the pending human hardware checklist, not yet run on hardware.
-The `Telemetry` POD gained `bypass` + `dspChain`;
-the worker relay publishes them; the UI reflects true bypass and disables the bypass control when the
-worker has no DSP chain (engine switch is never gated — Phase 2c makes it always available). New
-`voicecleaner-core` pure library (Windows-free: `UiState`, `LivenessTracker`, `buildWorkerCommandLine`)
-with a `voicecleaner-tests` gtest target; total test count is now **128 passing** (Debug and Release).
-The shipped `settings.toml` sets `ring_frames = 16` (real-time), NOT the drift-test default 1024
-(avoids ~5 s latency — Phase 2c finding). Phase 3 touched only telemetry plumbing and the new UI/worker-
-supervisor code — no DSP source changed, and the DFN3/RNNoise offline+live paths are unchanged from the
-prior validated state. **What remains for a human:** the manual real-hardware validation checklist (plan
-§12 / Task 15 Step 3 — audio flows, latency, engine switch, bypass, isolation, relaunch, quit, headless
-correctness, on the FIFINE K688 + VB-Cable), and **Phase 4** (Direct2D level meter, mic picker, tuning
-sliders, per-mic settings persistence, live warm-standby toggle, richer error/reconnect UX). Prior stale
-lines below are history.
+**Active work:** COMPLETE (pending hardware check) — **Phase 4a device picker + settings persistence.**
+`voicecleaner.exe` now lets the user pick capture + render devices in-app (custom-drawn dark dropdowns;
+non-48 kHz devices greyed as "48 kHz only"; device-gone shows "(not connected)"), persists them to a new
+`[global]` + `[mic."<id>"]` `settings.toml`, and applies them: first-run pick spawns the worker; a live mic
+switch sends `SelectCaptureDevice` + `SetParams(engine)` (pipeline rebuild, no respawn), render switch sends
+`SelectRenderDevice`. A visible **window Quit** control does the full shutdown (same as the tray). A shared
+`Settings` model in `transport-core` owns the schema; `Config::load` resolves the active profile through it,
+and **flat Phase-3 / `drift*.toml` files still load unchanged** (back-compat). New pure units: `Settings`
+(transport-core) + `DevicePicker` (voicecleaner-core), both unit-tested. Total tests now **142 passing**
+(Debug and Release). No DSP source changed (DFN3 golden unaffected). **What remains for a human:** the manual
+real-hardware checklist (plan [`2026-08-17-product-shell-phase4a-device-picker.md`](superpowers/plans/2026-08-17-product-shell-phase4a-device-picker.md)
+Task 11 Step 4 — first-run pick → audio flows, live mic/render switch, non-48 kHz greying, device-gone,
+persistence across relaunch, on the FIFINE K688 + VB-Cable). **Next:** 4b level meter, 4c tuning sliders,
+4d warm-standby toggle + per-mic drift persistence.
+
+_(historical)_ **Phase 3 product-shell UI skeleton (merged 2026-08-16).** `voicecleaner.exe` (Direct2D window +
+tray) spawns/attaches/supervises the worker and drives engine switch + bypass over the named-pipe/shm IPC;
+crash isolation is by design + code-verified. `Telemetry` gained `bypass` + `dspChain`; new `voicecleaner-core`
+lib (`UiState`, `LivenessTracker`, `buildWorkerCommandLine`); shipped `settings.toml` uses `ring_frames = 16`.
 
 ---
 _(historical)_ **COMPLETE — live real-time DeepFilterNet3 (STANDARD model), competitive with RNNoise.**

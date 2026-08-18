@@ -72,6 +72,18 @@ bool WorkerSupervisor::send(const vc::ipc::Command& c) {
   return vc::ipc::PipeClient::send(pipeName_, c);   // failure only corroborates death (design §10)
 }
 
+bool WorkerSupervisor::sendSelectCapture(const std::string& id, double driftSeedPpm) {
+  vc::ipc::Command c; c.type = vc::ipc::CmdType::SelectCaptureDevice;
+  c.deviceId = id; c.driftSeedPpm = driftSeedPpm;
+  return vc::ipc::PipeClient::send(pipeName_, c);
+}
+
+bool WorkerSupervisor::sendSelectRender(const std::string& id) {
+  vc::ipc::Command c; c.type = vc::ipc::CmdType::SelectRenderDevice;
+  c.deviceId = id;
+  return vc::ipc::PipeClient::send(pipeName_, c);
+}
+
 void WorkerSupervisor::shutdown(uint64_t waitMs) {
   vc::ipc::Command c; c.type = vc::ipc::CmdType::Shutdown;
   vc::ipc::PipeClient::send(pipeName_, c);

@@ -5,6 +5,8 @@
 #include <string>
 #include "ui_state.h"
 #include "worker_supervisor.h"
+#include "device_picker.h"
+#include "settings.h"
 
 namespace vc::ui {
 
@@ -19,6 +21,8 @@ class AppWindow {
   bool create(const wchar_t* title);
   HWND hwnd() const { return hwnd_; }
   void setTray(Tray* t) { tray_ = t; }
+  void setSettings(vc::Settings* s, std::string configPath) { settings_ = s; configPath_ = std::move(configPath); }
+  void markSpawned() { spawned_ = true; }   // main.cpp calls this when it spawns at startup
 
   void showRestore();          // bring back from tray (single-instance restore + tray click)
   void onCommandBypass();      // shared path for window + tray "Enabled" toggle
@@ -35,12 +39,20 @@ class AppWindow {
   void layout(D2D1_SIZE_F sz); // recompute control rects
   void sendCurrent(const vc::ipc::Params& p);
   int  hitControl(int x, int y) const;   // 0=RNNoise 1=DFN3 2=Bypass 3=Relaunch, -1=none
+  void refreshDevices();                 // enumerate WASAPI devices + seed picker active from settings
+  D2D1_RECT_F overlayRect() const;       // the open dropdown's bounding rect
+  int  overlayHit(int x, int y) const;   // row index under (x,y) in the open overlay, or -1
+  void applyPick(PickerKind k, size_t rowIndex);   // persist + spawn/switch (Task 9)
 
   HINSTANCE hInst_;
   HWND hwnd_ = nullptr;
   WorkerSupervisor* sup_;
   UiState* state_;
   Tray* tray_ = nullptr;
+  vc::Settings* settings_ = nullptr;
+  std::string configPath_;
+  DevicePicker picker_;
+  bool spawned_ = false;   // worker spawned/attached (startup or via a device pick)
 
   ID2D1Factory* d2dFactory_ = nullptr;
   IDWriteFactory* dwFactory_ = nullptr;
@@ -52,7 +64,8 @@ class AppWindow {
   int hot_ = -1;   // control under the cursor (see hitControl); drives hover highlight
 
   // control rects (client coords), recomputed in layout()
-  D2D1_RECT_F rcEngineRnn_{}, rcEngineDfn_{}, rcBypass_{}, rcRelaunch_{};
+  D2D1_RECT_F rcMicField_{}, rcOutField_{};
+  D2D1_RECT_F rcEngineRnn_{}, rcEngineDfn_{}, rcBypass_{}, rcRelaunch_{}, rcQuit_{};
 };
 
 }  // namespace vc::ui

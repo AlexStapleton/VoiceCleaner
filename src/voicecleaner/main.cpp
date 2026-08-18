@@ -1,6 +1,6 @@
 #include <windows.h>
 #include <string>
-#include "config.h"          // vc::Config
+#include "settings.h"        // vc::Settings
 #include "app_window.h"
 #include "tray.h"
 #include "worker_supervisor.h"
@@ -36,28 +36,26 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
   const std::wstring dir = moduleDir();
   const std::wstring cfgPath = dir + L"\\settings.toml";
 
+  std::string cfgUtf8;
+  cfgUtf8.reserve(cfgPath.size());
+  for (wchar_t c : cfgPath) cfgUtf8.push_back(static_cast<char>(c));   // explicit narrow (ASCII path)
+
   UiState state; state.setRenderLabel("CABLE Input");
   WorkerSupervisor sup(dir, cfgPath);
   AppWindow win(hInst, &sup, &state);
+
+  vc::Settings settings = vc::Settings::load(cfgUtf8);   // tolerant: missing/bad => empty
+  win.setSettings(&settings, cfgUtf8);                    // seed the picker before create()
+
   if (!win.create(L"VoiceCleaner")) { CoUninitialize(); return 1; }
 
   Tray tray(hInst, win.hwnd());
   tray.add();
   win.setTray(&tray);
 
-  // Pre-flight: config must exist and name both devices, else show NoConfig and do NOT spawn.
-  bool spawn = false;
-  std::string cfgUtf8;
-  cfgUtf8.reserve(cfgPath.size());
-  for (wchar_t c : cfgPath) cfgUtf8.push_back(static_cast<char>(c));   // explicit narrow (ASCII path)
-  try {
-    vc::Config cfg = vc::Config::load(cfgUtf8);
-    if (cfg.captureDeviceId.empty() || cfg.renderDeviceId.empty()) state.onNoConfig();
-    else spawn = true;
-  } catch (...) {
-    state.onNoConfig();   // missing/malformed settings.toml
-  }
-  if (spawn) sup.startOrAttach();
+  // First-run: spawn only when both devices are already chosen; else show the pickers (NoConfig).
+  if (!settings.activeCaptureId.empty() && !settings.renderId.empty()) { sup.startOrAttach(); win.markSpawned(); }
+  else                                                                 state.onNoConfig();
 
   MSG msg;
   while (GetMessage(&msg, nullptr, 0, 0)) { TranslateMessage(&msg); DispatchMessage(&msg); }
