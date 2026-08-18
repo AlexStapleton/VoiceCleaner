@@ -7,6 +7,7 @@
 #include "worker_supervisor.h"
 #include "device_picker.h"
 #include "settings.h"
+#include "slider.h"
 
 namespace vc::ui {
 
@@ -43,6 +44,13 @@ class AppWindow {
   D2D1_RECT_F overlayRect() const;       // the open dropdown's bounding rect
   int  overlayHit(int x, int y) const;   // row index under (x,y) in the open overlay, or -1
   void applyPick(PickerKind k, size_t rowIndex);   // persist + spawn/switch (Task 9)
+  Slider& sliderByIndex(int i);
+  D2D1_RECT_F& trackByIndex(int i);
+  int  trackHit(int x, int y) const;               // slider index whose track band contains (x,y), or -1
+  void setSliderFromX(int i, int x);               // set slider i's value from click/drag x
+  bool aggressionEnabled() const;                  // false when active engine is RNNoise
+  vc::ipc::Params applySlider(int i);              // push slider i's value into UiState -> Params
+  void persistTuning();                            // write the active profile on drag-end (Task 6)
 
   HINSTANCE hInst_;
   HWND hwnd_ = nullptr;
@@ -59,6 +67,7 @@ class AppWindow {
   IDWriteTextFormat* textFmt_ = nullptr;    // status line: left-aligned, wrapped
   IDWriteTextFormat* centerFmt_ = nullptr;  // control labels: centered both axes
   IDWriteTextFormat* capFmt_ = nullptr;     // section captions: small, centered
+  IDWriteTextFormat* capFmtRight_ = nullptr;// slider value: small, right-aligned
   ID2D1HwndRenderTarget* rt_ = nullptr;
 
   int hot_ = -1;   // control under the cursor (see hitControl); drives hover highlight
@@ -66,6 +75,13 @@ class AppWindow {
   // control rects (client coords), recomputed in layout()
   D2D1_RECT_F rcMicField_{}, rcOutField_{};
   D2D1_RECT_F rcEngineRnn_{}, rcEngineDfn_{}, rcBypass_{}, rcRelaunch_{}, rcQuit_{};
+
+  Slider sldGain_{-30.0f, -6.0f, -20.0f, SliderFmt::Dbfs};
+  Slider sldAggr_{0.0f, 1.0f, 0.0f, SliderFmt::Ratio2};
+  Slider sldHpf_{40.0f, 200.0f, 80.0f, SliderFmt::Hz};
+  Slider sldLim_{-6.0f, 0.0f, -1.0f, SliderFmt::Db};
+  D2D1_RECT_F rcGain_{}, rcAggr_{}, rcHpf_{}, rcLim_{};   // track rects
+  int grabbed_ = -1;        // slider being dragged: 0=gain 1=aggr 2=hpf 3=lim, -1=none
 };
 
 }  // namespace vc::ui

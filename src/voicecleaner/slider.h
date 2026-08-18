@@ -9,10 +9,9 @@ enum class SliderFmt { Dbfs, Ratio2, Hz, Db };
 class Slider {
  public:
   Slider() = default;
-  Slider(float min, float max, float value, SliderFmt fmt) : min_(min), max_(max), fmt_(fmt) { setValue(value); }
+  // Params named lo/hi (not min/max) to avoid the Windows min/max macros when windows.h is in scope.
+  Slider(float lo, float hi, float value, SliderFmt fmt) : min_(lo), max_(hi), fmt_(fmt) { setValue(value); }
   float value() const { return value_; }
-  float min() const { return min_; }
-  float max() const { return max_; }
   float fraction() const;              // (value-min)/(max-min), clamped to 0..1
   void  setFraction(float t);          // value = min + clamp(t,0,1)*(max-min)
   void  setValue(float v);             // clamped to [min,max]
