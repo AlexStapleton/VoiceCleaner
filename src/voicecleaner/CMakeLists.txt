@@ -8,9 +8,9 @@ endif()
 
 # The GUI executable: thin Win32/D2D/tray glue over voicecleaner-core.
 add_executable(voicecleaner WIN32
-  main.cpp worker_supervisor.cpp app_window.cpp tray.cpp)
+  main.cpp worker_supervisor.cpp app_window.cpp tray.cpp device_enum.cpp)
 target_link_libraries(voicecleaner PRIVATE
-  voicecleaner-core win-ipc transport-core
+  voicecleaner-core win-ipc transport-core win-audio
   d2d1 dwrite user32 shell32 ole32)
 if (MSVC)
   target_compile_options(voicecleaner PRIVATE /utf-8)
