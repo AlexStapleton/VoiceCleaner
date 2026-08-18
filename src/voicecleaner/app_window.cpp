@@ -119,6 +119,7 @@ void AppWindow::layout(D2D1_SIZE_F sz) {
   rcEngineDfn_ = D2D1::RectF(mid + gap*0.5f, 232, sz.width - pad,  232 + h);
   rcBypass_    = D2D1::RectF(pad, 300, sz.width - pad, 300 + h);
   rcRelaunch_  = D2D1::RectF(pad, 354, sz.width - pad, 354 + h);
+  rcQuit_      = D2D1::RectF(sz.width - pad - 90, sz.height - 36, sz.width - pad, sz.height - 10);
 }
 
 void AppWindow::paint() {
@@ -188,7 +189,11 @@ void AppWindow::paint() {
     label(L"Relaunch worker", rcRelaunch_, text, centerFmt_);
   }
 
-  // 6. Open dropdown overlay — drawn last, on top of everything
+  // 6. Quit (footer, right-aligned) — full shutdown, same path as the tray Quit
+  box(rcQuit_, hot_==4 ? panelHot : panel);
+  label(L"Quit", rcQuit_, text, centerFmt_);
+
+  // 7. Open dropdown overlay — drawn last, on top of everything
   if (picker_.isOpen()) {
     PickerKind k = picker_.openKind();
     D2D1_RECT_F o = overlayRect();
@@ -221,6 +226,7 @@ int AppWindow::hitControl(int x, int y) const {
   if (hit(rcEngineDfn_, x, y)) return 1;
   if (hit(rcBypass_,    x, y)) return 2;
   if (hit(rcRelaunch_,  x, y)) return 3;
+  if (hit(rcQuit_,      x, y)) return 4;
   return -1;
 }
 
@@ -327,6 +333,7 @@ LRESULT AppWindow::handle(UINT msg, WPARAM w, LPARAM l) {
         case 1: onCommandEngine(1); break;
         case 2: onCommandBypass(); break;   // onCommandBypass() itself no-ops when disabled
         case 3: if (state_->statusKind()==StatusKind::Down) requestRelaunch(); break;
+        case 4: sup_->shutdown(3000); DestroyWindow(hwnd_); break;   // full quit
       }
       return 0;
     }
