@@ -39,6 +39,9 @@ class AppWindow {
   void sendCurrent(const vc::ipc::Params& p);
   int  hitControl(int x, int y) const;   // 0=RNNoise 1=DFN3 2=Bypass 3=Relaunch, -1=none
   void refreshDevices();                 // enumerate WASAPI devices + seed picker active from settings
+  D2D1_RECT_F overlayRect() const;       // the open dropdown's bounding rect
+  int  overlayHit(int x, int y) const;   // row index under (x,y) in the open overlay, or -1
+  void applyPick(PickerKind k, size_t rowIndex);   // persist + spawn/switch (Task 9)
 
   HINSTANCE hInst_;
   HWND hwnd_ = nullptr;
@@ -59,6 +62,7 @@ class AppWindow {
   int hot_ = -1;   // control under the cursor (see hitControl); drives hover highlight
 
   // control rects (client coords), recomputed in layout()
+  D2D1_RECT_F rcMicField_{}, rcOutField_{};
   D2D1_RECT_F rcEngineRnn_{}, rcEngineDfn_{}, rcBypass_{}, rcRelaunch_{};
 };
 
