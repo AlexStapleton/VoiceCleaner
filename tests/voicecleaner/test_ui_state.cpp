@@ -198,3 +198,24 @@ TEST(SpawnArgs, ExactWorkerCommandLine) {
   std::wstring cmd = buildWorkerCommandLine(L"C:\\app", L"C:\\app\\settings.toml");
   EXPECT_EQ(cmd, L"\"C:\\app\\voicecleaner-worker.exe\" --config \"C:\\app\\settings.toml\"");
 }
+
+TEST(UiState, TuningSettersMutateCurrentAndReturnIt) {
+  UiState ui;
+  EXPECT_FLOAT_EQ(ui.onSetAggression(0.7f).aggression, 0.7f);
+  EXPECT_FLOAT_EQ(ui.onSetHpf(120.0f).hpfCutoffHz, 120.0f);
+  EXPECT_FLOAT_EQ(ui.onSetOutputGain(-18.0f).agcTargetDbfs, -18.0f);
+  EXPECT_FLOAT_EQ(ui.onSetLimiter(-2.0f).limiterCeilingDbfs, -2.0f);
+  EXPECT_FLOAT_EQ(ui.current().aggression, 0.7f);
+  EXPECT_FLOAT_EQ(ui.current().agcTargetDbfs, -18.0f);
+}
+TEST(UiState, SeedTuningSetsAllFourAndSurvivesBypassToggle) {
+  UiState ui;
+  ui.seedTuning(/*aggr*/0.4f, /*hpf*/90.0f, /*gain*/-16.0f, /*lim*/-3.0f);
+  EXPECT_FLOAT_EQ(ui.current().aggression, 0.4f);
+  EXPECT_FLOAT_EQ(ui.current().hpfCutoffHz, 90.0f);
+  EXPECT_FLOAT_EQ(ui.current().agcTargetDbfs, -16.0f);
+  EXPECT_FLOAT_EQ(ui.current().limiterCeilingDbfs, -3.0f);
+  vc::ipc::Params sent = ui.onToggleBypass();
+  EXPECT_FLOAT_EQ(sent.aggression, 0.4f);
+  EXPECT_FLOAT_EQ(sent.agcTargetDbfs, -16.0f);
+}
