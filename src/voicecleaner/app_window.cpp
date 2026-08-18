@@ -94,7 +94,15 @@ void AppWindow::refreshDevices() {
   std::vector<DeviceRow> cap, ren;
   enumerateDevices(cap, ren);
   picker_.setDevices(std::move(cap), std::move(ren));
-  if (settings_) picker_.setActive(settings_->activeCaptureId, settings_->renderId);
+  if (!settings_) return;
+  picker_.setActive(settings_->activeCaptureId, settings_->renderId);
+  if (vc::MicProfile* p = settings_->activeProfile()) {   // seed sliders + UiState from the active profile
+    sldGain_.setValue(p->outputGainDbfs);
+    sldAggr_.setValue(p->aggression);
+    sldHpf_.setValue(p->hpfHz);
+    sldLim_.setValue(p->limiterDbfs);
+    state_->seedTuning(p->aggression, p->hpfHz, p->outputGainDbfs, p->limiterDbfs);
+  }
 }
 
 LRESULT CALLBACK AppWindow::WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
@@ -291,7 +299,16 @@ vc::ipc::Params AppWindow::applySlider(int i) {
     default: return state_->onSetLimiter(s.value());
   }
 }
-void AppWindow::persistTuning() {}   // Task 6 implements
+void AppWindow::persistTuning() {
+  if (!settings_) return;
+  vc::MicProfile* p = settings_->activeProfile();
+  if (!p) return;
+  p->outputGainDbfs = sldGain_.value();
+  p->aggression     = sldAggr_.value();
+  p->hpfHz          = sldHpf_.value();
+  p->limiterDbfs    = sldLim_.value();
+  settings_->save(configPath_);
+}
 
 D2D1_RECT_F AppWindow::overlayRect() const {
   const D2D1_RECT_F& field = (picker_.openKind()==PickerKind::Capture) ? rcMicField_ : rcOutField_;
@@ -368,7 +385,14 @@ void AppWindow::tick() {
   }
   PollResult r = sup_->poll(GetTickCount64());
   if (!r.alive) state_->onWorkerDown();
-  else          state_->onTelemetry(r.telemetry, r.ready);
+  else {
+    state_->onTelemetry(r.telemetry, r.ready);
+    if (r.ready && !pushedTuning_) {   // apply the seeded profile tuning once the worker is running
+      pushedTuning_ = true;
+      vc::ipc::Command c; c.type = vc::ipc::CmdType::SetParams; c.params = state_->current();
+      sup_->send(c);
+    }
+  }
   if (tray_) tray_->update(*state_);
   InvalidateRect(hwnd_, nullptr, FALSE);
 }

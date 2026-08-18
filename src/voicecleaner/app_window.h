@@ -61,6 +61,7 @@ class AppWindow {
   std::string configPath_;
   DevicePicker picker_;
   bool spawned_ = false;   // worker spawned/attached (startup or via a device pick)
+  bool pushedTuning_ = false;   // seeded profile tuning sent to the worker once it became ready
 
   ID2D1Factory* d2dFactory_ = nullptr;
   IDWriteFactory* dwFactory_ = nullptr;
