@@ -12,8 +12,12 @@ DFN3 offline golden is engine-only and unaffected. New pure units: `Slider` + `U
 **Hardware finding (2026-08-17 A/B):** on real clicky input, **RNNoise clearly beats DFN3 at mouse/keyboard
 suppression** — DFN3 (spectral mask) passes short broadband transients; RNNoise (the shipped default) gates them
 better. Aggression deepens the mask, not transient timing, so it doesn't fix clicks. See
-[[realworld-audio-quality]]. **Next: a dedicated transient/click suppressor** (impulse-targeted gate after the
-engine) — the real fix for residual keyboard/mouse clicks; own brainstorm → spec → plan.
+[[realworld-audio-quality]]. **NEXT — READY TO IMPLEMENT: transient/click suppressor.** Design + plan written and
+committed; not yet built. Spec: [`2026-08-17-transient-click-suppressor-design.md`](superpowers/specs/2026-08-17-transient-click-suppressor-design.md);
+**plan (start here): [`2026-08-17-transient-click-suppressor.md`](superpowers/plans/2026-08-17-transient-click-suppressor.md)**
+— 7 TDD tasks, `git checkout -b feat/declicker`, Task 1 = the `Declicker` DSP unit. A voice-safe look-ahead ducker
+(HF-emphasis + crest detect + VAD back-off) inserted `HPF → declick → AGC`, a live `Params.declickStrength` + a
+fifth "DE-CLICK" slider, default off. Resume with superpowers:subagent-driven-development or executing-plans.
 
 _(historical)_ **Phase 4a device picker + settings persistence (merged 2026-08-17).** In-app capture/render
 pickers (custom D2D dropdowns; non-48 kHz greyed; device-gone "(not connected)"), `[global]`+`[mic."<id>"]`
