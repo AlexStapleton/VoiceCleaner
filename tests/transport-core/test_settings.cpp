@@ -89,6 +89,32 @@ TEST(Settings, ActiveProfileFollowsActiveId) {
   EXPECT_EQ(s.activeProfile(), nullptr);
 }
 
+TEST(Settings, TuningFieldsRoundTrip) {
+  Settings s;
+  s.activeCaptureId = "cap-1"; s.renderId = "ren-1";
+  vc::MicProfile& m = s.ensureProfile("cap-1", "K688");
+  m.aggression = 0.65f; m.hpfHz = 90.0f; m.outputGainDbfs = -18.0f; m.limiterDbfs = -2.0f;
+  auto p = (std::filesystem::temp_directory_path() / "vc_tmp_settings_tuning.toml").string();
+  s.save(p);
+  Settings r = Settings::load(p);
+  ASSERT_EQ(r.mics.size(), 1u);
+  EXPECT_FLOAT_EQ(r.mics[0].aggression, 0.65f);
+  EXPECT_FLOAT_EQ(r.mics[0].hpfHz, 90.0f);
+  EXPECT_FLOAT_EQ(r.mics[0].outputGainDbfs, -18.0f);
+  EXPECT_FLOAT_EQ(r.mics[0].limiterDbfs, -2.0f);
+}
+TEST(Settings, OlderProfileWithoutTuningLoadsDefaults) {
+  auto p = (std::filesystem::temp_directory_path() / "vc_tmp_settings_old.toml").string();
+  std::ofstream(p) <<
+    "[global]\nactive_capture_id=\"c1\"\nrender_id=\"r1\"\nring_frames=16\n"
+    "[mic.\"c1\"]\nname=\"Mic\"\nengine=\"dfn3\"\n";
+  Settings r = Settings::load(p);
+  ASSERT_EQ(r.mics.size(), 1u);
+  EXPECT_FLOAT_EQ(r.mics[0].aggression, 0.0f);
+  EXPECT_FLOAT_EQ(r.mics[0].hpfHz, 80.0f);
+  EXPECT_FLOAT_EQ(r.mics[0].outputGainDbfs, -20.0f);
+  EXPECT_FLOAT_EQ(r.mics[0].limiterDbfs, -1.0f);
+}
 TEST(Settings, SaveLoadRoundTripIsIdentity) {
   Settings s;
   s.activeCaptureId = "cap-1"; s.renderId = "ren-1"; s.ringFrames = 16;

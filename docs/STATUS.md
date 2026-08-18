@@ -2,20 +2,23 @@
 
 _Last updated: 2026-08-17_
 
-**Active work:** COMPLETE (pending hardware check) — **Phase 4a device picker + settings persistence.**
-`voicecleaner.exe` now lets the user pick capture + render devices in-app (custom-drawn dark dropdowns;
-non-48 kHz devices greyed as "48 kHz only"; device-gone shows "(not connected)"), persists them to a new
-`[global]` + `[mic."<id>"]` `settings.toml`, and applies them: first-run pick spawns the worker; a live mic
-switch sends `SelectCaptureDevice` + `SetParams(engine)` (pipeline rebuild, no respawn), render switch sends
-`SelectRenderDevice`. A visible **window Quit** control does the full shutdown (same as the tray). A shared
-`Settings` model in `transport-core` owns the schema; `Config::load` resolves the active profile through it,
-and **flat Phase-3 / `drift*.toml` files still load unchanged** (back-compat). New pure units: `Settings`
-(transport-core) + `DevicePicker` (voicecleaner-core), both unit-tested. Total tests now **142 passing**
-(Debug and Release). No DSP source changed (DFN3 golden unaffected). **What remains for a human:** the manual
-real-hardware checklist (plan [`2026-08-17-product-shell-phase4a-device-picker.md`](superpowers/plans/2026-08-17-product-shell-phase4a-device-picker.md)
-Task 11 Step 4 — first-run pick → audio flows, live mic/render switch, non-48 kHz greying, device-gone,
-persistence across relaunch, on the FIFINE K688 + VB-Cable). **Next:** 4b level meter, 4c tuning sliders,
-4d warm-standby toggle + per-mic drift persistence.
+**Active work:** COMPLETE (hardware-tested) — **Phase 4c tuning sliders + AGC softening.** `voicecleaner.exe`
+has four live tuning sliders — **output gain** (`agcTargetDbfs`), **aggression** (DFN3-only, greyed on RNNoise),
+**HPF**, **limiter** — custom-drawn D2D with a draggable thumb; dragging sends `SetParams` live, values are
+**seeded per-mic from the profile on attach**, **pushed once the worker is ready**, and **persisted on drag-end**.
+The **AGC default was softened** (target `-15 → -20 dBFS`, makeup cap `+30 → +18 dB`) — the only DSP edit; the
+DFN3 offline golden is engine-only and unaffected. New pure units: `Slider` + `UiState` tuning setters
+(voicecleaner-core), `MicProfile` tuning fields (transport-core). Total tests **149 passing** (Debug + Release).
+**Hardware finding (2026-08-17 A/B):** on real clicky input, **RNNoise clearly beats DFN3 at mouse/keyboard
+suppression** — DFN3 (spectral mask) passes short broadband transients; RNNoise (the shipped default) gates them
+better. Aggression deepens the mask, not transient timing, so it doesn't fix clicks. See
+[[realworld-audio-quality]]. **Next: a dedicated transient/click suppressor** (impulse-targeted gate after the
+engine) — the real fix for residual keyboard/mouse clicks; own brainstorm → spec → plan.
+
+_(historical)_ **Phase 4a device picker + settings persistence (merged 2026-08-17).** In-app capture/render
+pickers (custom D2D dropdowns; non-48 kHz greyed; device-gone "(not connected)"), `[global]`+`[mic."<id>"]`
+`settings.toml` via a shared `Settings` model (`Config::load` resolves it; flat files back-compatible), live
+mic/render switching over the pipe, window Quit. New pure units `Settings` + `DevicePicker`.
 
 _(historical)_ **Phase 3 product-shell UI skeleton (merged 2026-08-16).** `voicecleaner.exe` (Direct2D window +
 tray) spawns/attaches/supervises the worker and drives engine switch + bypass over the named-pipe/shm IPC;

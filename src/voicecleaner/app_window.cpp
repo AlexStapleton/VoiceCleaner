@@ -30,6 +30,7 @@ AppWindow::AppWindow(HINSTANCE hInst, WorkerSupervisor* sup, UiState* state)
 
 AppWindow::~AppWindow() {
   discardRenderTarget();
+  if (capFmtRight_) capFmtRight_->Release();
   if (capFmt_) capFmt_->Release();
   if (centerFmt_) centerFmt_->Release();
   if (textFmt_) textFmt_->Release();
@@ -62,6 +63,13 @@ bool AppWindow::create(const wchar_t* title) {
                                11.0f, L"en-us", &capFmt_);
   capFmt_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
 
+  // Slider value: small, right-aligned (shares the caption row with the left-aligned name).
+  dwFactory_->CreateTextFormat(L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_SEMI_BOLD,
+                               DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+                               11.0f, L"en-us", &capFmtRight_);
+  capFmtRight_->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+  capFmtRight_->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
+
   WNDCLASSW wc{};
   wc.lpfnWndProc = &AppWindow::WndProc;
   wc.hInstance = hInst_;
@@ -71,7 +79,7 @@ bool AppWindow::create(const wchar_t* title) {
 
   // Fixed, non-resizable window sized so the client area is exactly kClientW x kClientH.
   const DWORD style = WS_OVERLAPPEDWINDOW & ~WS_MAXIMIZEBOX & ~WS_THICKFRAME;
-  RECT wr{0, 0, 460, 420};
+  RECT wr{0, 0, 460, 620};
   AdjustWindowRectEx(&wr, style, FALSE, 0);
   hwnd_ = CreateWindowExW(0, kClass, title, style, CW_USEDEFAULT, CW_USEDEFAULT,
                           wr.right - wr.left, wr.bottom - wr.top, nullptr, nullptr, hInst_, this);
@@ -86,7 +94,15 @@ void AppWindow::refreshDevices() {
   std::vector<DeviceRow> cap, ren;
   enumerateDevices(cap, ren);
   picker_.setDevices(std::move(cap), std::move(ren));
-  if (settings_) picker_.setActive(settings_->activeCaptureId, settings_->renderId);
+  if (!settings_) return;
+  picker_.setActive(settings_->activeCaptureId, settings_->renderId);
+  if (vc::MicProfile* p = settings_->activeProfile()) {   // seed sliders + UiState from the active profile
+    sldGain_.setValue(p->outputGainDbfs);
+    sldAggr_.setValue(p->aggression);
+    sldHpf_.setValue(p->hpfHz);
+    sldLim_.setValue(p->limiterDbfs);
+    state_->seedTuning(p->aggression, p->hpfHz, p->outputGainDbfs, p->limiterDbfs);
+  }
 }
 
 LRESULT CALLBACK AppWindow::WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
@@ -118,7 +134,12 @@ void AppWindow::layout(D2D1_SIZE_F sz) {
   rcEngineRnn_ = D2D1::RectF(pad,           232, mid - gap * 0.5f, 232 + h);
   rcEngineDfn_ = D2D1::RectF(mid + gap*0.5f, 232, sz.width - pad,  232 + h);
   rcBypass_    = D2D1::RectF(pad, 300, sz.width - pad, 300 + h);
-  rcRelaunch_  = D2D1::RectF(pad, 354, sz.width - pad, 354 + h);
+  const float tw = sz.width - pad;
+  rcGain_ = D2D1::RectF(pad, 372, tw, 384);   // 12px track; caption row is drawn above it
+  rcAggr_ = D2D1::RectF(pad, 416, tw, 428);
+  rcHpf_  = D2D1::RectF(pad, 460, tw, 472);
+  rcLim_  = D2D1::RectF(pad, 504, tw, 516);
+  rcRelaunch_  = D2D1::RectF(pad, 536, sz.width - pad, 536 + h);   // only when Down
   rcQuit_      = D2D1::RectF(sz.width - pad - 90, sz.height - 36, sz.width - pad, sz.height - 10);
 }
 
@@ -189,7 +210,25 @@ void AppWindow::paint() {
     label(L"Relaunch worker", rcRelaunch_, text, centerFmt_);
   }
 
-  // 6. Quit (footer, right-aligned) — full shutdown, same path as the tray Quit
+  // 6. Tuning sliders (caption + value above; track with a draggable thumb)
+  auto drawSlider = [&](const wchar_t* cap, int i, bool enabled) {
+    D2D1_RECT_F& tr = trackByIndex(i);
+    ID2D1Brush* fg = enabled ? text : dim;
+    label(cap, D2D1::RectF(tr.left, tr.top - 20, tr.right, tr.top - 4), dim, capFmt_);
+    std::wstring val = enabled ? toW(sliderByIndex(i).format()) : L"DFN3 only";
+    label(val, D2D1::RectF(tr.left, tr.top - 20, tr.right, tr.top - 4), fg, capFmtRight_);
+    box(tr, panel);
+    float f = sliderByIndex(i).fraction();
+    float cx = tr.left + f * (tr.right - tr.left);
+    D2D1_RECT_F thumb = D2D1::RectF(cx - 6, tr.top - 6, cx + 6, tr.bottom + 6);
+    box(thumb, enabled ? (grabbed_==i ? accentHot : accent) : disabled);
+  };
+  drawSlider(L"OUTPUT GAIN", 0, true);
+  drawSlider(L"AGGRESSION",  1, aggressionEnabled());
+  drawSlider(L"HPF",         2, true);
+  drawSlider(L"LIMITER",     3, true);
+
+  // 7. Quit (footer, right-aligned) — full shutdown, same path as the tray Quit
   box(rcQuit_, hot_==4 ? panelHot : panel);
   label(L"Quit", rcQuit_, text, centerFmt_);
 
@@ -228,6 +267,47 @@ int AppWindow::hitControl(int x, int y) const {
   if (hit(rcRelaunch_,  x, y)) return 3;
   if (hit(rcQuit_,      x, y)) return 4;
   return -1;
+}
+
+Slider& AppWindow::sliderByIndex(int i) {
+  switch (i) { case 0: return sldGain_; case 1: return sldAggr_; case 2: return sldHpf_; default: return sldLim_; }
+}
+D2D1_RECT_F& AppWindow::trackByIndex(int i) {
+  switch (i) { case 0: return rcGain_; case 1: return rcAggr_; case 2: return rcHpf_; default: return rcLim_; }
+}
+bool AppWindow::aggressionEnabled() const { return state_->activeEngine() == 1; }  // DFN3 only
+
+int AppWindow::trackHit(int x, int y) const {
+  const D2D1_RECT_F rc[4] = { rcGain_, rcAggr_, rcHpf_, rcLim_ };
+  for (int i = 0; i < 4; ++i) {
+    if (i == 1 && !aggressionEnabled()) continue;   // aggression not draggable on RNNoise
+    if (x >= rc[i].left && x <= rc[i].right && y >= rc[i].top - 12 && y <= rc[i].bottom + 12) return i;
+  }
+  return -1;
+}
+void AppWindow::setSliderFromX(int i, int x) {
+  D2D1_RECT_F& r = trackByIndex(i);
+  float t = (r.right > r.left) ? ((float)x - r.left) / (r.right - r.left) : 0.0f;
+  sliderByIndex(i).setFraction(t);
+}
+vc::ipc::Params AppWindow::applySlider(int i) {
+  Slider& s = sliderByIndex(i);
+  switch (i) {
+    case 0: return state_->onSetOutputGain(s.value());
+    case 1: return state_->onSetAggression(s.value());
+    case 2: return state_->onSetHpf(s.value());
+    default: return state_->onSetLimiter(s.value());
+  }
+}
+void AppWindow::persistTuning() {
+  if (!settings_) return;
+  vc::MicProfile* p = settings_->activeProfile();
+  if (!p) return;
+  p->outputGainDbfs = sldGain_.value();
+  p->aggression     = sldAggr_.value();
+  p->hpfHz          = sldHpf_.value();
+  p->limiterDbfs    = sldLim_.value();
+  settings_->save(configPath_);
 }
 
 D2D1_RECT_F AppWindow::overlayRect() const {
@@ -305,7 +385,14 @@ void AppWindow::tick() {
   }
   PollResult r = sup_->poll(GetTickCount64());
   if (!r.alive) state_->onWorkerDown();
-  else          state_->onTelemetry(r.telemetry, r.ready);
+  else {
+    state_->onTelemetry(r.telemetry, r.ready);
+    if (r.ready && !pushedTuning_) {   // apply the seeded profile tuning once the worker is running
+      pushedTuning_ = true;
+      vc::ipc::Command c; c.type = vc::ipc::CmdType::SetParams; c.params = state_->current();
+      sup_->send(c);
+    }
+  }
   if (tray_) tray_->update(*state_);
   InvalidateRect(hwnd_, nullptr, FALSE);
 }
@@ -328,6 +415,8 @@ LRESULT AppWindow::handle(UINT msg, WPARAM w, LPARAM l) {
       }
       if (hit(rcMicField_, x, y)) { refreshDevices(); picker_.open(PickerKind::Capture); InvalidateRect(hwnd_, nullptr, FALSE); return 0; }
       if (hit(rcOutField_, x, y)) { refreshDevices(); picker_.open(PickerKind::Render);  InvalidateRect(hwnd_, nullptr, FALSE); return 0; }
+      { int s = trackHit(x, y);
+        if (s >= 0) { grabbed_ = s; setSliderFromX(s, x); sendCurrent(applySlider(s)); InvalidateRect(hwnd_, nullptr, FALSE); return 0; } }
       switch (hitControl(x, y)) {
         case 0: onCommandEngine(0); break;
         case 1: onCommandEngine(1); break;
@@ -341,6 +430,12 @@ LRESULT AppWindow::handle(UINT msg, WPARAM w, LPARAM l) {
       if (w == VK_ESCAPE && picker_.isOpen()) { picker_.close(); InvalidateRect(hwnd_, nullptr, FALSE); }
       return 0;
     case WM_MOUSEMOVE: {
+      if (grabbed_ >= 0) {   // dragging a slider
+        setSliderFromX(grabbed_, GET_X_LPARAM(l));
+        sendCurrent(applySlider(grabbed_));
+        InvalidateRect(hwnd_, nullptr, FALSE);
+        return 0;
+      }
       int h = hitControl(GET_X_LPARAM(l), GET_Y_LPARAM(l));
       if (h==2 && !state_->bypassEnabled()) h = -1;                       // disabled bypass: no hover
       if (h==3 && state_->statusKind()!=StatusKind::Down) h = -1;         // relaunch only when down
@@ -349,6 +444,9 @@ LRESULT AppWindow::handle(UINT msg, WPARAM w, LPARAM l) {
       TrackMouseEvent(&tme);                                             // so WM_MOUSELEAVE fires
       return 0;
     }
+    case WM_LBUTTONUP:
+      if (grabbed_ >= 0) { persistTuning(); grabbed_ = -1; }   // persist on drag-end
+      return 0;
     case WM_MOUSELEAVE:
       if (hot_ != -1) { hot_ = -1; InvalidateRect(hwnd_, nullptr, FALSE); }
       return 0;

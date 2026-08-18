@@ -12,6 +12,10 @@ struct MicProfile {
   std::string engine = "rnnoise"; // "none" | "rnnoise" | "dfn3"
   bool warmStandby = false;
   bool dspChain = true;
+  float aggression     = 0.0f;    // .aggression
+  float hpfHz          = 80.0f;   // .hpf_hz
+  float outputGainDbfs = -20.0f;  // .output_gain_dbfs  (== agcTargetDbfs)
+  float limiterDbfs    = -1.0f;   // .limiter_dbfs
 };
 
 // The full settings.toml as the UI owns it: a [global] block + every [mic."<id>"] profile.
