@@ -38,6 +38,10 @@ Settings Settings::load(const std::string& path) {
           m.engine      = (*p)["engine"].value_or(std::string("rnnoise"));
           m.warmStandby = (*p)["warm_standby"].value_or(false);
           m.dspChain    = (*p)["dsp_chain"].value_or(true);
+          m.aggression     = (float)(*p)["aggression"].value_or(0.0);
+          m.hpfHz          = (float)(*p)["hpf_hz"].value_or(80.0);
+          m.outputGainDbfs = (float)(*p)["output_gain_dbfs"].value_or(-20.0);
+          m.limiterDbfs    = (float)(*p)["limiter_dbfs"].value_or(-1.0);
           s.mics.push_back(std::move(m));
         }
       }
@@ -86,6 +90,10 @@ void Settings::save(const std::string& path) const {
     p.insert_or_assign("engine", m.engine);
     p.insert_or_assign("warm_standby", m.warmStandby);
     p.insert_or_assign("dsp_chain", m.dspChain);
+    p.insert_or_assign("aggression", (double)m.aggression);
+    p.insert_or_assign("hpf_hz", (double)m.hpfHz);
+    p.insert_or_assign("output_gain_dbfs", (double)m.outputGainDbfs);
+    p.insert_or_assign("limiter_dbfs", (double)m.limiterDbfs);
     micTbl.insert_or_assign(m.id, std::move(p));
   }
 
