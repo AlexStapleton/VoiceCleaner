@@ -5,6 +5,8 @@
 #include <string>
 #include "ui_state.h"
 #include "worker_supervisor.h"
+#include "device_picker.h"
+#include "settings.h"
 
 namespace vc::ui {
 
@@ -19,6 +21,7 @@ class AppWindow {
   bool create(const wchar_t* title);
   HWND hwnd() const { return hwnd_; }
   void setTray(Tray* t) { tray_ = t; }
+  void setSettings(vc::Settings* s, std::string configPath) { settings_ = s; configPath_ = std::move(configPath); }
 
   void showRestore();          // bring back from tray (single-instance restore + tray click)
   void onCommandBypass();      // shared path for window + tray "Enabled" toggle
@@ -35,12 +38,16 @@ class AppWindow {
   void layout(D2D1_SIZE_F sz); // recompute control rects
   void sendCurrent(const vc::ipc::Params& p);
   int  hitControl(int x, int y) const;   // 0=RNNoise 1=DFN3 2=Bypass 3=Relaunch, -1=none
+  void refreshDevices();                 // enumerate WASAPI devices + seed picker active from settings
 
   HINSTANCE hInst_;
   HWND hwnd_ = nullptr;
   WorkerSupervisor* sup_;
   UiState* state_;
   Tray* tray_ = nullptr;
+  vc::Settings* settings_ = nullptr;
+  std::string configPath_;
+  DevicePicker picker_;
 
   ID2D1Factory* d2dFactory_ = nullptr;
   IDWriteFactory* dwFactory_ = nullptr;

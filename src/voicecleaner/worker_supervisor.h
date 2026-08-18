@@ -28,6 +28,8 @@ class WorkerSupervisor {
 
   PollResult poll(uint64_t nowMs);           // call from WM_TIMER (~10 Hz)
   bool send(const vc::ipc::Command& c);       // PipeClient::send to the worker pipe
+  bool sendSelectCapture(const std::string& id, double driftSeedPpm);  // pipe: SelectCaptureDevice
+  bool sendSelectRender(const std::string& id);                        // pipe: SelectRenderDevice
   void shutdown(uint64_t waitMs);             // send Shutdown, bounded-wait for exit
   bool workerDown() const { return down_; }
 

@@ -1,7 +1,9 @@
 #include "app_window.h"
 #include "tray.h"
+#include "device_enum.h"
 #include <windowsx.h>   // GET_X_LPARAM / GET_Y_LPARAM
 #include <string>
+#include <vector>
 
 #pragma comment(lib, "d2d1.lib")
 #pragma comment(lib, "dwrite.lib")
@@ -74,8 +76,16 @@ bool AppWindow::create(const wchar_t* title) {
                           wr.right - wr.left, wr.bottom - wr.top, nullptr, nullptr, hInst_, this);
   if (!hwnd_) return false;
   SetTimer(hwnd_, kTimerId, 100, nullptr);   // ~10 Hz telemetry poll
+  refreshDevices();                           // initial enumeration + active seed
   ShowWindow(hwnd_, SW_SHOW);
   return true;
+}
+
+void AppWindow::refreshDevices() {
+  std::vector<DeviceRow> cap, ren;
+  enumerateDevices(cap, ren);
+  picker_.setDevices(std::move(cap), std::move(ren));
+  if (settings_) picker_.setActive(settings_->activeCaptureId, settings_->renderId);
 }
 
 LRESULT CALLBACK AppWindow::WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
