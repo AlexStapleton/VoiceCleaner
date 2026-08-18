@@ -249,7 +249,38 @@ void AppWindow::sendCurrent(const vc::ipc::Params& p) {
 void AppWindow::onCommandEngine(uint32_t engine) { sendCurrent(state_->onSelectEngine(engine)); }
 void AppWindow::onCommandBypass() { if (state_->bypassEnabled()) sendCurrent(state_->onToggleBypass()); }
 
-void AppWindow::applyPick(PickerKind, size_t) { picker_.close(); }   // Task 9 implements persist + spawn/switch
+void AppWindow::applyPick(PickerKind k, size_t rowIndex) {
+  const std::vector<DeviceRow>& rows = picker_.rows(k);
+  if (rowIndex >= rows.size()) { picker_.close(); return; }
+  const DeviceRow chosen = rows[rowIndex];          // copy before pick() mutates picker state
+  std::string id = picker_.pick(k, rowIndex);       // "" if non-selectable / unchanged
+  if (id.empty()) { InvalidateRect(hwnd_, nullptr, FALSE); return; }
+  if (!settings_) { picker_.close(); return; }
+
+  if (k == PickerKind::Capture) {
+    settings_->ensureProfile(id, chosen.name);
+    settings_->activeCaptureId = id;
+  } else {
+    settings_->renderId = id;
+  }
+  settings_->save(configPath_);
+
+  if (!spawned_) {
+    // First run: spawn once BOTH devices are chosen; tick() then starts polling.
+    if (!settings_->activeCaptureId.empty() && !settings_->renderId.empty()) {
+      sup_->startOrAttach();
+      spawned_ = true;
+    }
+  } else if (k == PickerKind::Capture) {
+    sup_->sendSelectCapture(id, /*driftSeed*/0.0);         // live pipeline rebuild on the new mic
+    const vc::MicProfile* p = settings_->activeProfile();
+    uint32_t eng = (p && p->engine == "dfn3") ? 1u : 0u;
+    sendCurrent(state_->onSelectEngine(eng));              // apply the mic's engine
+  } else {
+    sup_->sendSelectRender(id);
+  }
+  InvalidateRect(hwnd_, nullptr, FALSE);
+}
 
 void AppWindow::requestRelaunch() {
   sup_->startOrAttach();
@@ -262,7 +293,7 @@ void AppWindow::showRestore() {
 }
 
 void AppWindow::tick() {
-  if (state_->statusKind() == StatusKind::NoConfig) {   // pre-flight NoConfig is terminal this phase — never poll/spawn (design §8)
+  if (state_->statusKind() == StatusKind::NoConfig && !spawned_) {   // no worker yet: show pickers, don't poll (design §8)
     if (tray_) tray_->update(*state_);
     return;
   }

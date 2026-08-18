@@ -54,7 +54,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
   win.setTray(&tray);
 
   // First-run: spawn only when both devices are already chosen; else show the pickers (NoConfig).
-  if (!settings.activeCaptureId.empty() && !settings.renderId.empty()) sup.startOrAttach();
+  if (!settings.activeCaptureId.empty() && !settings.renderId.empty()) { sup.startOrAttach(); win.markSpawned(); }
   else                                                                 state.onNoConfig();
 
   MSG msg;

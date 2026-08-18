@@ -22,6 +22,7 @@ class AppWindow {
   HWND hwnd() const { return hwnd_; }
   void setTray(Tray* t) { tray_ = t; }
   void setSettings(vc::Settings* s, std::string configPath) { settings_ = s; configPath_ = std::move(configPath); }
+  void markSpawned() { spawned_ = true; }   // main.cpp calls this when it spawns at startup
 
   void showRestore();          // bring back from tray (single-instance restore + tray click)
   void onCommandBypass();      // shared path for window + tray "Enabled" toggle
@@ -51,6 +52,7 @@ class AppWindow {
   vc::Settings* settings_ = nullptr;
   std::string configPath_;
   DevicePicker picker_;
+  bool spawned_ = false;   // worker spawned/attached (startup or via a device pick)
 
   ID2D1Factory* d2dFactory_ = nullptr;
   IDWriteFactory* dwFactory_ = nullptr;
