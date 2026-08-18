@@ -52,10 +52,10 @@ TEST(DspChain, RemovesDcOffset){
 
 TEST(DspChain, CurrentsInitializeToConfigNotZero) {
   vc::PassthroughFilter eng;
-  vc::DspChain::Config cfg;              // hpf 80, agc -15, lim -1
+  vc::DspChain::Config cfg;              // hpf 80, agc -20, lim -1
   vc::DspChain chain(&eng, cfg);
   EXPECT_FLOAT_EQ(chain.currentHpfCutoffHz(), 80.0f);
-  EXPECT_FLOAT_EQ(chain.currentAgcTargetDb(), -15.0f);
+  EXPECT_FLOAT_EQ(chain.currentAgcTargetDb(), -20.0f);
   EXPECT_FLOAT_EQ(chain.currentLimiterCeilingDb(), -1.0f);
 }
 TEST(DspChain, HpfCutoffRampsMonotonicallyToTarget) {
@@ -77,13 +77,13 @@ TEST(DspChain, HpfCutoffRampsMonotonicallyToTarget) {
 TEST(DspChain, NoSingleFrameJumpOnParamChange) {
   vc::PassthroughFilter eng;
   vc::DspChain chain(&eng, vc::DspChain::Config{});
-  chain.setAgcTargetDb(0.0f);            // big change from -15
+  chain.setAgcTargetDb(0.0f);            // big change from -20
   float prev = chain.currentAgcTargetDb();
   std::vector<float> in(vc::FRAME_SAMPLES, 0.0f), out(vc::FRAME_SAMPLES);
   for (int f = 0; f < 5; ++f) {
     chain.process_frame(in.data(), out.data());
     float step = std::fabs(chain.currentAgcTargetDb() - prev);
-    EXPECT_LT(step, 10.0f);              // no full-jump in one frame (full jump would be 15 dB)
+    EXPECT_LT(step, 10.0f);              // no full-jump in one frame (full jump would be 20 dB)
     prev = chain.currentAgcTargetDb();
   }
 }

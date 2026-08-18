@@ -5,7 +5,7 @@ namespace vc {
 class Agc {
 public:
   struct Config { float targetRmsDb=-15.0f; float attackMs=50.0f; float releaseMs=500.0f;
-                  float maxGainDb=30.0f; float minGainDb=-10.0f; float fs=48000.0f; };
+                  float maxGainDb=18.0f; float minGainDb=-10.0f; float fs=48000.0f; };
   explicit Agc(const Config& c);
   // Process n samples. When vadActive is false, the gain is FROZEN (no adaptation) — prevents
   // hunting up during pauses (blueprint §7.1). out may alias in.

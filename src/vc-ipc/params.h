@@ -18,7 +18,7 @@ struct Params {
     return Params{
         /*aggression*/ 0.0f,
         /*hpfCutoffHz*/ 80.0f,
-        /*agcTargetDbfs*/ -15.0f,
+        /*agcTargetDbfs*/ -20.0f,
         /*limiterCeilingDbfs*/ -1.0f,
         /*engine*/ 1u,
         /*bypass*/ 0u,

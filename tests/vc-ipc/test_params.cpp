@@ -17,7 +17,7 @@ TEST(Telemetry, IsTriviallyCopyableStandardLayout) {
 TEST(Params, DefaultsMatchTodaysDspChain) {
   Params p = Params::defaults();
   EXPECT_FLOAT_EQ(p.hpfCutoffHz, 80.0f);
-  EXPECT_FLOAT_EQ(p.agcTargetDbfs, -15.0f);
+  EXPECT_FLOAT_EQ(p.agcTargetDbfs, -20.0f);
   EXPECT_FLOAT_EQ(p.limiterCeilingDbfs, -1.0f);
   EXPECT_EQ(p.engine, 1u);
   EXPECT_EQ(p.bypass, 0u);

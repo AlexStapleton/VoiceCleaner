@@ -5,7 +5,7 @@ namespace vc {
 DspChain::DspChain(INoiseFilter* engine, const Config& c)
     : engine_(engine),
       hpf_(Biquad::highpass(c.fs, c.hpfCutoffHz)),
-      agc_({c.agcTargetDb, 50.0f, 500.0f, 30.0f, -10.0f, c.fs}),
+      agc_({c.agcTargetDb, 50.0f, 500.0f, 18.0f, -10.0f, c.fs}),
       lim_(c.limiterCeilingDb, 144, 50.0f, c.fs),
       open_(c.vadOpen),
       close_(c.vadClose),

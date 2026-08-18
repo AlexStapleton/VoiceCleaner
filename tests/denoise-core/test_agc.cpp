@@ -5,7 +5,7 @@
 using vc::Agc;
 static float rmsdb(const std::vector<float>& v,size_t from){double s=0;size_t n=0;for(size_t i=from;i<v.size();++i){s+=v[i]*v[i];++n;}return 20.0f*std::log10(std::sqrt(s/n)+1e-12);}
 TEST(Agc, RaisesQuietSignalTowardTarget){
-  Agc::Config c; c.targetRmsDb=-15; Agc a(c);
+  Agc::Config c; c.targetRmsDb=-15; c.maxGainDb=30; Agc a(c);   // pin cap: this mechanics test needs +22 dB
   std::vector<float> x(96000), y(96000);
   for(size_t i=0;i<x.size();++i) x[i]=0.02f*std::sin(2*3.14159f*300.0f*i/48000.0f); // ~-34 dBFS
   a.process(x.data(),y.data(),x.size(),true);

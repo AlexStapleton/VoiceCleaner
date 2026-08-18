@@ -14,7 +14,7 @@ public:
   struct Config {
     float fs = 48000.0f;
     float hpfCutoffHz = 80.0f;
-    float agcTargetDb = -15.0f;
+    float agcTargetDb = -20.0f;
     float limiterCeilingDb = -1.0f;
     float vadOpen = 0.6f;      // hysteresis open threshold
     float vadClose = 0.3f;     // hysteresis close threshold
