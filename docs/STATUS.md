@@ -1,23 +1,31 @@
 # VoiceCleaner — Project Status & Resume Guide
 
-_Last updated: 2026-08-17_
+_Last updated: 2026-08-18_
 
-**Active work:** COMPLETE (hardware-tested) — **Phase 4c tuning sliders + AGC softening.** `voicecleaner.exe`
+**Active work:** COMPLETE (software; hardware A/B pending) — **transient/click Declicker.** A voice-safe,
+RT-safe look-ahead **transient ducker** (`vc::Declicker`, denoise-core) is inserted into `DspChain`
+**`HPF → declick → AGC`**: HF-emphasis (RC high-pass) → fast/slow envelopes → crest detection → a 3 ms
+look-ahead gain duck whose depth scales with **(1 − VAD)** so speech is protected while clicks in the gaps
+are ducked. It flows live as **`Params.declickStrength`** (0 = off) over the existing pipe/relay, persists
+per-mic as **`.declick_strength`** in `settings.toml`, and is driven by a fifth **"DE-CLICK"** D2D slider —
+seeded on attach, pushed when the worker is ready, persisted on drag-end (reuses all the Phase 4c slider
+machinery). **Default off; no engine change — the DFN3 offline golden is engine-only and unaffected**
+(`src/dfn3`/`src/offline-cli` untouched; only `declicker.*` + `dsp_chain.*` changed in denoise-core). New
+pure unit `Declicker` (4 unit tests: pure-delay at 0, impulse ducked in silence, steady tone preserved, VAD
+back-off leaves the impulse when voice is active). Total tests **159 passing** (Debug + Release). Branch
+`feat/declicker`. **NEXT — manual hardware A/B:** confirm DE-CLICK audibly reduces keyboard/mouse clicks in
+the gaps between words, consonants stay crisp at moderate strength, and the setting persists across relaunch;
+tune `crestK`/`holdMs`/`hpHz` in `Declicker::Config` by ear if needed. See [[realworld-audio-quality]] — this
+targets the finding that short broadband transients leak through the spectral engines.
+
+_(historical)_ **Phase 4c tuning sliders + AGC softening (hardware-tested, merged 2026-08-17).** `voicecleaner.exe`
 has four live tuning sliders — **output gain** (`agcTargetDbfs`), **aggression** (DFN3-only, greyed on RNNoise),
 **HPF**, **limiter** — custom-drawn D2D with a draggable thumb; dragging sends `SetParams` live, values are
 **seeded per-mic from the profile on attach**, **pushed once the worker is ready**, and **persisted on drag-end**.
-The **AGC default was softened** (target `-15 → -20 dBFS`, makeup cap `+30 → +18 dB`) — the only DSP edit; the
-DFN3 offline golden is engine-only and unaffected. New pure units: `Slider` + `UiState` tuning setters
-(voicecleaner-core), `MicProfile` tuning fields (transport-core). Total tests **149 passing** (Debug + Release).
-**Hardware finding (2026-08-17 A/B):** on real clicky input, **RNNoise clearly beats DFN3 at mouse/keyboard
-suppression** — DFN3 (spectral mask) passes short broadband transients; RNNoise (the shipped default) gates them
-better. Aggression deepens the mask, not transient timing, so it doesn't fix clicks. See
-[[realworld-audio-quality]]. **NEXT — READY TO IMPLEMENT: transient/click suppressor.** Design + plan written and
-committed; not yet built. Spec: [`2026-08-17-transient-click-suppressor-design.md`](superpowers/specs/2026-08-17-transient-click-suppressor-design.md);
-**plan (start here): [`2026-08-17-transient-click-suppressor.md`](superpowers/plans/2026-08-17-transient-click-suppressor.md)**
-— 7 TDD tasks, `git checkout -b feat/declicker`, Task 1 = the `Declicker` DSP unit. A voice-safe look-ahead ducker
-(HF-emphasis + crest detect + VAD back-off) inserted `HPF → declick → AGC`, a live `Params.declickStrength` + a
-fifth "DE-CLICK" slider, default off. Resume with superpowers:subagent-driven-development or executing-plans.
+The **AGC default was softened** (target `-15 → -20 dBFS`, makeup cap `+30 → +18 dB`). **Hardware finding
+(2026-08-17 A/B):** on real clicky input, **RNNoise clearly beats DFN3 at mouse/keyboard suppression** — DFN3
+(spectral mask) passes short broadband transients; RNNoise gates them better; aggression deepens the mask, not
+transient timing, so it doesn't fix clicks. See [[realworld-audio-quality]] — the motivation for the Declicker above.
 
 _(historical)_ **Phase 4a device picker + settings persistence (merged 2026-08-17).** In-app capture/render
 pickers (custom D2D dropdowns; non-48 kHz greyed; device-gone "(not connected)"), `[global]`+`[mic."<id>"]`
