@@ -5,9 +5,10 @@ namespace vc {
 DspChain::DspChain(INoiseFilter* engine, const Config& c)
     : engine_(engine),
       hpf_(Biquad::highpass(c.fs, c.hpfCutoffHz)),
-      agc_({c.agcTargetDb, 50.0f, 500.0f, 18.0f, -10.0f, c.fs}),
+      agc_({c.agcTargetDb, 50.0f, 500.0f, 9.0f, -10.0f, c.fs}),   // maxGain 18->9 dB: cap noise over-amplification
       lim_(c.limiterCeilingDb, 144, 50.0f, c.fs),
       declick_(Declicker::Config{c.fs}),
+      gate_(NoiseGate::Config{c.fs}),
       open_(c.vadOpen),
       close_(c.vadClose),
       holdSamples_((int)(c.vadHoldMs * 0.001f * c.fs)),
@@ -15,7 +16,8 @@ DspChain::DspChain(INoiseFilter* engine, const Config& c)
       hpfCur_(c.hpfCutoffHz), hpfTarget_(c.hpfCutoffHz),
       agcCur_(c.agcTargetDb), agcTarget_(c.agcTargetDb),
       limCur_(c.limiterCeilingDb), limTarget_(c.limiterCeilingDb),
-      dckCur_(c.declickStrength), dckTarget_(c.declickStrength) {
+      dckCur_(c.declickStrength), dckTarget_(c.declickStrength),
+      gateCur_(c.gateStrength), gateTarget_(c.gateStrength) {
   declick_.setVoiceFloor(c.declickVoiceFloor);
 }
 
@@ -53,8 +55,12 @@ void DspChain::process_frame(const float* in, float* out) noexcept {
   }
   // 5. VAD-gated AGC.
   agc_.process(t2_, t1_, FRAME_SAMPLES, vadActive_);   // t2_ (declicked) -> t1_
+  // 5b. Noise gate (ramped depth): silence the non-speech gaps so the AGC's amplified noise floor
+  //     / typing residue drops out. Open == vadActive_ (same speech decision as the AGC).
+  gateCur_ = kRampCoef * gateCur_ + (1.0f - kRampCoef) * gateTarget_;
+  gate_.process(t1_, t2_, FRAME_SAMPLES, vadActive_, gateCur_);   // t1_ -> t2_ (gated)
   // 6. Limiter.
-  lim_.process(t1_, out, FRAME_SAMPLES);               // t1_ -> out
+  lim_.process(t2_, out, FRAME_SAMPLES);               // t2_ -> out
 }
 
 void DspChain::reset() noexcept {
@@ -63,6 +69,7 @@ void DspChain::reset() noexcept {
   agc_.reset();
   lim_.reset();
   declick_.reset(); dckCur_ = dckTarget_;
+  gate_.reset(); gateCur_ = gateTarget_;
   vadActive_ = false;
   holdLeft_ = 0;
   hpfCur_ = hpfTarget_; agcCur_ = agcTarget_; limCur_ = limTarget_;

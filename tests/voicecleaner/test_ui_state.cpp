@@ -211,7 +211,7 @@ TEST(UiState, TuningSettersMutateCurrentAndReturnIt) {
 }
 TEST(UiState, SeedTuningSetsAllFourAndSurvivesBypassToggle) {
   UiState ui;
-  ui.seedTuning(/*aggr*/0.4f, /*hpf*/90.0f, /*gain*/-16.0f, /*lim*/-3.0f, /*declick*/0.0f, /*voiceFloor*/0.0f);
+  ui.seedTuning(/*aggr*/0.4f, /*hpf*/90.0f, /*gain*/-16.0f, /*lim*/-3.0f, /*declick*/0.0f, /*voiceFloor*/0.0f, /*gate*/0.0f);
   EXPECT_FLOAT_EQ(ui.current().aggression, 0.4f);
   EXPECT_FLOAT_EQ(ui.current().hpfCutoffHz, 90.0f);
   EXPECT_FLOAT_EQ(ui.current().agcTargetDbfs, -16.0f);
@@ -241,10 +241,16 @@ TEST(UiState, OnSetDeclickVoiceFloorMutatesCurrent) {
   EXPECT_FLOAT_EQ(ui.onSetDeclickVoiceFloor(0.3f).declickVoiceFloor, 0.3f);
   EXPECT_FLOAT_EQ(ui.current().declickVoiceFloor, 0.3f);
 }
+TEST(UiState, OnSetGateMutatesCurrent) {
+  UiState ui;
+  EXPECT_FLOAT_EQ(ui.onSetGate(0.5f).gateStrength, 0.5f);
+  EXPECT_FLOAT_EQ(ui.current().gateStrength, 0.5f);
+}
 TEST(UiState, SeedTuningCarriesDeclick) {
   UiState ui;
-  ui.seedTuning(/*aggr*/0.4f, /*hpf*/90.0f, /*gain*/-16.0f, /*lim*/-3.0f, /*declick*/0.7f, /*voiceFloor*/0.5f);
+  ui.seedTuning(/*aggr*/0.4f, /*hpf*/90.0f, /*gain*/-16.0f, /*lim*/-3.0f, /*declick*/0.7f, /*voiceFloor*/0.5f, /*gate*/0.3f);
   EXPECT_FLOAT_EQ(ui.current().declickStrength, 0.7f);
   EXPECT_FLOAT_EQ(ui.current().declickVoiceFloor, 0.5f);
+  EXPECT_FLOAT_EQ(ui.current().gateStrength, 0.3f);
   EXPECT_FLOAT_EQ(ui.current().aggression, 0.4f);   // still carries the others
 }

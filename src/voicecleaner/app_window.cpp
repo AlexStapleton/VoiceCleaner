@@ -79,7 +79,7 @@ bool AppWindow::create(const wchar_t* title) {
 
   // Fixed, non-resizable window sized so the client area is exactly kClientW x kClientH.
   const DWORD style = WS_OVERLAPPEDWINDOW & ~WS_MAXIMIZEBOX & ~WS_THICKFRAME;
-  RECT wr{0, 0, 460, 756};
+  RECT wr{0, 0, 460, 804};
   AdjustWindowRectEx(&wr, style, FALSE, 0);
   hwnd_ = CreateWindowExW(0, kClass, title, style, CW_USEDEFAULT, CW_USEDEFAULT,
                           wr.right - wr.left, wr.bottom - wr.top, nullptr, nullptr, hInst_, this);
@@ -103,7 +103,8 @@ void AppWindow::refreshDevices() {
     sldLim_.setValue(p->limiterDbfs);
     sldDck_.setValue(p->declickStrength);
     sldVfl_.setValue(p->declickVoiceFloor);
-    state_->seedTuning(p->aggression, p->hpfHz, p->outputGainDbfs, p->limiterDbfs, p->declickStrength, p->declickVoiceFloor);
+    sldGate_.setValue(p->gateStrength);
+    state_->seedTuning(p->aggression, p->hpfHz, p->outputGainDbfs, p->limiterDbfs, p->declickStrength, p->declickVoiceFloor, p->gateStrength);
   }
 }
 
@@ -143,8 +144,9 @@ void AppWindow::layout(D2D1_SIZE_F sz) {
   rcLim_  = D2D1::RectF(pad, 504, tw, 516);
   rcDck_  = D2D1::RectF(pad, 548, tw, 560);
   rcVfl_  = D2D1::RectF(pad, 592, tw, 604);
-  rcHelp_      = D2D1::RectF(pad, 626, sz.width - pad, 710);       // hover help strip (what each control does)
-  rcRelaunch_  = D2D1::RectF(pad, 626, sz.width - pad, 626 + h);   // only when Down (shares the help band)
+  rcGate_ = D2D1::RectF(pad, 636, tw, 648);
+  rcHelp_      = D2D1::RectF(pad, 670, sz.width - pad, 754);       // hover help strip (what each control does)
+  rcRelaunch_  = D2D1::RectF(pad, 670, sz.width - pad, 670 + h);   // only when Down (shares the help band)
   rcQuit_      = D2D1::RectF(sz.width - pad - 90, sz.height - 36, sz.width - pad, sz.height - 10);
 }
 
@@ -239,6 +241,7 @@ void AppWindow::paint() {
   drawSlider(L"LIMITER",     3, true);
   drawSlider(L"DE-CLICK",    4, true);
   drawSlider(L"SPEECH DECLICK", 5, true);
+  drawSlider(L"NOISE GATE",  6, true);
 
   // 7. Quit (footer, right-aligned) — full shutdown, same path as the tray Quit
   box(rcQuit_, hot_==4 ? panelHot : panel);
@@ -282,16 +285,16 @@ int AppWindow::hitControl(int x, int y) const {
 }
 
 Slider& AppWindow::sliderByIndex(int i) {
-  switch (i) { case 0: return sldGain_; case 1: return sldAggr_; case 2: return sldHpf_; case 3: return sldLim_; case 4: return sldDck_; default: return sldVfl_; }
+  switch (i) { case 0: return sldGain_; case 1: return sldAggr_; case 2: return sldHpf_; case 3: return sldLim_; case 4: return sldDck_; case 5: return sldVfl_; default: return sldGate_; }
 }
 D2D1_RECT_F& AppWindow::trackByIndex(int i) {
-  switch (i) { case 0: return rcGain_; case 1: return rcAggr_; case 2: return rcHpf_; case 3: return rcLim_; case 4: return rcDck_; default: return rcVfl_; }
+  switch (i) { case 0: return rcGain_; case 1: return rcAggr_; case 2: return rcHpf_; case 3: return rcLim_; case 4: return rcDck_; case 5: return rcVfl_; default: return rcGate_; }
 }
 bool AppWindow::aggressionEnabled() const { return state_->activeEngine() == 1; }  // DFN3 only
 
 int AppWindow::trackHit(int x, int y) const {
-  const D2D1_RECT_F rc[6] = { rcGain_, rcAggr_, rcHpf_, rcLim_, rcDck_, rcVfl_ };
-  for (int i = 0; i < 6; ++i) {
+  const D2D1_RECT_F rc[7] = { rcGain_, rcAggr_, rcHpf_, rcLim_, rcDck_, rcVfl_, rcGate_ };
+  for (int i = 0; i < 7; ++i) {
     if (i == 1 && !aggressionEnabled()) continue;   // aggression not draggable on RNNoise
     if (x >= rc[i].left && x <= rc[i].right && y >= rc[i].top - 12 && y <= rc[i].bottom + 12) return i;
   }
@@ -299,8 +302,8 @@ int AppWindow::trackHit(int x, int y) const {
 }
 int AppWindow::helpTargetAt(int x, int y) const {
   // Sliders first (same horizontal band as the track, extended up to cover the caption row).
-  const D2D1_RECT_F rc[6] = { rcGain_, rcAggr_, rcHpf_, rcLim_, rcDck_, rcVfl_ };
-  for (int i = 0; i < 6; ++i)
+  const D2D1_RECT_F rc[7] = { rcGain_, rcAggr_, rcHpf_, rcLim_, rcDck_, rcVfl_, rcGate_ };
+  for (int i = 0; i < 7; ++i)
     if (x >= rc[i].left && x <= rc[i].right && y >= rc[i].top - 20 && y <= rc[i].bottom + 8) return i;
   if (hit(rcMicField_, x, y))  return 100;
   if (hit(rcOutField_, x, y))  return 101;
@@ -318,6 +321,7 @@ std::wstring AppWindow::helpText() const {
     case 3:   return L"LIMITER — a ceiling that stops loud peaks from clipping. Lower the ceiling for safer, quieter peaks.";
     case 4:   return L"DE-CLICK — ducks short clicks (keyboard/mouse) in the gaps between words. Raise until clicks fade; too high can soften consonants.";
     case 5:   return L"SPEECH DECLICK — how much de-click applies while you talk. 0 = never touch your voice (safest). Raise only if clicks ride on your speech.";
+    case 6:   return L"NOISE GATE — silences the gaps between words so the amplified noise floor / typing static drops out when you're not speaking. Raise until the gaps go quiet; too high can clip soft word endings.";
     case 100: return L"MICROPHONE — the input device being cleaned. Click to choose a different mic.";
     case 101: return L"OUTPUT — where the cleaned audio is sent (e.g. CABLE Input, which apps pick as your mic). Click to choose.";
     case 200: return L"ENGINE: RNNoise — lighter, low-latency denoiser. Best at keyboard/mouse clicks — use this in a clicky room.";
@@ -340,7 +344,8 @@ vc::ipc::Params AppWindow::applySlider(int i) {
     case 2: return state_->onSetHpf(s.value());
     case 3: return state_->onSetLimiter(s.value());
     case 4: return state_->onSetDeclick(s.value());
-    default: return state_->onSetDeclickVoiceFloor(s.value());
+    case 5: return state_->onSetDeclickVoiceFloor(s.value());
+    default: return state_->onSetGate(s.value());
   }
 }
 void AppWindow::persistTuning() {
@@ -353,6 +358,7 @@ void AppWindow::persistTuning() {
   p->limiterDbfs    = sldLim_.value();
   p->declickStrength = sldDck_.value();
   p->declickVoiceFloor = sldVfl_.value();
+  p->gateStrength = sldGate_.value();
   settings_->save(configPath_);
 }
 

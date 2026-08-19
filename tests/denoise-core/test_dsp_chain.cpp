@@ -133,6 +133,23 @@ TEST(DspChain, OutputGainTargetChangesOutputLevelUnderVoice) {
 TEST(DspChain, DeclickVoiceFloorDefaultIsZero) {
   EXPECT_FLOAT_EQ(vc::DspChain::Config{}.declickVoiceFloor, 0.0f);
 }
+TEST(DspChain, GateStrengthDefaultIsZero) {
+  EXPECT_FLOAT_EQ(vc::DspChain::Config{}.gateStrength, 0.0f);
+}
+TEST(DspChain, NoiseGateSilencesGapsWhenVadClosed) {
+  MockEngine eng(0.0f);                          // no voice -> VAD closed
+  vc::DspChain::Config cfg; cfg.gateStrength = 1.0f;
+  vc::DspChain chain(&eng, cfg);
+  std::vector<float> in(vc::FRAME_SAMPLES), out(vc::FRAME_SAMPLES);
+  float peak = 0;
+  for (int f = 0; f < 60; ++f) {
+    for (size_t i = 0; i < vc::FRAME_SAMPLES; ++i)
+      in[i] = 0.05f * std::sin(2*3.14159f*300.0f*(f*vc::FRAME_SAMPLES+i)/48000.0f);   // low-level "noise"
+    chain.process_frame(in.data(), out.data());                                       // let the gate close
+    if (f >= 55) for (float v : out) peak = std::max(peak, std::fabs(v));
+  }
+  EXPECT_LT(peak, 0.05f * 0.2f);                 // gap gated well below the input level
+}
 TEST(DspChain, DeclickVoiceFloorDucksTransientUnderVoice) {
   MockEngine eng(1.0f);                        // voice active (vad = 1)
   vc::DspChain::Config cfg; cfg.declickStrength = 1.0f; cfg.declickVoiceFloor = 1.0f;
