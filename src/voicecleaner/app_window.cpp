@@ -79,7 +79,7 @@ bool AppWindow::create(const wchar_t* title) {
 
   // Fixed, non-resizable window sized so the client area is exactly kClientW x kClientH.
   const DWORD style = WS_OVERLAPPEDWINDOW & ~WS_MAXIMIZEBOX & ~WS_THICKFRAME;
-  RECT wr{0, 0, 460, 708};
+  RECT wr{0, 0, 460, 756};
   AdjustWindowRectEx(&wr, style, FALSE, 0);
   hwnd_ = CreateWindowExW(0, kClass, title, style, CW_USEDEFAULT, CW_USEDEFAULT,
                           wr.right - wr.left, wr.bottom - wr.top, nullptr, nullptr, hInst_, this);
@@ -143,7 +143,8 @@ void AppWindow::layout(D2D1_SIZE_F sz) {
   rcLim_  = D2D1::RectF(pad, 504, tw, 516);
   rcDck_  = D2D1::RectF(pad, 548, tw, 560);
   rcVfl_  = D2D1::RectF(pad, 592, tw, 604);
-  rcRelaunch_  = D2D1::RectF(pad, 624, sz.width - pad, 624 + h);   // only when Down
+  rcHelp_      = D2D1::RectF(pad, 626, sz.width - pad, 710);       // hover help strip (what each control does)
+  rcRelaunch_  = D2D1::RectF(pad, 626, sz.width - pad, 626 + h);   // only when Down (shares the help band)
   rcQuit_      = D2D1::RectF(sz.width - pad - 90, sz.height - 36, sz.width - pad, sz.height - 10);
 }
 
@@ -208,10 +209,15 @@ void AppWindow::paint() {
                                             : L"Enabled — click to bypass";
   label(bLabel, rcBypass_, bEn ? text : dim, centerFmt_);
 
-  // 5. Relaunch — only when the worker is down
+  // 5. Relaunch (only when the worker is down) OR the hover help strip (otherwise) — they share the band.
   if (state_->statusKind()==StatusKind::Down) {
     box(rcRelaunch_, hot_==3 ? accentHot : accent);
     label(L"Relaunch worker", rcRelaunch_, text, centerFmt_);
+  } else {
+    box(rcHelp_, panel);
+    D2D1_RECT_F htr = D2D1::RectF(rcHelp_.left + 12, rcHelp_.top + 8, rcHelp_.right - 12, rcHelp_.bottom - 8);
+    std::wstring h = helpText();
+    label(h, htr, helpHot_ < 0 ? dim : text, textFmt_);
   }
 
   // 6. Tuning sliders (caption + value above; track with a draggable thumb)
@@ -291,6 +297,36 @@ int AppWindow::trackHit(int x, int y) const {
   }
   return -1;
 }
+int AppWindow::helpTargetAt(int x, int y) const {
+  // Sliders first (same horizontal band as the track, extended up to cover the caption row).
+  const D2D1_RECT_F rc[6] = { rcGain_, rcAggr_, rcHpf_, rcLim_, rcDck_, rcVfl_ };
+  for (int i = 0; i < 6; ++i)
+    if (x >= rc[i].left && x <= rc[i].right && y >= rc[i].top - 20 && y <= rc[i].bottom + 8) return i;
+  if (hit(rcMicField_, x, y))  return 100;
+  if (hit(rcOutField_, x, y))  return 101;
+  if (hit(rcEngineRnn_, x, y)) return 200;
+  if (hit(rcEngineDfn_, x, y)) return 201;
+  if (hit(rcBypass_, x, y))    return 202;
+  return -1;
+}
+
+std::wstring AppWindow::helpText() const {
+  switch (helpHot_) {
+    case 0:   return L"OUTPUT GAIN — how loud your cleaned voice is sent out. Raise if you're too quiet, lower if it distorts.";
+    case 1:   return L"AGGRESSION — how hard DeepFilterNet3 scrubs noise (DFN3 only). Higher is cleaner but can sound processed.";
+    case 2:   return L"HPF — high-pass filter. Cuts low rumble, handling thumps and AC hum below the set frequency. Raise to remove more low end.";
+    case 3:   return L"LIMITER — a ceiling that stops loud peaks from clipping. Lower the ceiling for safer, quieter peaks.";
+    case 4:   return L"DE-CLICK — ducks short clicks (keyboard/mouse) in the gaps between words. Raise until clicks fade; too high can soften consonants.";
+    case 5:   return L"SPEECH DECLICK — how much de-click applies while you talk. 0 = never touch your voice (safest). Raise only if clicks ride on your speech.";
+    case 100: return L"MICROPHONE — the input device being cleaned. Click to choose a different mic.";
+    case 101: return L"OUTPUT — where the cleaned audio is sent (e.g. CABLE Input, which apps pick as your mic). Click to choose.";
+    case 200: return L"ENGINE: RNNoise — lighter, low-latency denoiser. Best at keyboard/mouse clicks — use this in a clicky room.";
+    case 201: return L"ENGINE: DeepFilterNet3 — stronger on steady background noise, but passes short clicks (use DE-CLICK or RNNoise for those).";
+    case 202: return L"BYPASS — pass your mic through untouched with denoising off. Click to toggle (A/B your setup).";
+    default:  return L"Hover a slider or control to see what it does and how to use it.";
+  }
+}
+
 void AppWindow::setSliderFromX(int i, int x) {
   D2D1_RECT_F& r = trackByIndex(i);
   float t = (r.right > r.left) ? ((float)x - r.left) / (r.right - r.left) : 0.0f;
@@ -450,6 +486,8 @@ LRESULT AppWindow::handle(UINT msg, WPARAM w, LPARAM l) {
       if (h==2 && !state_->bypassEnabled()) h = -1;                       // disabled bypass: no hover
       if (h==3 && state_->statusKind()!=StatusKind::Down) h = -1;         // relaunch only when down
       if (h != hot_) { hot_ = h; InvalidateRect(hwnd_, nullptr, FALSE); }
+      int hp = helpTargetAt(GET_X_LPARAM(l), GET_Y_LPARAM(l));           // hovered control for the help strip
+      if (hp != helpHot_) { helpHot_ = hp; InvalidateRect(hwnd_, nullptr, FALSE); }
       TRACKMOUSEEVENT tme{ sizeof(TRACKMOUSEEVENT), TME_LEAVE, hwnd_, 0 };
       TrackMouseEvent(&tme);                                             // so WM_MOUSELEAVE fires
       return 0;
@@ -458,7 +496,7 @@ LRESULT AppWindow::handle(UINT msg, WPARAM w, LPARAM l) {
       if (grabbed_ >= 0) { persistTuning(); grabbed_ = -1; }   // persist on drag-end
       return 0;
     case WM_MOUSELEAVE:
-      if (hot_ != -1) { hot_ = -1; InvalidateRect(hwnd_, nullptr, FALSE); }
+      if (hot_ != -1 || helpHot_ != -1) { hot_ = -1; helpHot_ = -1; InvalidateRect(hwnd_, nullptr, FALSE); }
       return 0;
     case WM_SETCURSOR:
       if (LOWORD(l)==HTCLIENT && hot_ != -1) { SetCursor(LoadCursor(nullptr, IDC_HAND)); return TRUE; }

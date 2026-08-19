@@ -47,6 +47,8 @@ class AppWindow {
   Slider& sliderByIndex(int i);
   D2D1_RECT_F& trackByIndex(int i);
   int  trackHit(int x, int y) const;               // slider index whose track band contains (x,y), or -1
+  int  helpTargetAt(int x, int y) const;           // control under (x,y) for the help strip (see helpText)
+  std::wstring helpText() const;                   // plain-English "what + how" for helpHot_
   void setSliderFromX(int i, int x);               // set slider i's value from click/drag x
   bool aggressionEnabled() const;                  // false when active engine is RNNoise
   vc::ipc::Params applySlider(int i);              // push slider i's value into UiState -> Params
@@ -72,10 +74,11 @@ class AppWindow {
   ID2D1HwndRenderTarget* rt_ = nullptr;
 
   int hot_ = -1;   // control under the cursor (see hitControl); drives hover highlight
+  int helpHot_ = -1;   // control under the cursor for the help strip (see helpTargetAt/helpText)
 
   // control rects (client coords), recomputed in layout()
   D2D1_RECT_F rcMicField_{}, rcOutField_{};
-  D2D1_RECT_F rcEngineRnn_{}, rcEngineDfn_{}, rcBypass_{}, rcRelaunch_{}, rcQuit_{};
+  D2D1_RECT_F rcEngineRnn_{}, rcEngineDfn_{}, rcBypass_{}, rcRelaunch_{}, rcQuit_{}, rcHelp_{};
 
   Slider sldGain_{-30.0f, -6.0f, -20.0f, SliderFmt::Dbfs};
   Slider sldAggr_{0.0f, 1.0f, 0.0f, SliderFmt::Ratio2};
