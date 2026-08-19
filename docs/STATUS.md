@@ -2,21 +2,27 @@
 
 _Last updated: 2026-08-18_
 
-**Active work:** COMPLETE (software; hardware A/B pending) — **transient/click Declicker.** A voice-safe,
-RT-safe look-ahead **transient ducker** (`vc::Declicker`, denoise-core) is inserted into `DspChain`
+**Active work:** COMPLETE (software; hardware-informed) — **transient/click Declicker + voice-floor knob.** A
+voice-safe, RT-safe look-ahead **transient ducker** (`vc::Declicker`, denoise-core) is inserted into `DspChain`
 **`HPF → declick → AGC`**: HF-emphasis (RC high-pass) → fast/slow envelopes → crest detection → a 3 ms
-look-ahead gain duck whose depth scales with **(1 − VAD)** so speech is protected while clicks in the gaps
-are ducked. It flows live as **`Params.declickStrength`** (0 = off) over the existing pipe/relay, persists
-per-mic as **`.declick_strength`** in `settings.toml`, and is driven by a fifth **"DE-CLICK"** D2D slider —
-seeded on attach, pushed when the worker is ready, persisted on drag-end (reuses all the Phase 4c slider
-machinery). **Default off; no engine change — the DFN3 offline golden is engine-only and unaffected**
-(`src/dfn3`/`src/offline-cli` untouched; only `declicker.*` + `dsp_chain.*` changed in denoise-core). New
-pure unit `Declicker` (4 unit tests: pure-delay at 0, impulse ducked in silence, steady tone preserved, VAD
-back-off leaves the impulse when voice is active). Total tests **159 passing** (Debug + Release). Branch
-`feat/declicker`. **NEXT — manual hardware A/B:** confirm DE-CLICK audibly reduces keyboard/mouse clicks in
-the gaps between words, consonants stay crisp at moderate strength, and the setting persists across relaunch;
-tune `crestK`/`holdMs`/`hpHz` in `Declicker::Config` by ear if needed. See [[realworld-audio-quality]] — this
-targets the finding that short broadband transients leak through the spectral engines.
+look-ahead gain duck. Two live, per-mic knobs drive it: **DE-CLICK** (`declickStrength`, overall duck; 0 = off)
+and **SPEECH DECLICK** (`declickVoiceFloor`, 0..1 — the fraction of the duck kept *during voice*). Depth =
+`strength * ((1 − vad) + vad*voiceFloor)`, so at **voiceFloor 0 (default)** the duck fully backs off under
+speech (only clicks in the gaps are removed — fully voice-safe), and higher values also fight clicks that ride
+on top of speech, at a clarity cost. Both flow live as `Params.declick*` over the pipe/relay, persist per-mic
+(`.declick_strength` / `.declick_voice_floor`), and are two D2D sliders (fifth + sixth) seeded/pushed/persisted
+via the Phase 4c machinery. **Default off; no engine change — DFN3 offline golden unaffected** (`src/dfn3`/
+`src/offline-cli` untouched; only `declicker.*` + `dsp_chain.*` in denoise-core). Total tests **164 passing**
+(Debug + Release). Branch `feat/declicker-voice-floor`.
+
+**Hardware finding (2026-08-18):** a post-engine *broadband* ducker cannot cleanly remove a click that overlaps
+speech — killing the click dips the voice with it (that's the clarity loss on DFN3 at high SPEECH DECLICK).
+**RNNoise removes clicks at the engine stage, before they mix with voice, so it wins for clicky environments —
+that's the intended click-suppression path.** DFN3 (spectral mask) passes transients; the declicker helps only
+in the gaps for that engine. **NEXT options:** (a) accept RNNoise as the click engine (done — declicker defaults
+voice-safe so it never hurts clarity); (b) if DFN3-with-clicks is worth it, build a **spectral (STFT-domain)
+declicker** that separates the click's flat broadband signature from voice harmonics (real R&D; reuses the
+DFN3 STFT/ERB infra). See [[realworld-audio-quality]].
 
 _(historical)_ **Phase 4c tuning sliders + AGC softening (hardware-tested, merged 2026-08-17).** `voicecleaner.exe`
 has four live tuning sliders — **output gain** (`agcTargetDbfs`), **aggression** (DFN3-only, greyed on RNNoise),

@@ -43,6 +43,7 @@ Settings Settings::load(const std::string& path) {
           m.outputGainDbfs = (float)(*p)["output_gain_dbfs"].value_or(-20.0);
           m.limiterDbfs    = (float)(*p)["limiter_dbfs"].value_or(-1.0);
           m.declickStrength = (float)(*p)["declick_strength"].value_or(0.0);
+          m.declickVoiceFloor = (float)(*p)["declick_voice_floor"].value_or(0.0);
           s.mics.push_back(std::move(m));
         }
       }
@@ -96,6 +97,7 @@ void Settings::save(const std::string& path) const {
     p.insert_or_assign("output_gain_dbfs", (double)m.outputGainDbfs);
     p.insert_or_assign("limiter_dbfs", (double)m.limiterDbfs);
     p.insert_or_assign("declick_strength", (double)m.declickStrength);
+    p.insert_or_assign("declick_voice_floor", (double)m.declickVoiceFloor);
     micTbl.insert_or_assign(m.id, std::move(p));
   }
 

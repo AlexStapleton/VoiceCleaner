@@ -49,18 +49,20 @@ vc::ipc::Params UiState::onToggleBypass() {
   return current_;
 }
 
-void UiState::seedTuning(float aggression, float hpfHz, float gainDbfs, float limiterDbfs, float declick) {
+void UiState::seedTuning(float aggression, float hpfHz, float gainDbfs, float limiterDbfs, float declick, float declickVoiceFloor) {
   current_.aggression         = aggression;
   current_.hpfCutoffHz        = hpfHz;
   current_.agcTargetDbfs      = gainDbfs;
   current_.limiterCeilingDbfs = limiterDbfs;
   current_.declickStrength    = declick;
+  current_.declickVoiceFloor  = declickVoiceFloor;
 }
 vc::ipc::Params UiState::onSetAggression(float v)  { current_.aggression = v;         return current_; }
 vc::ipc::Params UiState::onSetHpf(float v)         { current_.hpfCutoffHz = v;        return current_; }
 vc::ipc::Params UiState::onSetOutputGain(float v)  { current_.agcTargetDbfs = v;      return current_; }
 vc::ipc::Params UiState::onSetLimiter(float v)     { current_.limiterCeilingDbfs = v; return current_; }
 vc::ipc::Params UiState::onSetDeclick(float v)     { current_.declickStrength = v;    return current_; }
+vc::ipc::Params UiState::onSetDeclickVoiceFloor(float v) { current_.declickVoiceFloor = v; return current_; }
 
 std::string UiState::bypassDisabledReason() const {
   return "no DSP chain \xE2\x80\x94 bypass unavailable";   // U+2014 em dash, UTF-8

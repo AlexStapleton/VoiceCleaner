@@ -15,7 +15,9 @@ DspChain::DspChain(INoiseFilter* engine, const Config& c)
       hpfCur_(c.hpfCutoffHz), hpfTarget_(c.hpfCutoffHz),
       agcCur_(c.agcTargetDb), agcTarget_(c.agcTargetDb),
       limCur_(c.limiterCeilingDb), limTarget_(c.limiterCeilingDb),
-      dckCur_(c.declickStrength), dckTarget_(c.declickStrength) {}
+      dckCur_(c.declickStrength), dckTarget_(c.declickStrength) {
+  declick_.setVoiceFloor(c.declickVoiceFloor);
+}
 
 void DspChain::process_frame(const float* in, float* out) noexcept {
   if (bypass_) {

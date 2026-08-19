@@ -14,6 +14,7 @@ struct Params {
   uint32_t driftComp;           // 0 / 1 — set at worker start via Config; relay does not consume live yet (deferred)
   uint32_t dryTap;              // 0 / 1 (placeholder; behavior deferred)
   float    declickStrength;     // 0..1 transient/click ducker (0 = off)
+  float    declickVoiceFloor;   // 0..1 duck fraction kept during voice (0 = fully voice-safe)
 
   static constexpr Params defaults() {
     return Params{
@@ -27,6 +28,7 @@ struct Params {
         /*driftComp*/ 1u,
         /*dryTap*/ 0u,
         /*declickStrength*/ 0.0f,
+        /*declickVoiceFloor*/ 0.0f,
     };
   }
 };
