@@ -138,10 +138,12 @@ TEST(Settings, DeclickStrengthRoundTrips) {
   vc::MicProfile& m = s.ensureProfile("cap-1", "K688");
   m.declickStrength = 0.55f;
   m.declickVoiceFloor = 0.35f;
+  m.gateStrength = 0.65f;
   auto p = (std::filesystem::temp_directory_path() / "vc_tmp_settings_declick.toml").string();
   s.save(p);
   Settings r = Settings::load(p);
   ASSERT_EQ(r.mics.size(), 1u);
   EXPECT_FLOAT_EQ(r.mics[0].declickStrength, 0.55f);
   EXPECT_FLOAT_EQ(r.mics[0].declickVoiceFloor, 0.35f);
+  EXPECT_FLOAT_EQ(r.mics[0].gateStrength, 0.65f);
 }

@@ -15,6 +15,7 @@ struct Params {
   uint32_t dryTap;              // 0 / 1 (placeholder; behavior deferred)
   float    declickStrength;     // 0..1 transient/click ducker (0 = off)
   float    declickVoiceFloor;   // 0..1 duck fraction kept during voice (0 = fully voice-safe)
+  float    gateStrength;        // 0..1 noise gate depth (0 = off; silences non-speech gaps)
 
   static constexpr Params defaults() {
     return Params{
@@ -29,6 +30,7 @@ struct Params {
         /*dryTap*/ 0u,
         /*declickStrength*/ 0.0f,
         /*declickVoiceFloor*/ 0.0f,
+        /*gateStrength*/ 0.0f,
     };
   }
 };

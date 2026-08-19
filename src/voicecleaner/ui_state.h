@@ -28,13 +28,14 @@ class UiState {
   // ---- user actions: mutate current_, return the Params the caller sends via SetParams ----
   vc::ipc::Params onSelectEngine(uint32_t engine);   // 0 = RNNoise, 1 = DFN3
   vc::ipc::Params onToggleBypass();                   // flips current_.bypass; engine stays synced
-  void seedTuning(float aggression, float hpfHz, float gainDbfs, float limiterDbfs, float declick, float declickVoiceFloor);  // attach seed
+  void seedTuning(float aggression, float hpfHz, float gainDbfs, float limiterDbfs, float declick, float declickVoiceFloor, float gate);  // attach seed
   vc::ipc::Params onSetAggression(float v);
   vc::ipc::Params onSetHpf(float v);
   vc::ipc::Params onSetOutputGain(float v);
   vc::ipc::Params onSetLimiter(float v);
   vc::ipc::Params onSetDeclick(float v);
   vc::ipc::Params onSetDeclickVoiceFloor(float v);
+  vc::ipc::Params onSetGate(float v);
 
   // ---- queries (paint) ----
   StatusKind statusKind() const { return kind_; }
@@ -56,6 +57,8 @@ class UiState {
   bool     enginePending_ = false;  // true until telemetry confirms pendingEngine_ is active
   bool bypass_ = false;
   bool dspChain_ = true;
+  bool  telVadActive_ = false;   // last telemetry VAD state (readout)
+  float telAgcGainDb_ = 0.0f;    // last telemetry AGC gain in dB (readout)
 };
 
 // Pure liveness/readiness policy over (shmOpen, seq, nowMs) samples (design §10). Terminal at Down.

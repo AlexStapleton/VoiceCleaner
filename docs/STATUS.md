@@ -2,6 +2,21 @@
 
 _Last updated: 2026-08-18_
 
+**Active work:** COMPLETE (software; hardware A/B in progress) — **OUTPUT GAIN diagnosis → TARGET LOUDNESS + noise gate.**
+Hardware testing found the "OUTPUT GAIN slider does nothing" + "static when typing" issues. Root cause (by
+elimination — DE-CLICK proves live param delivery; a new chain test proves the AGC follows its target under
+active VAD): the slider drives the **AGC target**, which only acts while VAD is open and auto-normalizes — so it
+felt dead — and with a quiet mic it **rails to max gain**, freezing high gain over the gaps and amplifying the
+noise floor / typing residue → static. Fixes shipped: (1) a live **AGC gain + VAD readout** in the status line
+(`agcGainDb` telemetry) so auto-leveling is visible; (2) relabel **OUTPUT GAIN → TARGET LOUDNESS** + corrected
+help; (3) AGC **max gain 18 → 9 dB** to cap noise over-amplification; (4) a new **`vc::NoiseGate`** (denoise-core,
+VAD-keyed downward gate, fast attack / smooth release, depth = `gateStrength`) inserted **AGC → gate → limiter**,
+exposed as a live per-mic **NOISE GATE** slider (7th) that silences the non-speech gaps. All `gateStrength` flows
+live over the pipe/relay + persists per-mic (`.gate_strength`); default 0 (off). Total tests **173 passing**
+(Debug + Release). Branch `fix/output-gain-agc-readout`. **NEXT — hardware A/B:** with a quiet mic, raise NOISE
+GATE until the between-keystroke static drops out, and raise the Windows mic level so the AGC stops railing.
+
+
 **Active work:** COMPLETE (software; hardware-informed) — **transient/click Declicker + voice-floor knob.** A
 voice-safe, RT-safe look-ahead **transient ducker** (`vc::Declicker`, denoise-core) is inserted into `DspChain`
 **`HPF → declick → AGC`**: HF-emphasis (RC high-pass) → fast/slow envelopes → crest detection → a 3 ms

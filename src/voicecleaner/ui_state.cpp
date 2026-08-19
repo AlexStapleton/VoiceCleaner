@@ -1,4 +1,5 @@
 #include "ui_state.h"
+#include <cstdio>
 
 namespace vc::ui {
 
@@ -34,6 +35,8 @@ void UiState::onTelemetry(const vc::ipc::Telemetry& t, bool ready) {
     current_.engine = t.activeEngine;
   }
   current_.bypass = t.bypass;
+  telVadActive_ = (t.vadActive != 0);
+  telAgcGainDb_ = t.agcGainDb;
   if (ready) kind_ = bypass_ ? StatusKind::Bypassed : StatusKind::Active;
 }
 
@@ -49,13 +52,14 @@ vc::ipc::Params UiState::onToggleBypass() {
   return current_;
 }
 
-void UiState::seedTuning(float aggression, float hpfHz, float gainDbfs, float limiterDbfs, float declick, float declickVoiceFloor) {
+void UiState::seedTuning(float aggression, float hpfHz, float gainDbfs, float limiterDbfs, float declick, float declickVoiceFloor, float gate) {
   current_.aggression         = aggression;
   current_.hpfCutoffHz        = hpfHz;
   current_.agcTargetDbfs      = gainDbfs;
   current_.limiterCeilingDbfs = limiterDbfs;
   current_.declickStrength    = declick;
   current_.declickVoiceFloor  = declickVoiceFloor;
+  current_.gateStrength       = gate;
 }
 vc::ipc::Params UiState::onSetAggression(float v)  { current_.aggression = v;         return current_; }
 vc::ipc::Params UiState::onSetHpf(float v)         { current_.hpfCutoffHz = v;        return current_; }
@@ -63,6 +67,7 @@ vc::ipc::Params UiState::onSetOutputGain(float v)  { current_.agcTargetDbfs = v;
 vc::ipc::Params UiState::onSetLimiter(float v)     { current_.limiterCeilingDbfs = v; return current_; }
 vc::ipc::Params UiState::onSetDeclick(float v)     { current_.declickStrength = v;    return current_; }
 vc::ipc::Params UiState::onSetDeclickVoiceFloor(float v) { current_.declickVoiceFloor = v; return current_; }
+vc::ipc::Params UiState::onSetGate(float v)        { current_.gateStrength = v;       return current_; }
 
 std::string UiState::bypassDisabledReason() const {
   return "no DSP chain \xE2\x80\x94 bypass unavailable";   // U+2014 em dash, UTF-8
@@ -70,9 +75,15 @@ std::string UiState::bypassDisabledReason() const {
 
 std::string UiState::statusLine() const {
   switch (kind_) {
-    case StatusKind::Active:
+    case StatusKind::Active: {
+      // Append a live readout: VAD dot (● when the AGC gate is open) + current AGC gain in dB, so
+      // the user can see auto-leveling engaging while they speak / move the TARGET LOUDNESS slider.
+      char buf[64];
+      std::snprintf(buf, sizeof(buf), " \xC2\xB7 VAD %s \xC2\xB7 AGC %+.1f dB",
+                    telVadActive_ ? "\xE2\x97\x8F" : "\xE2\x97\x8B", (double)telAgcGainDb_);
       return "\xE2\x97\x8F Active \xC2\xB7 " + std::string(engineName(activeEngine_)) +
-             " \xC2\xB7 \xE2\x86\x92 " + renderLabel_;                       // dot Active mid engine arrow label
+             " \xC2\xB7 \xE2\x86\x92 " + renderLabel_ + buf;                 // dot Active mid engine arrow label + readout
+    }
     case StatusKind::Bypassed:
       return "\xE2\x97\x8B Bypassed \xC2\xB7 " + std::string(engineName(activeEngine_)) +
              " \xC2\xB7 \xE2\x86\x92 " + renderLabel_;

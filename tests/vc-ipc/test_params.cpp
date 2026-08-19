@@ -28,4 +28,5 @@ TEST(Params, DeclickDefaultsOff) {
   vc::ipc::Params p = vc::ipc::Params::defaults();
   EXPECT_FLOAT_EQ(p.declickStrength, 0.0f);
   EXPECT_FLOAT_EQ(p.declickVoiceFloor, 0.0f);
+  EXPECT_FLOAT_EQ(p.gateStrength, 0.0f);
 }
