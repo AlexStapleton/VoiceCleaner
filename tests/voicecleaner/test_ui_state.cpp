@@ -14,7 +14,8 @@ TEST(UiState, ActiveStatusLineFromReadyTelemetry) {
   ui.onTelemetry(tel(/*engine*/1, /*bypass*/0, /*dspChain*/1, /*seq*/1), /*ready*/true);
   EXPECT_EQ(ui.statusKind(), StatusKind::Active);
   EXPECT_EQ(ui.statusLine(),
-            "\xE2\x97\x8F Active \xC2\xB7 DeepFilterNet3 \xC2\xB7 \xE2\x86\x92 CABLE Input");
+            "\xE2\x97\x8F Active \xC2\xB7 DeepFilterNet3 \xC2\xB7 \xE2\x86\x92 CABLE Input"
+            " \xC2\xB7 VAD \xE2\x97\x8B \xC2\xB7 AGC +0.0 dB");
   EXPECT_EQ(ui.activeEngine(), 1u);
 }
 
@@ -223,6 +224,17 @@ TEST(UiState, OnSetDeclickMutatesCurrent) {
   UiState ui;
   EXPECT_FLOAT_EQ(ui.onSetDeclick(0.6f).declickStrength, 0.6f);
   EXPECT_FLOAT_EQ(ui.current().declickStrength, 0.6f);
+}
+TEST(UiState, StatusLineShowsAgcReadoutWhenActive) {
+  UiState ui;
+  vc::ipc::Telemetry t{};
+  t.activeEngine = 0; t.bypass = 0; t.dspChain = 1;
+  t.vadActive = 1; t.agcGainDb = 6.0f;
+  ui.onTelemetry(t, /*ready*/true);
+  std::string s = ui.statusLine();
+  EXPECT_NE(s.find("VAD"), std::string::npos);
+  EXPECT_NE(s.find("AGC"), std::string::npos);
+  EXPECT_NE(s.find("+6.0"), std::string::npos);   // gain value rendered
 }
 TEST(UiState, OnSetDeclickVoiceFloorMutatesCurrent) {
   UiState ui;

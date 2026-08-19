@@ -24,5 +24,6 @@ struct Telemetry {
   uint32_t seq;            // increments each aggregate publish
   uint32_t bypass;         // current bypass state (0/1); lets the UI reflect true bypass on attach
   uint32_t dspChain;       // capability: worker has a DSP chain (0/1); UI disables bypass when 0
+  float    agcGainDb;      // current AGC gain (dB) — live readout so the UI can show auto-leveling engaging
 };
 }  // namespace vc::ipc

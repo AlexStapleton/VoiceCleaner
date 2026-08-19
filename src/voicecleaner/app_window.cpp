@@ -233,7 +233,7 @@ void AppWindow::paint() {
     D2D1_RECT_F thumb = D2D1::RectF(cx - 6, tr.top - 6, cx + 6, tr.bottom + 6);
     box(thumb, enabled ? (grabbed_==i ? accentHot : accent) : disabled);
   };
-  drawSlider(L"OUTPUT GAIN", 0, true);
+  drawSlider(L"TARGET LOUDNESS", 0, true);
   drawSlider(L"AGGRESSION",  1, aggressionEnabled());
   drawSlider(L"HPF",         2, true);
   drawSlider(L"LIMITER",     3, true);
@@ -312,7 +312,7 @@ int AppWindow::helpTargetAt(int x, int y) const {
 
 std::wstring AppWindow::helpText() const {
   switch (helpHot_) {
-    case 0:   return L"OUTPUT GAIN — how loud your cleaned voice is sent out. Raise if you're too quiet, lower if it distorts.";
+    case 0:   return L"TARGET LOUDNESS — auto-levels your voice to this level while you speak (an AGC, not a raw volume). It only acts when the VAD dot in the status line is lit. Watch the AGC readout move as you drag.";
     case 1:   return L"AGGRESSION — how hard DeepFilterNet3 scrubs noise (DFN3 only). Higher is cleaner but can sound processed.";
     case 2:   return L"HPF — high-pass filter. Cuts low rumble, handling thumps and AC hum below the set frequency. Raise to remove more low end.";
     case 3:   return L"LIMITER — a ceiling that stops loud peaks from clipping. Lower the ceiling for safer, quieter peaks.";

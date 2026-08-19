@@ -111,6 +111,25 @@ TEST(DspChain, DeclickReducesTransientWhenEnabled) {
 TEST(DspChain, DeclickDefaultIsZeroStrength) {
   EXPECT_FLOAT_EQ(vc::DspChain::Config{}.declickStrength, 0.0f);
 }
+TEST(DspChain, OutputGainTargetChangesOutputLevelUnderVoice) {
+  auto runRms = [](float target) {
+    MockEngine eng(0.9f);                          // voice active
+    vc::DspChain::Config cfg; cfg.agcTargetDb = target;
+    vc::DspChain chain(&eng, cfg);
+    std::vector<float> in(vc::FRAME_SAMPLES), out(vc::FRAME_SAMPLES);
+    double acc = 0; int cnt = 0;
+    for (int f = 0; f < 300; ++f) {                // ~3 s to let the AGC converge
+      for (size_t i = 0; i < vc::FRAME_SAMPLES; ++i)
+        in[i] = 0.178f * std::sin(2*3.14159f*300.0f*(f*vc::FRAME_SAMPLES+i)/48000.0f);  // ~-18 dBFS
+      chain.process_frame(in.data(), out.data());
+      if (f >= 250) { for (float v : out) { acc += v*v; ++cnt; } }
+    }
+    return std::sqrt(acc / cnt);
+  };
+  float lo = runRms(-30.0f);                        // quiet target
+  float hi = runRms(-6.0f);                         // loud target
+  EXPECT_GT(hi, lo * 2.0f);                         // OUTPUT GAIN target clearly moves output level
+}
 TEST(DspChain, DeclickVoiceFloorDefaultIsZero) {
   EXPECT_FLOAT_EQ(vc::DspChain::Config{}.declickVoiceFloor, 0.0f);
 }

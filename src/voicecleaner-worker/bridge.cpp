@@ -177,6 +177,7 @@ void Bridge::relayLoop() {
           t.inputRms = (float)std::sqrt(winSumSq_ / n);
           t.inputPeak = winPeak_;
           t.vadActive = (chain_ && chain_->vadActive()) ? 1u : 0u;
+          t.agcGainDb = chain_ ? chain_->currentAgcGainDb() : 0.0f;
           t.frameP50Ms = (float)frameStats_.percentileMs(50.0);
           t.frameP99Ms = (float)frameStats_.percentileMs(99.0);
           t.frameMaxMs = (float)frameStats_.maxMs();

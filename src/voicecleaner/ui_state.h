@@ -56,6 +56,8 @@ class UiState {
   bool     enginePending_ = false;  // true until telemetry confirms pendingEngine_ is active
   bool bypass_ = false;
   bool dspChain_ = true;
+  bool  telVadActive_ = false;   // last telemetry VAD state (readout)
+  float telAgcGainDb_ = 0.0f;    // last telemetry AGC gain in dB (readout)
 };
 
 // Pure liveness/readiness policy over (shmOpen, seq, nowMs) samples (design §10). Terminal at Down.

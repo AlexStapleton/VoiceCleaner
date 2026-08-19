@@ -27,6 +27,7 @@ public:
   void process_frame(const float* in, float* out) noexcept;   // FRAME_SAMPLES in/out
   void reset() noexcept;
   bool vadActive() const noexcept { return vadActive_; }
+  float currentAgcGainDb() const noexcept { return agc_.currentGainDb(); }   // live AGC gain (readout)
   void setHpfCutoffHz(float hz) noexcept          { hpfTarget_ = hz; }
   void setAgcTargetDb(float db) noexcept          { agcTarget_ = db; }
   void setLimiterCeilingDb(float db) noexcept     { limTarget_ = db; }

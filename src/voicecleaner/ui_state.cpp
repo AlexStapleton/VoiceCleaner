@@ -1,4 +1,5 @@
 #include "ui_state.h"
+#include <cstdio>
 
 namespace vc::ui {
 
@@ -34,6 +35,8 @@ void UiState::onTelemetry(const vc::ipc::Telemetry& t, bool ready) {
     current_.engine = t.activeEngine;
   }
   current_.bypass = t.bypass;
+  telVadActive_ = (t.vadActive != 0);
+  telAgcGainDb_ = t.agcGainDb;
   if (ready) kind_ = bypass_ ? StatusKind::Bypassed : StatusKind::Active;
 }
 
@@ -70,9 +73,15 @@ std::string UiState::bypassDisabledReason() const {
 
 std::string UiState::statusLine() const {
   switch (kind_) {
-    case StatusKind::Active:
+    case StatusKind::Active: {
+      // Append a live readout: VAD dot (● when the AGC gate is open) + current AGC gain in dB, so
+      // the user can see auto-leveling engaging while they speak / move the TARGET LOUDNESS slider.
+      char buf[64];
+      std::snprintf(buf, sizeof(buf), " \xC2\xB7 VAD %s \xC2\xB7 AGC %+.1f dB",
+                    telVadActive_ ? "\xE2\x97\x8F" : "\xE2\x97\x8B", (double)telAgcGainDb_);
       return "\xE2\x97\x8F Active \xC2\xB7 " + std::string(engineName(activeEngine_)) +
-             " \xC2\xB7 \xE2\x86\x92 " + renderLabel_;                       // dot Active mid engine arrow label
+             " \xC2\xB7 \xE2\x86\x92 " + renderLabel_ + buf;                 // dot Active mid engine arrow label + readout
+    }
     case StatusKind::Bypassed:
       return "\xE2\x97\x8B Bypassed \xC2\xB7 " + std::string(engineName(activeEngine_)) +
              " \xC2\xB7 \xE2\x86\x92 " + renderLabel_;
