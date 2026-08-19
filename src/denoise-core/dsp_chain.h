@@ -4,6 +4,7 @@
 #include "biquad.h"
 #include "agc.h"
 #include "limiter.h"
+#include "declicker.h"
 #include "frame.h"
 namespace vc {
 // Composes the DSP leaves per blueprint §7.1:
@@ -16,6 +17,7 @@ public:
     float hpfCutoffHz = 80.0f;
     float agcTargetDb = -20.0f;
     float limiterCeilingDb = -1.0f;
+    float declickStrength = 0.0f;   // 0..1 transient/click ducker (0 = off)
     float vadOpen = 0.6f;      // hysteresis open threshold
     float vadClose = 0.3f;     // hysteresis close threshold
     float vadHoldMs = 200.0f;  // keep AGC active this long after VAD drops
@@ -27,16 +29,19 @@ public:
   void setHpfCutoffHz(float hz) noexcept          { hpfTarget_ = hz; }
   void setAgcTargetDb(float db) noexcept          { agcTarget_ = db; }
   void setLimiterCeilingDb(float db) noexcept     { limTarget_ = db; }
+  void setDeclickStrength(float s) noexcept       { dckTarget_ = s; }
   void setBypass(bool on) noexcept                { bypass_ = on; }
   float currentHpfCutoffHz() const noexcept       { return hpfCur_; }
   float currentAgcTargetDb() const noexcept       { return agcCur_; }
   float currentLimiterCeilingDb() const noexcept  { return limCur_; }
+  float currentDeclickStrength() const noexcept   { return dckCur_; }
 private:
   INoiseFilter* engine_;
   DcBlocker dc_;
   Biquad    hpf_;
   Agc       agc_;
   Limiter   lim_;
+  Declicker declick_;
   float open_;
   float close_;
   bool  vadActive_ = false;
@@ -48,6 +53,7 @@ private:
   float hpfCur_, hpfTarget_;
   float agcCur_, agcTarget_;
   float limCur_, limTarget_;
+  float dckCur_, dckTarget_;
   bool  bypass_ = false;
   static constexpr float kRampCoef = 0.6065f;   // e^{-10ms/20ms}
 };

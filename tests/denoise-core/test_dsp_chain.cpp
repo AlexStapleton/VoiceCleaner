@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include <vector>
 #include <cmath>
+#include <algorithm>
 #include "dsp_chain.h"
 #include "passthrough_filter.h"
 using namespace vc;
@@ -95,4 +96,18 @@ TEST(DspChain, BypassCopiesInputToOutput) {
   for (size_t i = 0; i < in.size(); ++i) in[i] = 0.01f * static_cast<float>(i % 50);
   chain.process_frame(in.data(), out.data());
   for (size_t i = 0; i < in.size(); ++i) EXPECT_FLOAT_EQ(out[i], in[i]);
+}
+
+TEST(DspChain, DeclickReducesTransientWhenEnabled) {
+  vc::PassthroughFilter eng;
+  vc::DspChain::Config cfg; cfg.declickStrength = 1.0f;
+  vc::DspChain chain(&eng, cfg);
+  std::vector<float> in(vc::FRAME_SAMPLES, 0.0f), out(vc::FRAME_SAMPLES);
+  in[10] = 1.0f;                              // a click early in the frame
+  for (int f = 0; f < 4; ++f) chain.process_frame(in.data(), out.data());  // let the duck engage
+  float peak = 0; for (float v : out) peak = std::max(peak, std::fabs(v));
+  EXPECT_LT(peak, 0.5f);                      // transient is ducked (default chain would pass ~1.0)
+}
+TEST(DspChain, DeclickDefaultIsZeroStrength) {
+  EXPECT_FLOAT_EQ(vc::DspChain::Config{}.declickStrength, 0.0f);
 }

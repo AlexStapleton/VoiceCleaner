@@ -7,13 +7,15 @@ DspChain::DspChain(INoiseFilter* engine, const Config& c)
       hpf_(Biquad::highpass(c.fs, c.hpfCutoffHz)),
       agc_({c.agcTargetDb, 50.0f, 500.0f, 18.0f, -10.0f, c.fs}),
       lim_(c.limiterCeilingDb, 144, 50.0f, c.fs),
+      declick_(Declicker::Config{c.fs}),
       open_(c.vadOpen),
       close_(c.vadClose),
       holdSamples_((int)(c.vadHoldMs * 0.001f * c.fs)),
       fs_(c.fs),
       hpfCur_(c.hpfCutoffHz), hpfTarget_(c.hpfCutoffHz),
       agcCur_(c.agcTargetDb), agcTarget_(c.agcTargetDb),
-      limCur_(c.limiterCeilingDb), limTarget_(c.limiterCeilingDb) {}
+      limCur_(c.limiterCeilingDb), limTarget_(c.limiterCeilingDb),
+      dckCur_(c.declickStrength), dckTarget_(c.declickStrength) {}
 
 void DspChain::process_frame(const float* in, float* out) noexcept {
   if (bypass_) {
@@ -33,7 +35,10 @@ void DspChain::process_frame(const float* in, float* out) noexcept {
   engine_->ProcessFrame(t1_, t2_);
   float vad = engine_->LastVadProbability();
   // 3. High-pass.
-  hpf_.process(t2_, t1_, FRAME_SAMPLES);
+  hpf_.process(t2_, t1_, FRAME_SAMPLES);          // t1_ = HPF output
+  // 3b. Declicker (ramped strength; VAD scales the duck down).
+  dckCur_ = kRampCoef * dckCur_ + (1.0f - kRampCoef) * dckTarget_;
+  declick_.process(t1_, t2_, FRAME_SAMPLES, dckCur_, vad);   // t2_ = declicked
   // 4. VAD hysteresis + hold (per-frame).
   if (vad >= open_) {
     vadActive_ = true;
@@ -45,9 +50,9 @@ void DspChain::process_frame(const float* in, float* out) noexcept {
       vadActive_ = false;
   }
   // 5. VAD-gated AGC.
-  agc_.process(t1_, t2_, FRAME_SAMPLES, vadActive_);
+  agc_.process(t2_, t1_, FRAME_SAMPLES, vadActive_);   // t2_ (declicked) -> t1_
   // 6. Limiter.
-  lim_.process(t2_, out, FRAME_SAMPLES);
+  lim_.process(t1_, out, FRAME_SAMPLES);               // t1_ -> out
 }
 
 void DspChain::reset() noexcept {
@@ -55,6 +60,7 @@ void DspChain::reset() noexcept {
   hpf_.reset();
   agc_.reset();
   lim_.reset();
+  declick_.reset(); dckCur_ = dckTarget_;
   vadActive_ = false;
   holdLeft_ = 0;
   hpfCur_ = hpfTarget_; agcCur_ = agcTarget_; limCur_ = limTarget_;
