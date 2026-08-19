@@ -36,12 +36,24 @@ TEST(Declicker, PreservesSteadyToneAtFullStrength) {
   EXPECT_NEAR(std::sqrt(rout), std::sqrt(rin), 0.1 * std::sqrt(rin));      // tone not falsely ducked
 }
 
-TEST(Declicker, VadBackoffLeavesImpulseWhenVoiceActive) {
+TEST(Declicker, VoiceFloorStillDucksImpulseWhenVoiceActive) {
+  // Default config carries a voice floor (~0.6): during full voice the duck is softened but NOT
+  // disabled, so clicks that land on top of speech are still substantially reduced (DFN3 path).
   const size_t L = 144, n = 2000, P = 500;
   std::vector<float> in(n, 0.0f), out0(n), out1(n);
   in[P] = 1.0f;
   Declicker a = make(); a.process(in.data(), out0.data(), n, 1.0f, /*vad*/0.0f);
   Declicker b = make(); b.process(in.data(), out1.data(), n, 1.0f, /*vad*/1.0f);
-  EXPECT_LT(std::fabs(out0[P + L]), 0.15f);   // vad=0 -> ducked
-  EXPECT_GT(std::fabs(out1[P + L]), 0.8f);    // vad=1 -> passes (voice-safe)
+  EXPECT_LT(std::fabs(out0[P + L]), 0.15f);   // vad=0 -> fully ducked
+  EXPECT_LT(std::fabs(out1[P + L]), 0.6f);    // vad=1 -> voice floor still ducks it well below unity
+}
+
+TEST(Declicker, ZeroVoiceFloorIsFullyVoiceSafe) {
+  // voiceFloor=0 restores the original behavior: the duck fully backs off under voice.
+  Declicker::Config c; c.voiceFloor = 0.0f;
+  const size_t L = 144, n = 2000, P = 500;
+  std::vector<float> in(n, 0.0f), out(n);
+  in[P] = 1.0f;
+  Declicker d(c); d.process(in.data(), out.data(), n, 1.0f, /*vad*/1.0f);
+  EXPECT_GT(std::fabs(out[P + L]), 0.8f);     // vad=1 -> passes (fully voice-safe)
 }

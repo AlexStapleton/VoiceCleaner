@@ -15,6 +15,7 @@ Declicker::Declicker(const Config& c) : L_(c.lookahead) {
   relCoef_  = onepole(c.releaseMs, c.fs);
   holdSamples_ = L_ + (size_t)(c.holdMs * 0.001f * c.fs);
   crestK_ = c.crestK;
+  voiceFloor_ = clamp01(c.voiceFloor);
   delay_.assign(L_ > 0 ? L_ : 1, 0.0f);
 }
 
@@ -36,7 +37,10 @@ void Declicker::process(const float* in, float* out, size_t n, float strength, f
     envF_ = mag > envF_ ? mag : envF_ * fastCoef_;          // fast peak envelope
     envS_ = envS_ * slowCoef_ + mag * (1.0f - slowCoef_);   // slow baseline
     if (strength > 0.0f && envF_ > crestK_ * (envS_ + 1e-6f)) holdLeft_ = (int)holdSamples_;
-    const float depth  = holdLeft_ > 0 ? strength * (1.0f - vad) : 0.0f;
+    // VAD back-off with a floor: at vad=1 the duck is scaled by voiceFloor_ (not to zero), so clicks
+    // that land on top of speech are still reduced (matters for engines that pass transients, e.g. DFN3).
+    const float backoff = (1.0f - vad) + vad * voiceFloor_;
+    const float depth   = holdLeft_ > 0 ? strength * backoff : 0.0f;
     if (holdLeft_ > 0) --holdLeft_;
     const float target = 1.0f - depth;
     gain_ = target < gain_ ? target                          // fast attack (down, within lookahead)
