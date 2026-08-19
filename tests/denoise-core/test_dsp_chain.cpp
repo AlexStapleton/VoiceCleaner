@@ -111,3 +111,16 @@ TEST(DspChain, DeclickReducesTransientWhenEnabled) {
 TEST(DspChain, DeclickDefaultIsZeroStrength) {
   EXPECT_FLOAT_EQ(vc::DspChain::Config{}.declickStrength, 0.0f);
 }
+TEST(DspChain, DeclickVoiceFloorDefaultIsZero) {
+  EXPECT_FLOAT_EQ(vc::DspChain::Config{}.declickVoiceFloor, 0.0f);
+}
+TEST(DspChain, DeclickVoiceFloorDucksTransientUnderVoice) {
+  MockEngine eng(1.0f);                        // voice active (vad = 1)
+  vc::DspChain::Config cfg; cfg.declickStrength = 1.0f; cfg.declickVoiceFloor = 1.0f;
+  vc::DspChain chain(&eng, cfg);
+  std::vector<float> in(vc::FRAME_SAMPLES, 0.0f), out(vc::FRAME_SAMPLES);
+  in[10] = 1.0f;                               // a click on top of "voice"
+  for (int f = 0; f < 4; ++f) chain.process_frame(in.data(), out.data());
+  float peak = 0; for (float v : out) peak = std::max(peak, std::fabs(v));
+  EXPECT_LT(peak, 0.6f);                       // floor=1 -> ducked even under voice
+}

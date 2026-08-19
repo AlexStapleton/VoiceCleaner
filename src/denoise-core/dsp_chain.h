@@ -18,6 +18,7 @@ public:
     float agcTargetDb = -20.0f;
     float limiterCeilingDb = -1.0f;
     float declickStrength = 0.0f;   // 0..1 transient/click ducker (0 = off)
+    float declickVoiceFloor = 0.0f; // 0..1 fraction of the duck kept during voice (0 = fully voice-safe)
     float vadOpen = 0.6f;      // hysteresis open threshold
     float vadClose = 0.3f;     // hysteresis close threshold
     float vadHoldMs = 200.0f;  // keep AGC active this long after VAD drops
@@ -30,11 +31,13 @@ public:
   void setAgcTargetDb(float db) noexcept          { agcTarget_ = db; }
   void setLimiterCeilingDb(float db) noexcept     { limTarget_ = db; }
   void setDeclickStrength(float s) noexcept       { dckTarget_ = s; }
+  void setDeclickVoiceFloor(float f) noexcept     { declick_.setVoiceFloor(f); }
   void setBypass(bool on) noexcept                { bypass_ = on; }
   float currentHpfCutoffHz() const noexcept       { return hpfCur_; }
   float currentAgcTargetDb() const noexcept       { return agcCur_; }
   float currentLimiterCeilingDb() const noexcept  { return limCur_; }
   float currentDeclickStrength() const noexcept   { return dckCur_; }
+  float currentDeclickVoiceFloor() const noexcept { return declick_.currentVoiceFloor(); }
 private:
   INoiseFilter* engine_;
   DcBlocker dc_;

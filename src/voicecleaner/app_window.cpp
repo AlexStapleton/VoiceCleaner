@@ -79,7 +79,7 @@ bool AppWindow::create(const wchar_t* title) {
 
   // Fixed, non-resizable window sized so the client area is exactly kClientW x kClientH.
   const DWORD style = WS_OVERLAPPEDWINDOW & ~WS_MAXIMIZEBOX & ~WS_THICKFRAME;
-  RECT wr{0, 0, 460, 664};
+  RECT wr{0, 0, 460, 708};
   AdjustWindowRectEx(&wr, style, FALSE, 0);
   hwnd_ = CreateWindowExW(0, kClass, title, style, CW_USEDEFAULT, CW_USEDEFAULT,
                           wr.right - wr.left, wr.bottom - wr.top, nullptr, nullptr, hInst_, this);
@@ -102,7 +102,8 @@ void AppWindow::refreshDevices() {
     sldHpf_.setValue(p->hpfHz);
     sldLim_.setValue(p->limiterDbfs);
     sldDck_.setValue(p->declickStrength);
-    state_->seedTuning(p->aggression, p->hpfHz, p->outputGainDbfs, p->limiterDbfs, p->declickStrength);
+    sldVfl_.setValue(p->declickVoiceFloor);
+    state_->seedTuning(p->aggression, p->hpfHz, p->outputGainDbfs, p->limiterDbfs, p->declickStrength, p->declickVoiceFloor);
   }
 }
 
@@ -141,7 +142,8 @@ void AppWindow::layout(D2D1_SIZE_F sz) {
   rcHpf_  = D2D1::RectF(pad, 460, tw, 472);
   rcLim_  = D2D1::RectF(pad, 504, tw, 516);
   rcDck_  = D2D1::RectF(pad, 548, tw, 560);
-  rcRelaunch_  = D2D1::RectF(pad, 580, sz.width - pad, 580 + h);   // only when Down
+  rcVfl_  = D2D1::RectF(pad, 592, tw, 604);
+  rcRelaunch_  = D2D1::RectF(pad, 624, sz.width - pad, 624 + h);   // only when Down
   rcQuit_      = D2D1::RectF(sz.width - pad - 90, sz.height - 36, sz.width - pad, sz.height - 10);
 }
 
@@ -230,6 +232,7 @@ void AppWindow::paint() {
   drawSlider(L"HPF",         2, true);
   drawSlider(L"LIMITER",     3, true);
   drawSlider(L"DE-CLICK",    4, true);
+  drawSlider(L"SPEECH DECLICK", 5, true);
 
   // 7. Quit (footer, right-aligned) — full shutdown, same path as the tray Quit
   box(rcQuit_, hot_==4 ? panelHot : panel);
@@ -273,16 +276,16 @@ int AppWindow::hitControl(int x, int y) const {
 }
 
 Slider& AppWindow::sliderByIndex(int i) {
-  switch (i) { case 0: return sldGain_; case 1: return sldAggr_; case 2: return sldHpf_; case 3: return sldLim_; default: return sldDck_; }
+  switch (i) { case 0: return sldGain_; case 1: return sldAggr_; case 2: return sldHpf_; case 3: return sldLim_; case 4: return sldDck_; default: return sldVfl_; }
 }
 D2D1_RECT_F& AppWindow::trackByIndex(int i) {
-  switch (i) { case 0: return rcGain_; case 1: return rcAggr_; case 2: return rcHpf_; case 3: return rcLim_; default: return rcDck_; }
+  switch (i) { case 0: return rcGain_; case 1: return rcAggr_; case 2: return rcHpf_; case 3: return rcLim_; case 4: return rcDck_; default: return rcVfl_; }
 }
 bool AppWindow::aggressionEnabled() const { return state_->activeEngine() == 1; }  // DFN3 only
 
 int AppWindow::trackHit(int x, int y) const {
-  const D2D1_RECT_F rc[5] = { rcGain_, rcAggr_, rcHpf_, rcLim_, rcDck_ };
-  for (int i = 0; i < 5; ++i) {
+  const D2D1_RECT_F rc[6] = { rcGain_, rcAggr_, rcHpf_, rcLim_, rcDck_, rcVfl_ };
+  for (int i = 0; i < 6; ++i) {
     if (i == 1 && !aggressionEnabled()) continue;   // aggression not draggable on RNNoise
     if (x >= rc[i].left && x <= rc[i].right && y >= rc[i].top - 12 && y <= rc[i].bottom + 12) return i;
   }
@@ -300,7 +303,8 @@ vc::ipc::Params AppWindow::applySlider(int i) {
     case 1: return state_->onSetAggression(s.value());
     case 2: return state_->onSetHpf(s.value());
     case 3: return state_->onSetLimiter(s.value());
-    default: return state_->onSetDeclick(s.value());
+    case 4: return state_->onSetDeclick(s.value());
+    default: return state_->onSetDeclickVoiceFloor(s.value());
   }
 }
 void AppWindow::persistTuning() {
@@ -312,6 +316,7 @@ void AppWindow::persistTuning() {
   p->hpfHz          = sldHpf_.value();
   p->limiterDbfs    = sldLim_.value();
   p->declickStrength = sldDck_.value();
+  p->declickVoiceFloor = sldVfl_.value();
   settings_->save(configPath_);
 }
 

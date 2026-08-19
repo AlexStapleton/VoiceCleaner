@@ -17,6 +17,7 @@ struct MicProfile {
   float outputGainDbfs = -20.0f;  // .output_gain_dbfs  (== agcTargetDbfs)
   float limiterDbfs    = -1.0f;   // .limiter_dbfs
   float declickStrength = 0.0f;   // .declick_strength
+  float declickVoiceFloor = 0.0f; // .declick_voice_floor
 };
 
 // The full settings.toml as the UI owns it: a [global] block + every [mic."<id>"] profile.

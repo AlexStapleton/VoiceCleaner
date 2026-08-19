@@ -20,6 +20,7 @@ Declicker::Declicker(const Config& c) : L_(c.lookahead) {
 }
 
 void Declicker::setStrength(float s) noexcept { strength_ = clamp01(s); }
+void Declicker::setVoiceFloor(float f) noexcept { voiceFloor_ = clamp01(f); }
 
 void Declicker::reset() noexcept {
   hpPrevIn_ = hpPrevOut_ = 0.0f; envF_ = 0.0f; envS_ = 1e-6f; gain_ = 1.0f; holdLeft_ = 0;
