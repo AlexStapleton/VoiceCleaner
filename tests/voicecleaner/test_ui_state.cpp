@@ -210,7 +210,7 @@ TEST(UiState, TuningSettersMutateCurrentAndReturnIt) {
 }
 TEST(UiState, SeedTuningSetsAllFourAndSurvivesBypassToggle) {
   UiState ui;
-  ui.seedTuning(/*aggr*/0.4f, /*hpf*/90.0f, /*gain*/-16.0f, /*lim*/-3.0f);
+  ui.seedTuning(/*aggr*/0.4f, /*hpf*/90.0f, /*gain*/-16.0f, /*lim*/-3.0f, /*declick*/0.0f);
   EXPECT_FLOAT_EQ(ui.current().aggression, 0.4f);
   EXPECT_FLOAT_EQ(ui.current().hpfCutoffHz, 90.0f);
   EXPECT_FLOAT_EQ(ui.current().agcTargetDbfs, -16.0f);
@@ -218,4 +218,15 @@ TEST(UiState, SeedTuningSetsAllFourAndSurvivesBypassToggle) {
   vc::ipc::Params sent = ui.onToggleBypass();
   EXPECT_FLOAT_EQ(sent.aggression, 0.4f);
   EXPECT_FLOAT_EQ(sent.agcTargetDbfs, -16.0f);
+}
+TEST(UiState, OnSetDeclickMutatesCurrent) {
+  UiState ui;
+  EXPECT_FLOAT_EQ(ui.onSetDeclick(0.6f).declickStrength, 0.6f);
+  EXPECT_FLOAT_EQ(ui.current().declickStrength, 0.6f);
+}
+TEST(UiState, SeedTuningCarriesDeclick) {
+  UiState ui;
+  ui.seedTuning(/*aggr*/0.4f, /*hpf*/90.0f, /*gain*/-16.0f, /*lim*/-3.0f, /*declick*/0.7f);
+  EXPECT_FLOAT_EQ(ui.current().declickStrength, 0.7f);
+  EXPECT_FLOAT_EQ(ui.current().aggression, 0.4f);   // still carries the others
 }
