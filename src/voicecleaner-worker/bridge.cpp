@@ -151,6 +151,7 @@ void Bridge::relayLoop() {
         chain_->setHpfCutoffHz(sp.hpfCutoffHz);
         chain_->setAgcTargetDb(sp.agcTargetDbfs);
         chain_->setLimiterCeilingDb(sp.limiterCeilingDbfs);
+        chain_->setDeclickStrength(sp.declickStrength);
         chain_->setBypass(sp.bypass != 0);
       }
       if (engine_) engine_->SetAggression(sp.aggression);   // DFN3-only; RNNoise/passthrough no-op
