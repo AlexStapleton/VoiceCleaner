@@ -53,6 +53,7 @@ class AppWindow {
   bool aggressionEnabled() const;                  // false when active engine is RNNoise
   vc::ipc::Params applySlider(int i);              // push slider i's value into UiState -> Params
   void persistTuning();                            // write the active profile on drag-end (Task 6)
+  void seedFromActiveProfile();                    // load the active mic's tuning into sliders + UiState
 
   HINSTANCE hInst_;
   HWND hwnd_ = nullptr;

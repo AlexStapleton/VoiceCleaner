@@ -96,16 +96,22 @@ void AppWindow::refreshDevices() {
   picker_.setDevices(std::move(cap), std::move(ren));
   if (!settings_) return;
   picker_.setActive(settings_->activeCaptureId, settings_->renderId);
-  if (vc::MicProfile* p = settings_->activeProfile()) {   // seed sliders + UiState from the active profile
-    sldGain_.setValue(p->outputGainDbfs);
-    sldAggr_.setValue(p->aggression);
-    sldHpf_.setValue(p->hpfHz);
-    sldLim_.setValue(p->limiterDbfs);
-    sldDck_.setValue(p->declickStrength);
-    sldVfl_.setValue(p->declickVoiceFloor);
-    sldGate_.setValue(p->gateStrength);
-    state_->seedTuning(p->aggression, p->hpfHz, p->outputGainDbfs, p->limiterDbfs, p->declickStrength, p->declickVoiceFloor, p->gateStrength);
-  }
+  seedFromActiveProfile();   // seed sliders + UiState from the active profile
+}
+
+void AppWindow::seedFromActiveProfile() {
+  if (!settings_) return;
+  vc::MicProfile* p = settings_->activeProfile();
+  if (!p) return;
+  sldGain_.setValue(p->outputGainDbfs);
+  sldAggr_.setValue(p->aggression);
+  sldHpf_.setValue(p->hpfHz);
+  sldLim_.setValue(p->limiterDbfs);
+  sldDck_.setValue(p->declickStrength);
+  sldVfl_.setValue(p->declickVoiceFloor);
+  sldGate_.setValue(p->gateStrength);
+  state_->seedTuning(p->aggression, p->hpfHz, p->outputGainDbfs, p->limiterDbfs,
+                     p->declickStrength, p->declickVoiceFloor, p->gateStrength);
 }
 
 LRESULT CALLBACK AppWindow::WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
@@ -411,9 +417,10 @@ void AppWindow::applyPick(PickerKind k, size_t rowIndex) {
     }
   } else if (k == PickerKind::Capture) {
     sup_->sendSelectCapture(id, /*driftSeed*/0.0);         // live pipeline rebuild on the new mic
+    seedFromActiveProfile();                                // load the new mic's sliders + tuning into state_
     const vc::MicProfile* p = settings_->activeProfile();
     uint32_t eng = (p && p->engine == "dfn3") ? 1u : 0u;
-    sendCurrent(state_->onSelectEngine(eng));              // apply the mic's engine
+    sendCurrent(state_->onSelectEngine(eng));              // push the new mic's engine + tuning live
   } else {
     sup_->sendSelectRender(id);
   }
