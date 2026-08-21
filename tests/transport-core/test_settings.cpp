@@ -147,3 +147,28 @@ TEST(Settings, DeclickStrengthRoundTrips) {
   EXPECT_FLOAT_EQ(r.mics[0].declickVoiceFloor, 0.35f);
   EXPECT_FLOAT_EQ(r.mics[0].gateStrength, 0.65f);
 }
+
+TEST(Settings, PerMicProfilesAndRingRoundTrip) {
+  Settings s;
+  s.activeCaptureId = "cap-A"; s.renderId = "ren-1"; s.ringFrames = 512;
+  vc::MicProfile& a = s.ensureProfile("cap-A", "Mic A");
+  a.outputGainDbfs = -12.0f; a.hpfHz = 120.0f; a.gateStrength = 0.7f; a.engine = "dfn3";
+  vc::MicProfile& b = s.ensureProfile("cap-B", "Mic B");
+  b.outputGainDbfs = -24.0f; b.hpfHz = 60.0f;  b.gateStrength = 0.1f; b.engine = "rnnoise";
+  auto p = (std::filesystem::temp_directory_path() / "vc_tmp_permic.toml").string();
+  s.save(p);
+
+  Settings r = Settings::load(p);
+  EXPECT_EQ(r.ringFrames, 512u);                 // global latency preserved across save/load
+  ASSERT_EQ(r.mics.size(), 2u);
+  r.activeCaptureId = "cap-A";
+  ASSERT_NE(r.activeProfile(), nullptr);
+  EXPECT_FLOAT_EQ(r.activeProfile()->outputGainDbfs, -12.0f);
+  EXPECT_FLOAT_EQ(r.activeProfile()->hpfHz, 120.0f);
+  EXPECT_EQ(r.activeProfile()->engine, "dfn3");
+  r.activeCaptureId = "cap-B";
+  ASSERT_NE(r.activeProfile(), nullptr);
+  EXPECT_FLOAT_EQ(r.activeProfile()->outputGainDbfs, -24.0f);
+  EXPECT_FLOAT_EQ(r.activeProfile()->hpfHz, 60.0f);
+  EXPECT_EQ(r.activeProfile()->engine, "rnnoise");
+}

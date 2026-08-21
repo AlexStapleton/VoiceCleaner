@@ -254,3 +254,17 @@ TEST(UiState, SeedTuningCarriesDeclick) {
   EXPECT_FLOAT_EQ(ui.current().gateStrength, 0.3f);
   EXPECT_FLOAT_EQ(ui.current().aggression, 0.4f);   // still carries the others
 }
+TEST(UiState, SeedTuningThenSelectEngineCarriesTuning) {
+  UiState ui;
+  ui.seedTuning(/*aggression*/0.4f, /*hpfHz*/95.0f, /*gainDbfs*/-18.0f, /*limiterDbfs*/-2.0f,
+                /*declick*/0.3f, /*declickVoiceFloor*/0.1f, /*gate*/0.5f);
+  vc::ipc::Params p = ui.onSelectEngine(1u);   // the exact call the mic-switch path uses
+  EXPECT_EQ(p.engine, 1u);
+  EXPECT_FLOAT_EQ(p.aggression, 0.4f);
+  EXPECT_FLOAT_EQ(p.hpfCutoffHz, 95.0f);
+  EXPECT_FLOAT_EQ(p.agcTargetDbfs, -18.0f);
+  EXPECT_FLOAT_EQ(p.limiterCeilingDbfs, -2.0f);
+  EXPECT_FLOAT_EQ(p.declickStrength, 0.3f);
+  EXPECT_FLOAT_EQ(p.declickVoiceFloor, 0.1f);
+  EXPECT_FLOAT_EQ(p.gateStrength, 0.5f);
+}
