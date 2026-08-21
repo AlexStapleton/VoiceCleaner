@@ -1,6 +1,7 @@
 # VoiceCleaner settings — shipped default (Phase 4a schema).
 #
-# REAL-TIME latency: ring_frames MUST stay small (~16 = ~15 ms buffered). 1024 = ~5 s latency.
+# REAL-TIME latency: buffered delay ~= ring_frames x 5 ms (16 ~= 80 ms, 512 ~= 2.5 s, 1024 ~= 5 s).
+# Editable in-app: the LATENCY box (clamped 4..512) writes this and restarts the worker.
 # The mic picker in the app fills active_capture_id / render_id and writes the per-mic profile;
 # with them blank, the app opens to the pickers and does not spawn the worker.
 

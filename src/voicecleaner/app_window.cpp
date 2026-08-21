@@ -13,6 +13,8 @@ namespace vc::ui {
 static const wchar_t* kClass = L"VoiceCleanerWindow";
 static const UINT kTimerId = 1;
 static const float kRowH = 34.0f;   // dropdown row height
+static const int kRingMin = 4;      // below the worker's floor of 3; keeps the value meaningful
+static const int kRingMax = 512;    // ~2.5 s buffered (ring_frames x 5 ms)
 // Cached once: the same value is returned for the same name across processes, so main.cpp's
 // single-instance broadcast lands here (design note, Task 14).
 static const UINT kRestoreMsg = RegisterWindowMessageW(L"VoiceCleanerRestore");
@@ -79,13 +81,14 @@ bool AppWindow::create(const wchar_t* title) {
 
   // Fixed, non-resizable window sized so the client area is exactly kClientW x kClientH.
   const DWORD style = WS_OVERLAPPEDWINDOW & ~WS_MAXIMIZEBOX & ~WS_THICKFRAME;
-  RECT wr{0, 0, 460, 804};
+  RECT wr{0, 0, 460, 864};   // +60 px for the LATENCY row
   AdjustWindowRectEx(&wr, style, FALSE, 0);
   hwnd_ = CreateWindowExW(0, kClass, title, style, CW_USEDEFAULT, CW_USEDEFAULT,
                           wr.right - wr.left, wr.bottom - wr.top, nullptr, nullptr, hInst_, this);
   if (!hwnd_) return false;
   SetTimer(hwnd_, kTimerId, 100, nullptr);   // ~10 Hz telemetry poll
   refreshDevices();                           // initial enumeration + active seed
+  if (settings_) ringEdit_ = std::to_wstring((int)settings_->ringFrames);   // seed the latency box
   ShowWindow(hwnd_, SW_SHOW);
   return true;
 }
@@ -151,8 +154,10 @@ void AppWindow::layout(D2D1_SIZE_F sz) {
   rcDck_  = D2D1::RectF(pad, 548, tw, 560);
   rcVfl_  = D2D1::RectF(pad, 592, tw, 604);
   rcGate_ = D2D1::RectF(pad, 636, tw, 648);
-  rcHelp_      = D2D1::RectF(pad, 670, sz.width - pad, 754);       // hover help strip (what each control does)
-  rcRelaunch_  = D2D1::RectF(pad, 670, sz.width - pad, 670 + h);   // only when Down (shares the help band)
+  rcRingBox_   = D2D1::RectF(pad, 684, pad + 120, 684 + h);            // editable latency box
+  rcRingApply_ = D2D1::RectF(sz.width - pad - 100, 684, sz.width - pad, 684 + h);
+  rcHelp_      = D2D1::RectF(pad, 740, sz.width - pad, 824);           // hover help strip
+  rcRelaunch_  = D2D1::RectF(pad, 740, sz.width - pad, 740 + h);       // only when Down (shares the help band)
   rcQuit_      = D2D1::RectF(sz.width - pad - 90, sz.height - 36, sz.width - pad, sz.height - 10);
 }
 
@@ -249,6 +254,23 @@ void AppWindow::paint() {
   drawSlider(L"SPEECH DECLICK", 5, true);
   drawSlider(L"NOISE GATE",  6, true);
 
+  // 6b. Latency (ring frames): editable box + approx-ms readout + Apply (restarts the worker)
+  label(L"LATENCY (ring frames)", D2D1::RectF(pad, rcRingBox_.top - 20, sz.width - pad, rcRingBox_.top - 4), dim, capFmt_);
+  box(rcRingBox_, ringFocused_ ? panelHot : panel);
+  {
+    std::wstring shown = ringEdit_;
+    if (ringFocused_) shown += L"|";                       // simple caret while focused
+    D2D1_RECT_F br = D2D1::RectF(rcRingBox_.left + 12, rcRingBox_.top + 9, rcRingBox_.right - 8, rcRingBox_.bottom);
+    rt_->DrawText(shown.c_str(), (UINT32)shown.size(), textFmt_, br, text);
+    wchar_t ms[32];
+    swprintf(ms, 32, L"\xE2\x89\x88 %d ms", ringParse() * 5);   // buffered delay ~= frames x 5 ms
+    D2D1_RECT_F mr = D2D1::RectF(rcRingBox_.right + 12, rcRingBox_.top + 9, rcRingApply_.left - 8, rcRingBox_.bottom);
+    rt_->DrawText(ms, (UINT32)wcslen(ms), textFmt_, mr, dim);
+  }
+  const bool ringDirty = settings_ && ringPendingClamped() != (int)settings_->ringFrames;
+  box(rcRingApply_, ringDirty ? (hot_==5 ? accentHot : accent) : disabled);
+  label(L"Apply", rcRingApply_, ringDirty ? text : dim, centerFmt_);
+
   // 7. Quit (footer, right-aligned) — full shutdown, same path as the tray Quit
   box(rcQuit_, hot_==4 ? panelHot : panel);
   label(L"Quit", rcQuit_, text, centerFmt_);
@@ -287,6 +309,7 @@ int AppWindow::hitControl(int x, int y) const {
   if (hit(rcBypass_,    x, y)) return 2;
   if (hit(rcRelaunch_,  x, y)) return 3;
   if (hit(rcQuit_,      x, y)) return 4;
+  if (hit(rcRingApply_, x, y)) return 5;
   return -1;
 }
 
@@ -316,6 +339,7 @@ int AppWindow::helpTargetAt(int x, int y) const {
   if (hit(rcEngineRnn_, x, y)) return 200;
   if (hit(rcEngineDfn_, x, y)) return 201;
   if (hit(rcBypass_, x, y))    return 202;
+  if (hit(rcRingBox_, x, y) || hit(rcRingApply_, x, y)) return 102;
   return -1;
 }
 
@@ -333,6 +357,7 @@ std::wstring AppWindow::helpText() const {
     case 200: return L"ENGINE: RNNoise — lighter, low-latency denoiser. Best at keyboard/mouse clicks — use this in a clicky room.";
     case 201: return L"ENGINE: DeepFilterNet3 — stronger on steady background noise, but passes short clicks (use DE-CLICK or RNNoise for those).";
     case 202: return L"BYPASS — pass your mic through untouched with denoising off. Click to toggle (A/B your setup).";
+    case 102: return L"LATENCY — audio buffer depth in frames (1 frame = 10 ms audio; buffered delay \xE2\x89\x88 frames \xC3\x97 5 ms). Higher tolerates glitches better but adds delay. Applying restarts the audio engine (brief dropout).";
     default:  return L"Hover a slider or control to see what it does and how to use it.";
   }
 }
@@ -366,6 +391,45 @@ void AppWindow::persistTuning() {
   p->declickVoiceFloor = sldVfl_.value();
   p->gateStrength = sldGate_.value();
   settings_->save(configPath_);
+}
+
+int AppWindow::ringParse() const {
+  if (ringEdit_.empty()) return 0;
+  int v = 0;
+  for (wchar_t c : ringEdit_) {
+    if (c < L'0' || c > L'9') return 0;
+    v = v * 10 + (int)(c - L'0');
+    if (v > 100000) return 100000;   // guard overflow on absurd input
+  }
+  return v;
+}
+
+int AppWindow::ringPendingClamped() const {
+  int v = ringParse();
+  if (v < kRingMin) v = kRingMin;
+  if (v > kRingMax) v = kRingMax;
+  return v;
+}
+
+void AppWindow::commitRingEdit() {
+  ringEdit_ = std::to_wstring(ringPendingClamped());
+}
+
+void AppWindow::respawnWorker() {
+  sup_->shutdown(3000);      // fully stop the current worker process
+  pushedTuning_ = false;     // re-push the active mic's tuning to the fresh worker (tick() readiness path)
+  sup_->startOrAttach();     // spawns fresh -> reads the new ring_frames
+  InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
+void AppWindow::applyRing() {
+  if (!settings_) return;
+  commitRingEdit();
+  int v = ringPendingClamped();
+  if ((size_t)v == settings_->ringFrames) return;   // no change -> nothing to restart
+  settings_->ringFrames = (size_t)v;
+  settings_->save(configPath_);
+  if (spawned_) respawnWorker();   // first-run (no worker yet): value takes effect at first spawn
 }
 
 D2D1_RECT_F AppWindow::overlayRect() const {
@@ -465,6 +529,7 @@ LRESULT AppWindow::handle(UINT msg, WPARAM w, LPARAM l) {
       return 0;
     case WM_LBUTTONDOWN: {
       int x = GET_X_LPARAM(l), y = GET_Y_LPARAM(l);
+      if (ringFocused_ && !hit(rcRingBox_, x, y)) { commitRingEdit(); ringFocused_ = false; }   // click-away commits
       if (picker_.isOpen()) {                          // overlay takes priority
         int row = overlayHit(x, y);
         if (row >= 0) applyPick(picker_.openKind(), (size_t)row);
@@ -474,6 +539,7 @@ LRESULT AppWindow::handle(UINT msg, WPARAM w, LPARAM l) {
       }
       if (hit(rcMicField_, x, y)) { refreshDevices(); picker_.open(PickerKind::Capture); InvalidateRect(hwnd_, nullptr, FALSE); return 0; }
       if (hit(rcOutField_, x, y)) { refreshDevices(); picker_.open(PickerKind::Render);  InvalidateRect(hwnd_, nullptr, FALSE); return 0; }
+      if (hit(rcRingBox_, x, y)) { ringFocused_ = true; InvalidateRect(hwnd_, nullptr, FALSE); return 0; }
       { int s = trackHit(x, y);
         if (s >= 0) { grabbed_ = s; setSliderFromX(s, x); sendCurrent(applySlider(s)); InvalidateRect(hwnd_, nullptr, FALSE); return 0; } }
       switch (hitControl(x, y)) {
@@ -482,12 +548,24 @@ LRESULT AppWindow::handle(UINT msg, WPARAM w, LPARAM l) {
         case 2: onCommandBypass(); break;   // onCommandBypass() itself no-ops when disabled
         case 3: if (state_->statusKind()==StatusKind::Down) requestRelaunch(); break;
         case 4: sup_->shutdown(3000); DestroyWindow(hwnd_); break;   // full quit
+        case 5: applyRing(); break;   // latency Apply -> persist + respawn
       }
       return 0;
     }
     case WM_KEYDOWN:
       if (w == VK_ESCAPE && picker_.isOpen()) { picker_.close(); InvalidateRect(hwnd_, nullptr, FALSE); }
       return 0;
+    case WM_CHAR:
+      if (ringFocused_) {
+        wchar_t c = (wchar_t)w;
+        if (c >= L'0' && c <= L'9') { if (ringEdit_.size() < 4) ringEdit_.push_back(c); }
+        else if (c == L'\b') { if (!ringEdit_.empty()) ringEdit_.pop_back(); }   // Backspace
+        else if (c == L'\r') { applyRing(); ringFocused_ = false; }              // Enter commits + applies
+        else if (c == 27)    { commitRingEdit(); ringFocused_ = false; }         // Esc cancels edit
+        InvalidateRect(hwnd_, nullptr, FALSE);
+        return 0;
+      }
+      break;
     case WM_MOUSEMOVE: {
       if (grabbed_ >= 0) {   // dragging a slider
         setSliderFromX(grabbed_, GET_X_LPARAM(l));

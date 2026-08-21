@@ -54,6 +54,11 @@ class AppWindow {
   vc::ipc::Params applySlider(int i);              // push slider i's value into UiState -> Params
   void persistTuning();                            // write the active profile on drag-end (Task 6)
   void seedFromActiveProfile();                    // load the active mic's tuning into sliders + UiState
+  void respawnWorker();                            // full stop + fresh spawn so ring_frames is re-read
+  void applyRing();                                // commit+clamp the latency box, persist, respawn
+  void commitRingEdit();                           // normalize ringEdit_ to the clamped pending value
+  int  ringParse() const;                          // ringEdit_ digits -> int (0 if empty/non-digit)
+  int  ringPendingClamped() const;                 // ringParse() clamped to [kRingMin, kRingMax]
 
   HINSTANCE hInst_;
   HWND hwnd_ = nullptr;
@@ -76,10 +81,13 @@ class AppWindow {
 
   int hot_ = -1;   // control under the cursor (see hitControl); drives hover highlight
   int helpHot_ = -1;   // control under the cursor for the help strip (see helpTargetAt/helpText)
+  std::wstring ringEdit_;      // latency box edit buffer (digits); seeded from settings_->ringFrames
+  bool ringFocused_ = false;   // latency box has keyboard focus (caret shown)
 
   // control rects (client coords), recomputed in layout()
   D2D1_RECT_F rcMicField_{}, rcOutField_{};
   D2D1_RECT_F rcEngineRnn_{}, rcEngineDfn_{}, rcBypass_{}, rcRelaunch_{}, rcQuit_{}, rcHelp_{};
+  D2D1_RECT_F rcRingBox_{}, rcRingApply_{};   // editable latency box + Apply button
 
   Slider sldGain_{-30.0f, -6.0f, -20.0f, SliderFmt::Dbfs};
   Slider sldAggr_{0.0f, 1.0f, 0.0f, SliderFmt::Ratio2};
