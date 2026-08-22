@@ -172,3 +172,17 @@ TEST(Settings, PerMicProfilesAndRingRoundTrip) {
   EXPECT_FLOAT_EQ(r.activeProfile()->hpfHz, 60.0f);
   EXPECT_EQ(r.activeProfile()->engine, "rnnoise");
 }
+
+TEST(Settings, MixStrengthDefaultsFullWet) {
+  EXPECT_FLOAT_EQ(vc::MicProfile{}.mixStrength, 1.0f);
+}
+TEST(Settings, MixStrengthRoundTrips) {
+  Settings s; s.activeCaptureId = "cap-1"; s.renderId = "ren-1";
+  vc::MicProfile& m = s.ensureProfile("cap-1", "K688");
+  m.mixStrength = 0.65f;
+  auto p = (std::filesystem::temp_directory_path() / "vc_tmp_settings_mix.toml").string();
+  s.save(p);
+  Settings r = Settings::load(p);
+  ASSERT_EQ(r.mics.size(), 1u);
+  EXPECT_FLOAT_EQ(r.mics[0].mixStrength, 0.65f);
+}

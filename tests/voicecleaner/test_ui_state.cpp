@@ -211,7 +211,7 @@ TEST(UiState, TuningSettersMutateCurrentAndReturnIt) {
 }
 TEST(UiState, SeedTuningSetsAllFourAndSurvivesBypassToggle) {
   UiState ui;
-  ui.seedTuning(/*aggr*/0.4f, /*hpf*/90.0f, /*gain*/-16.0f, /*lim*/-3.0f, /*declick*/0.0f, /*voiceFloor*/0.0f, /*gate*/0.0f);
+  ui.seedTuning(/*aggr*/0.4f, /*hpf*/90.0f, /*gain*/-16.0f, /*lim*/-3.0f, /*declick*/0.0f, /*voiceFloor*/0.0f, /*gate*/0.0f, /*mix*/1.0f);
   EXPECT_FLOAT_EQ(ui.current().aggression, 0.4f);
   EXPECT_FLOAT_EQ(ui.current().hpfCutoffHz, 90.0f);
   EXPECT_FLOAT_EQ(ui.current().agcTargetDbfs, -16.0f);
@@ -246,9 +246,20 @@ TEST(UiState, OnSetGateMutatesCurrent) {
   EXPECT_FLOAT_EQ(ui.onSetGate(0.5f).gateStrength, 0.5f);
   EXPECT_FLOAT_EQ(ui.current().gateStrength, 0.5f);
 }
+TEST(UiState, OnSetMixMutatesCurrent) {
+  UiState ui;
+  EXPECT_FLOAT_EQ(ui.onSetMix(0.4f).mixStrength, 0.4f);
+  EXPECT_FLOAT_EQ(ui.current().mixStrength, 0.4f);
+}
+TEST(UiState, SeedTuningCarriesMix) {
+  UiState ui;
+  ui.seedTuning(/*aggr*/0.0f, /*hpf*/80.0f, /*gain*/-20.0f, /*lim*/-1.0f,
+                /*declick*/0.0f, /*voiceFloor*/0.0f, /*gate*/0.0f, /*mix*/0.7f);
+  EXPECT_FLOAT_EQ(ui.current().mixStrength, 0.7f);
+}
 TEST(UiState, SeedTuningCarriesDeclick) {
   UiState ui;
-  ui.seedTuning(/*aggr*/0.4f, /*hpf*/90.0f, /*gain*/-16.0f, /*lim*/-3.0f, /*declick*/0.7f, /*voiceFloor*/0.5f, /*gate*/0.3f);
+  ui.seedTuning(/*aggr*/0.4f, /*hpf*/90.0f, /*gain*/-16.0f, /*lim*/-3.0f, /*declick*/0.7f, /*voiceFloor*/0.5f, /*gate*/0.3f, /*mix*/1.0f);
   EXPECT_FLOAT_EQ(ui.current().declickStrength, 0.7f);
   EXPECT_FLOAT_EQ(ui.current().declickVoiceFloor, 0.5f);
   EXPECT_FLOAT_EQ(ui.current().gateStrength, 0.3f);
@@ -257,7 +268,7 @@ TEST(UiState, SeedTuningCarriesDeclick) {
 TEST(UiState, SeedTuningThenSelectEngineCarriesTuning) {
   UiState ui;
   ui.seedTuning(/*aggression*/0.4f, /*hpfHz*/95.0f, /*gainDbfs*/-18.0f, /*limiterDbfs*/-2.0f,
-                /*declick*/0.3f, /*declickVoiceFloor*/0.1f, /*gate*/0.5f);
+                /*declick*/0.3f, /*declickVoiceFloor*/0.1f, /*gate*/0.5f, /*mix*/0.8f);
   vc::ipc::Params p = ui.onSelectEngine(1u);   // the exact call the mic-switch path uses
   EXPECT_EQ(p.engine, 1u);
   EXPECT_FLOAT_EQ(p.aggression, 0.4f);

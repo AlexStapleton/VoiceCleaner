@@ -9,6 +9,7 @@ DspChain::DspChain(INoiseFilter* engine, const Config& c)
       lim_(c.limiterCeilingDb, 144, 50.0f, c.fs),
       declick_(Declicker::Config{c.fs}),
       gate_(NoiseGate::Config{c.fs}),
+      mix_(engine ? engine->AlgorithmicDelaySamples() : 0),
       open_(c.vadOpen),
       close_(c.vadClose),
       holdSamples_((int)(c.vadHoldMs * 0.001f * c.fs)),
@@ -17,7 +18,8 @@ DspChain::DspChain(INoiseFilter* engine, const Config& c)
       agcCur_(c.agcTargetDb), agcTarget_(c.agcTargetDb),
       limCur_(c.limiterCeilingDb), limTarget_(c.limiterCeilingDb),
       dckCur_(c.declickStrength), dckTarget_(c.declickStrength),
-      gateCur_(c.gateStrength), gateTarget_(c.gateStrength) {
+      gateCur_(c.gateStrength), gateTarget_(c.gateStrength),
+      mixCur_(c.mixStrength), mixTarget_(c.mixStrength) {
   declick_.setVoiceFloor(c.declickVoiceFloor);
 }
 
@@ -38,6 +40,9 @@ void DspChain::process_frame(const float* in, float* out) noexcept {
   // 2. Engine.
   engine_->ProcessFrame(t1_, t2_);
   float vad = engine_->LastVadProbability();
+  // 2b. Wet/dry mix (ramped). t1_ = dry (pre-engine), t2_ = wet (engine out, engine-delayed).
+  mixCur_ = kRampCoef * mixCur_ + (1.0f - kRampCoef) * mixTarget_;
+  mix_.process(t1_, t2_, t2_, FRAME_SAMPLES, mixCur_);   // out aliases wet (t2_) — allowed
   // 3. High-pass.
   hpf_.process(t2_, t1_, FRAME_SAMPLES);          // t1_ = HPF output
   // 3b. Declicker (ramped strength; VAD scales the duck down).
@@ -70,6 +75,7 @@ void DspChain::reset() noexcept {
   lim_.reset();
   declick_.reset(); dckCur_ = dckTarget_;
   gate_.reset(); gateCur_ = gateTarget_;
+  mix_.reset(); mixCur_ = mixTarget_;
   vadActive_ = false;
   holdLeft_ = 0;
   hpfCur_ = hpfTarget_; agcCur_ = agcTarget_; limCur_ = limTarget_;

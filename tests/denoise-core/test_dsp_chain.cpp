@@ -160,3 +160,19 @@ TEST(DspChain, DeclickVoiceFloorDucksTransientUnderVoice) {
   float peak = 0; for (float v : out) peak = std::max(peak, std::fabs(v));
   EXPECT_LT(peak, 0.6f);                       // floor=1 -> ducked even under voice
 }
+
+TEST(DspChain, MixDefaultIsFullWet) {
+  EXPECT_FLOAT_EQ(vc::DspChain::Config{}.mixStrength, 1.0f);
+}
+TEST(DspChain, MixZeroPassesDrySignalThroughEngineStage) {
+  // With a passthrough engine, wet == dry, so mix strength shouldn't change a steady tone's level;
+  // this guards that the mix stage is wired without corrupting the buffer plumbing.
+  vc::PassthroughFilter eng;
+  vc::DspChain::Config cfg; cfg.mixStrength = 0.0f;
+  vc::DspChain chain(&eng, cfg);
+  std::vector<float> in(vc::FRAME_SAMPLES), out(vc::FRAME_SAMPLES);
+  for (size_t i = 0; i < vc::FRAME_SAMPLES; ++i) in[i] = 0.2f * std::sin(0.03f * i);
+  for (int f = 0; f < 4; ++f) chain.process_frame(in.data(), out.data());
+  double r = 0; for (float v : out) r += (double)v * v;
+  EXPECT_GT(std::sqrt(r / vc::FRAME_SAMPLES), 0.05);   // signal survives (not silenced/NaN)
+}

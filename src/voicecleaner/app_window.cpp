@@ -81,7 +81,7 @@ bool AppWindow::create(const wchar_t* title) {
 
   // Fixed, non-resizable window sized so the client area is exactly kClientW x kClientH.
   const DWORD style = WS_OVERLAPPEDWINDOW & ~WS_MAXIMIZEBOX & ~WS_THICKFRAME;
-  RECT wr{0, 0, 460, 864};   // +60 px for the LATENCY row
+  RECT wr{0, 0, 460, 908};   // +44 px for the STRENGTH row (was 864: LATENCY row)
   AdjustWindowRectEx(&wr, style, FALSE, 0);
   hwnd_ = CreateWindowExW(0, kClass, title, style, CW_USEDEFAULT, CW_USEDEFAULT,
                           wr.right - wr.left, wr.bottom - wr.top, nullptr, nullptr, hInst_, this);
@@ -113,8 +113,9 @@ void AppWindow::seedFromActiveProfile() {
   sldDck_.setValue(p->declickStrength);
   sldVfl_.setValue(p->declickVoiceFloor);
   sldGate_.setValue(p->gateStrength);
+  sldMix_.setValue(p->mixStrength);
   state_->seedTuning(p->aggression, p->hpfHz, p->outputGainDbfs, p->limiterDbfs,
-                     p->declickStrength, p->declickVoiceFloor, p->gateStrength);
+                     p->declickStrength, p->declickVoiceFloor, p->gateStrength, p->mixStrength);
 }
 
 LRESULT CALLBACK AppWindow::WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
@@ -154,10 +155,11 @@ void AppWindow::layout(D2D1_SIZE_F sz) {
   rcDck_  = D2D1::RectF(pad, 548, tw, 560);
   rcVfl_  = D2D1::RectF(pad, 592, tw, 604);
   rcGate_ = D2D1::RectF(pad, 636, tw, 648);
-  rcRingBox_   = D2D1::RectF(pad, 684, pad + 120, 684 + h);            // editable latency box
-  rcRingApply_ = D2D1::RectF(sz.width - pad - 100, 684, sz.width - pad, 684 + h);
-  rcHelp_      = D2D1::RectF(pad, 740, sz.width - pad, 824);           // hover help strip
-  rcRelaunch_  = D2D1::RectF(pad, 740, sz.width - pad, 740 + h);       // only when Down (shares the help band)
+  rcMix_  = D2D1::RectF(pad, 680, tw, 692);
+  rcRingBox_   = D2D1::RectF(pad, 728, pad + 120, 728 + h);            // editable latency box
+  rcRingApply_ = D2D1::RectF(sz.width - pad - 100, 728, sz.width - pad, 728 + h);
+  rcHelp_      = D2D1::RectF(pad, 784, sz.width - pad, 868);           // hover help strip
+  rcRelaunch_  = D2D1::RectF(pad, 784, sz.width - pad, 784 + h);       // only when Down (shares the help band)
   rcQuit_      = D2D1::RectF(sz.width - pad - 90, sz.height - 36, sz.width - pad, sz.height - 10);
 }
 
@@ -253,6 +255,7 @@ void AppWindow::paint() {
   drawSlider(L"DE-CLICK",    4, true);
   drawSlider(L"SPEECH DECLICK", 5, true);
   drawSlider(L"NOISE GATE",  6, true);
+  drawSlider(L"STRENGTH",    7, true);
 
   // 6b. Latency (ring frames): editable box + approx-ms readout + Apply (restarts the worker)
   label(L"LATENCY (ring frames)", D2D1::RectF(pad, rcRingBox_.top - 20, sz.width - pad, rcRingBox_.top - 4), dim, capFmt_);
@@ -263,7 +266,7 @@ void AppWindow::paint() {
     D2D1_RECT_F br = D2D1::RectF(rcRingBox_.left + 12, rcRingBox_.top + 9, rcRingBox_.right - 8, rcRingBox_.bottom);
     rt_->DrawText(shown.c_str(), (UINT32)shown.size(), textFmt_, br, text);
     wchar_t ms[32];
-    swprintf(ms, 32, L"\xE2\x89\x88 %d ms", ringParse() * 5);   // buffered delay ~= frames x 5 ms
+    swprintf(ms, 32, L"\x2248 %d ms", ringParse() * 5);   // U+2248 (almost-equal); delay ~= frames x 5 ms
     D2D1_RECT_F mr = D2D1::RectF(rcRingBox_.right + 12, rcRingBox_.top + 9, rcRingApply_.left - 8, rcRingBox_.bottom);
     rt_->DrawText(ms, (UINT32)wcslen(ms), textFmt_, mr, dim);
   }
@@ -314,16 +317,16 @@ int AppWindow::hitControl(int x, int y) const {
 }
 
 Slider& AppWindow::sliderByIndex(int i) {
-  switch (i) { case 0: return sldGain_; case 1: return sldAggr_; case 2: return sldHpf_; case 3: return sldLim_; case 4: return sldDck_; case 5: return sldVfl_; default: return sldGate_; }
+  switch (i) { case 0: return sldGain_; case 1: return sldAggr_; case 2: return sldHpf_; case 3: return sldLim_; case 4: return sldDck_; case 5: return sldVfl_; case 6: return sldGate_; default: return sldMix_; }
 }
 D2D1_RECT_F& AppWindow::trackByIndex(int i) {
-  switch (i) { case 0: return rcGain_; case 1: return rcAggr_; case 2: return rcHpf_; case 3: return rcLim_; case 4: return rcDck_; case 5: return rcVfl_; default: return rcGate_; }
+  switch (i) { case 0: return rcGain_; case 1: return rcAggr_; case 2: return rcHpf_; case 3: return rcLim_; case 4: return rcDck_; case 5: return rcVfl_; case 6: return rcGate_; default: return rcMix_; }
 }
 bool AppWindow::aggressionEnabled() const { return state_->activeEngine() == 1; }  // DFN3 only
 
 int AppWindow::trackHit(int x, int y) const {
-  const D2D1_RECT_F rc[7] = { rcGain_, rcAggr_, rcHpf_, rcLim_, rcDck_, rcVfl_, rcGate_ };
-  for (int i = 0; i < 7; ++i) {
+  const D2D1_RECT_F rc[8] = { rcGain_, rcAggr_, rcHpf_, rcLim_, rcDck_, rcVfl_, rcGate_, rcMix_ };
+  for (int i = 0; i < 8; ++i) {
     if (i == 1 && !aggressionEnabled()) continue;   // aggression not draggable on RNNoise
     if (x >= rc[i].left && x <= rc[i].right && y >= rc[i].top - 12 && y <= rc[i].bottom + 12) return i;
   }
@@ -331,8 +334,8 @@ int AppWindow::trackHit(int x, int y) const {
 }
 int AppWindow::helpTargetAt(int x, int y) const {
   // Sliders first (same horizontal band as the track, extended up to cover the caption row).
-  const D2D1_RECT_F rc[7] = { rcGain_, rcAggr_, rcHpf_, rcLim_, rcDck_, rcVfl_, rcGate_ };
-  for (int i = 0; i < 7; ++i)
+  const D2D1_RECT_F rc[8] = { rcGain_, rcAggr_, rcHpf_, rcLim_, rcDck_, rcVfl_, rcGate_, rcMix_ };
+  for (int i = 0; i < 8; ++i)
     if (x >= rc[i].left && x <= rc[i].right && y >= rc[i].top - 20 && y <= rc[i].bottom + 8) return i;
   if (hit(rcMicField_, x, y))  return 100;
   if (hit(rcOutField_, x, y))  return 101;
@@ -352,12 +355,13 @@ std::wstring AppWindow::helpText() const {
     case 4:   return L"DE-CLICK — ducks short clicks (keyboard/mouse) in the gaps between words. Raise until clicks fade; too high can soften consonants.";
     case 5:   return L"SPEECH DECLICK — how much de-click applies while you talk. 0 = never touch your voice (safest). Raise only if clicks ride on your speech.";
     case 6:   return L"NOISE GATE — silences the gaps between words so the amplified noise floor / typing static drops out when you're not speaking. Raise until the gaps go quiet; too high can clip soft word endings.";
+    case 7:   return L"STRENGTH — how hard the denoiser works. Lower blends your natural (un-denoised) voice back in to soften musical-noise / 'laser' artifacts (RNNoise); 100% = full denoise.";
     case 100: return L"MICROPHONE — the input device being cleaned. Click to choose a different mic.";
     case 101: return L"OUTPUT — where the cleaned audio is sent (e.g. CABLE Input, which apps pick as your mic). Click to choose.";
     case 200: return L"ENGINE: RNNoise — lighter, low-latency denoiser. Best at keyboard/mouse clicks — use this in a clicky room.";
     case 201: return L"ENGINE: DeepFilterNet3 — stronger on steady background noise, but passes short clicks (use DE-CLICK or RNNoise for those).";
     case 202: return L"BYPASS — pass your mic through untouched with denoising off. Click to toggle (A/B your setup).";
-    case 102: return L"LATENCY — audio buffer depth in frames (1 frame = 10 ms audio; buffered delay \xE2\x89\x88 frames \xC3\x97 5 ms). Higher tolerates glitches better but adds delay. Applying restarts the audio engine (brief dropout).";
+    case 102: return L"LATENCY — audio buffer depth in frames (1 frame = 10 ms audio; buffered delay \x2248 frames \x00D7 5 ms). Higher tolerates glitches better but adds delay. Applying restarts the audio engine (brief dropout).";
     default:  return L"Hover a slider or control to see what it does and how to use it.";
   }
 }
@@ -376,7 +380,8 @@ vc::ipc::Params AppWindow::applySlider(int i) {
     case 3: return state_->onSetLimiter(s.value());
     case 4: return state_->onSetDeclick(s.value());
     case 5: return state_->onSetDeclickVoiceFloor(s.value());
-    default: return state_->onSetGate(s.value());
+    case 6: return state_->onSetGate(s.value());
+    default: return state_->onSetMix(s.value());
   }
 }
 void AppWindow::persistTuning() {
@@ -390,6 +395,7 @@ void AppWindow::persistTuning() {
   p->declickStrength = sldDck_.value();
   p->declickVoiceFloor = sldVfl_.value();
   p->gateStrength = sldGate_.value();
+  p->mixStrength = sldMix_.value();
   settings_->save(configPath_);
 }
 
