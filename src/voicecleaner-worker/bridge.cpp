@@ -118,6 +118,11 @@ void Bridge::request_engine(int idx) {
   }
 }
 
+void Bridge::reset_counters() noexcept {
+  dropouts_.reset();                                              // atomic counts: safe from this (non-RT) thread
+  statsResetRequested_.store(true, std::memory_order_relaxed);    // relay clears frameStats_/ringBHigh_ next hop
+}
+
 void Bridge::reclaimRetiredEngines() {
   std::lock_guard<std::mutex> lk(engMutex_);
   if (!dyn_) return;
@@ -146,6 +151,9 @@ void Bridge::relayLoop() {
   while (running_.load(std::memory_order_acquire)) {
     WaitForSingleObject(static_cast<HANDLE>(frameReady_), 200);
     if (!running_.load(std::memory_order_acquire)) break;
+    if (statsResetRequested_.exchange(false, std::memory_order_relaxed)) {
+      frameStats_.reset(); ringBHigh_ = 0;   // relay owns these -> reset here (race-free)
+    }
     while (ringA_.try_pop(f)) {
       const vc::ipc::Params sp = params_.snapshot();
       if (chain_) {

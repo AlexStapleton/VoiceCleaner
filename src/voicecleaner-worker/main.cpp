@@ -146,7 +146,8 @@ int main(int argc, char** argv) {
         case vc::ipc::CmdType::SetWarmStandby:
           break;   // deferred: toggling warm-standby requires a pipeline rebuild; not yet wired
         case vc::ipc::CmdType::ResetCounters:
-          break;   // deferred: no counter-reset path yet (DropoutCounter/FrameTimeStats have no reset())
+          bridge.reset_counters();   // zero dropout/frame-time/ring-high-water for a clean measurement window
+          break;
         case vc::ipc::CmdType::Shutdown:
           g_stop.store(true);
           break;

@@ -1,5 +1,6 @@
 #pragma once
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <thread>
@@ -42,6 +43,9 @@ public:
   void request_engine(int idx);
   // Non-RT: free engines retired by the RT relay. Call from a non-RT loop (worker main tick).
   void reclaimRetiredEngines();
+  // Non-RT: zero the dropout + frame-time counters (and ring high-water) for a clean measurement
+  // window. dropouts_ is atomic (reset here); relay-owned stats are cleared on the relay's next hop.
+  void reset_counters() noexcept;
   vc::ipc::ParamStore& params() noexcept { return params_; }
 private:
   void   relayLoop();
@@ -84,5 +88,8 @@ private:
   int                      hopsSincePublish_ = 0;
   float                    winPeak_ = 0.0f;
   double                   winSumSq_ = 0.0;
+  std::atomic<bool>        statsResetRequested_{false};  // main tick -> relay clears frameStats_/ringBHigh_ next hop
+  uint32_t                 ringBHigh_ = 0;               // relay-owned running max of ringB occupancy (telemetry)
+  std::chrono::steady_clock::time_point start_{};        // set in start(); telemetry uptimeMs
 };
 }
