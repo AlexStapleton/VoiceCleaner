@@ -8,6 +8,7 @@ Config Settings::resolveActive() const {
   c.captureDeviceId = activeCaptureId;
   c.renderDeviceId  = renderId;
   c.ringFrames      = ringFrames;
+  c.lowLatency      = lowLatency;
   for (const auto& m : mics) {
     if (m.id == activeCaptureId) {
       c.engine      = m.engine;
@@ -29,6 +30,7 @@ Settings Settings::load(const std::string& path) {
     s.activeCaptureId = (*g)["active_capture_id"].value_or(std::string(""));
     s.renderId        = (*g)["render_id"].value_or(std::string(""));
     s.ringFrames      = (size_t)(*g)["ring_frames"].value_or((int64_t)16);
+    s.lowLatency      = (*g)["low_latency"].value_or(false);
     if (auto mics = t["mic"].as_table()) {
       for (auto&& [key, val] : *mics) {
         if (auto p = val.as_table()) {
@@ -55,6 +57,7 @@ Settings Settings::load(const std::string& path) {
     s.activeCaptureId = t["capture_device_id"].value_or(std::string(""));
     s.renderId        = t["render_device_id"].value_or(std::string(""));
     s.ringFrames      = (size_t)t["ring_frames"].value_or((int64_t)16);
+    s.lowLatency      = t["low_latency"].value_or(false);
     if (!s.activeCaptureId.empty()) {
       MicProfile m;
       m.id          = s.activeCaptureId;
@@ -86,6 +89,7 @@ void Settings::save(const std::string& path) const {
   g.insert_or_assign("active_capture_id", activeCaptureId);
   g.insert_or_assign("render_id", renderId);
   g.insert_or_assign("ring_frames", (int64_t)ringFrames);
+  g.insert_or_assign("low_latency", lowLatency);
 
   toml::table micTbl;
   for (const auto& m : mics) {

@@ -28,6 +28,7 @@ struct Settings {
   std::string activeCaptureId;    // [global].active_capture_id  ("" => none)
   std::string renderId;           // [global].render_id
   size_t      ringFrames = 16;    // [global].ring_frames
+  bool        lowLatency = false; // [global].low_latency — skip the DFN3 delay pin (RNNoise ~0 latency)
   std::vector<MicProfile> mics;   // all [mic."<id>"] sections
 
   static Settings load(const std::string& path);   // new schema OR flat back-compat; missing/bad file => empty

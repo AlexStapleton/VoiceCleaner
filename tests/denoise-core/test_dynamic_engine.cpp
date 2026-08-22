@@ -84,6 +84,15 @@ TEST(DynamicEngine, LeanSteadyStateRunsOnlyActive) {
   EXPECT_EQ(pr[1].processCount, 0);         // idx1 never constructed, never run
 }
 
+TEST(DynamicEngine, LowLatencyZeroDelaysReportZeroDelay) {
+  // Low-latency mode passes delaySamples {0,0} (no DFN3 pin) => output carries no alignment delay.
+  EngineProbe pr[2]; pr[0] = {1.0f, 0}; pr[1] = {1.0f, 1440};
+  DynamicEngine::Config c; c.mode = DynamicEngine::Mode::Lean; c.initialActive = 0;
+  c.fadeFrames = 1; c.delaySamples[0] = 0; c.delaySamples[1] = 0;
+  DynamicEngine eng(probeLoader(pr), c);
+  EXPECT_EQ(eng.AlgorithmicDelaySamples(), 0u);   // RNNoise runs at native zero latency
+}
+
 TEST(DynamicEngine, LeanSwitchLoadsCrossfadesRetires) {
   EngineProbe pr[2]; pr[0] = {1.0f, 0}; pr[1] = {0.0f, 0};   // from passes input, to outputs 0
   DynamicEngine::Config c; c.mode = DynamicEngine::Mode::Lean; c.initialActive = 0;

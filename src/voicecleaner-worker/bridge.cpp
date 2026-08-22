@@ -68,7 +68,8 @@ bool Bridge::start() {
       dc.mode = cfg_.warmStandby ? DynamicEngine::Mode::Warm : DynamicEngine::Mode::Lean;
       dc.initialActive = (cfg_.engine == "dfn3") ? 1 : 0;
       dc.fadeFrames = 15;
-      dc.delaySamples[0] = 0; dc.delaySamples[1] = kDfn3DelaySamples;
+      dc.delaySamples[0] = 0;
+      dc.delaySamples[1] = cfg_.lowLatency ? 0u : kDfn3DelaySamples;   // low-latency: don't pin RNNoise to DFN3's delay
       auto de = std::make_unique<DynamicEngine>(loader, dc);   // builds initial leaf(s); may throw
       dyn_ = de.get();
       engine_ = std::move(de);

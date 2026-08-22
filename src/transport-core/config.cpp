@@ -29,6 +29,7 @@ Config Config::load(const std::string& path) {
     c.engine            = t["engine"].value_or(std::string("none"));
     c.dspChain          = t["dsp_chain"].value_or(false);
     c.warmStandby       = t["warm_standby"].value_or(false);
+    c.lowLatency        = t["low_latency"].value_or(false);
   }
   c.validate();
   return c;
