@@ -64,7 +64,8 @@ TEST(Settings, ResolveWithNoActiveProfileUsesDefaults) {
   Settings s;  // empty
   vc::Config c = s.resolveActive();
   EXPECT_TRUE(c.captureDeviceId.empty());
-  EXPECT_EQ(c.ringFrames, 16u);   // Settings default ring
+  EXPECT_EQ(c.ringFrames, 8u);    // Settings default ring (shipped ~40 ms buffered)
+  EXPECT_FALSE(c.lowLatency);      // low-latency off by default
 }
 
 TEST(Settings, EnsureProfileCreatesDefaultThenReuses) {
