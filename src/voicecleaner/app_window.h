@@ -96,7 +96,8 @@ class AppWindow {
   Slider sldDck_{0.0f, 1.0f, 0.0f, SliderFmt::Ratio2};
   Slider sldVfl_{0.0f, 1.0f, 0.0f, SliderFmt::Ratio2};
   Slider sldGate_{0.0f, 1.0f, 0.0f, SliderFmt::Ratio2};
-  D2D1_RECT_F rcGain_{}, rcAggr_{}, rcHpf_{}, rcLim_{}, rcDck_{}, rcVfl_{}, rcGate_{};   // track rects
+  Slider sldMix_{0.0f, 1.0f, 1.0f, SliderFmt::Ratio2};
+  D2D1_RECT_F rcGain_{}, rcAggr_{}, rcHpf_{}, rcLim_{}, rcDck_{}, rcVfl_{}, rcGate_{}, rcMix_{};   // track rects
   int grabbed_ = -1;        // slider being dragged: 0=gain 1=aggr 2=hpf 3=lim, -1=none
 };
 
