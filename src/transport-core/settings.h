@@ -27,7 +27,7 @@ struct MicProfile {
 struct Settings {
   std::string activeCaptureId;    // [global].active_capture_id  ("" => none)
   std::string renderId;           // [global].render_id
-  size_t      ringFrames = 16;    // [global].ring_frames
+  size_t      ringFrames = 8;     // [global].ring_frames (shipped default ~40 ms buffered)
   bool        lowLatency = false; // [global].low_latency — skip the DFN3 delay pin (RNNoise ~0 latency)
   std::vector<MicProfile> mics;   // all [mic."<id>"] sections
 

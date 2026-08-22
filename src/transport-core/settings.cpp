@@ -29,7 +29,7 @@ Settings Settings::load(const std::string& path) {
   if (auto g = t["global"].as_table()) {
     s.activeCaptureId = (*g)["active_capture_id"].value_or(std::string(""));
     s.renderId        = (*g)["render_id"].value_or(std::string(""));
-    s.ringFrames      = (size_t)(*g)["ring_frames"].value_or((int64_t)16);
+    s.ringFrames      = (size_t)(*g)["ring_frames"].value_or((int64_t)8);
     s.lowLatency      = (*g)["low_latency"].value_or(false);
     if (auto mics = t["mic"].as_table()) {
       for (auto&& [key, val] : *mics) {
@@ -56,7 +56,7 @@ Settings Settings::load(const std::string& path) {
     // Flat back-compat: synthesize [global] + one profile from Phase-3 top-level keys.
     s.activeCaptureId = t["capture_device_id"].value_or(std::string(""));
     s.renderId        = t["render_device_id"].value_or(std::string(""));
-    s.ringFrames      = (size_t)t["ring_frames"].value_or((int64_t)16);
+    s.ringFrames      = (size_t)t["ring_frames"].value_or((int64_t)8);
     s.lowLatency      = t["low_latency"].value_or(false);
     if (!s.activeCaptureId.empty()) {
       MicProfile m;

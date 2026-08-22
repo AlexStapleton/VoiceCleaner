@@ -161,6 +161,7 @@ void AppWindow::layout(D2D1_SIZE_F sz) {
   rcHelp_      = D2D1::RectF(pad, 784, sz.width - pad, 868);           // hover help strip
   rcRelaunch_  = D2D1::RectF(pad, 784, sz.width - pad, 784 + h);       // only when Down (shares the help band)
   rcQuit_      = D2D1::RectF(sz.width - pad - 90, sz.height - 36, sz.width - pad, sz.height - 10);
+  rcLowLat_    = D2D1::RectF(pad, sz.height - 34, pad + 210, sz.height - 10);   // footer-left checkbox
 }
 
 void AppWindow::paint() {
@@ -281,6 +282,16 @@ void AppWindow::paint() {
   box(rcQuit_, hot_==4 ? panelHot : panel);
   label(L"Quit", rcQuit_, text, centerFmt_);
 
+  // 7b. Low-latency checkbox (footer-left) — toggles [global].low_latency (respawns the worker)
+  {
+    const bool ll = settings_ && settings_->lowLatency;
+    D2D1_RECT_F cbx = D2D1::RectF(rcLowLat_.left, rcLowLat_.top + 3, rcLowLat_.left + 16, rcLowLat_.top + 19);
+    rt_->DrawRectangle(cbx, hot_==6 ? accentHot : dim, 1.5f);
+    if (ll) rt_->FillRectangle(D2D1::RectF(cbx.left + 3, cbx.top + 3, cbx.right - 3, cbx.bottom - 3), accent);
+    D2D1_RECT_F cbl = D2D1::RectF(cbx.right + 8, rcLowLat_.top, rcLowLat_.right, rcLowLat_.bottom);
+    label(L"LOW LATENCY", cbl, ll ? text : dim, textFmt_);
+  }
+
   // 7. Open dropdown overlay — drawn last, on top of everything
   if (picker_.isOpen()) {
     PickerKind k = picker_.openKind();
@@ -316,6 +327,7 @@ int AppWindow::hitControl(int x, int y) const {
   if (hit(rcRelaunch_,  x, y)) return 3;
   if (hit(rcQuit_,      x, y)) return 4;
   if (hit(rcRingApply_, x, y)) return 5;
+  if (hit(rcLowLat_,    x, y)) return 6;
   return -1;
 }
 
@@ -346,6 +358,7 @@ int AppWindow::helpTargetAt(int x, int y) const {
   if (hit(rcEngineDfn_, x, y)) return 201;
   if (hit(rcBypass_, x, y))    return 202;
   if (hit(rcRingBox_, x, y) || hit(rcRingApply_, x, y)) return 102;
+  if (hit(rcLowLat_, x, y)) return 103;
   return -1;
 }
 
@@ -365,6 +378,7 @@ std::wstring AppWindow::helpText() const {
     case 201: return L"ENGINE: DeepFilterNet3 — stronger on steady background noise, but passes short clicks (use DE-CLICK or RNNoise for those).";
     case 202: return L"BYPASS — pass your mic through untouched with denoising off. Click to toggle (A/B your setup).";
     case 102: return L"LATENCY — audio buffer depth in frames (1 frame = 10 ms audio; buffered delay \x2248 frames \x00D7 5 ms). Higher tolerates glitches better but adds delay. Applying restarts the audio engine (brief dropout).";
+    case 103: return L"LOW LATENCY — run RNNoise at its native \x223C 0 ms engine delay (drops the \x223C 30 ms DFN3 alignment pin). Switching to DFN3 later causes a one-time timing shift. Toggling restarts the audio engine (brief dropout).";
     default:  return L"Hover a slider or control to see what it does and how to use it.";
   }
 }
@@ -429,6 +443,14 @@ void AppWindow::respawnWorker() {
   pushedTuning_ = false;     // re-push the active mic's tuning to the fresh worker (tick() readiness path)
   sup_->startOrAttach();     // spawns fresh -> reads the new ring_frames
   InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
+void AppWindow::toggleLowLatency() {
+  if (!settings_) return;
+  settings_->lowLatency = !settings_->lowLatency;   // global; read by the bridge at worker start
+  settings_->save(configPath_);
+  if (spawned_) respawnWorker();   // first-run (no worker yet): value takes effect at first spawn
+  else InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
 void AppWindow::applyRing() {
@@ -566,6 +588,7 @@ LRESULT AppWindow::handle(UINT msg, WPARAM w, LPARAM l) {
         case 3: if (state_->statusKind()==StatusKind::Down) requestRelaunch(); break;
         case 4: sup_->shutdown(3000); DestroyWindow(hwnd_); break;   // full quit
         case 5: applyRing(); break;   // latency Apply -> persist + respawn
+        case 6: toggleLowLatency(); break;   // low-latency checkbox -> persist + respawn
       }
       return 0;
     }
