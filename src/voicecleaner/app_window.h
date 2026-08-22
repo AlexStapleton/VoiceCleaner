@@ -57,6 +57,8 @@ class AppWindow {
   void seedFromActiveProfile();                    // load the active mic's tuning into sliders + UiState
   void respawnWorker();                            // full stop + fresh spawn so ring_frames is re-read
   void toggleLowLatency();                          // flip [global].low_latency, persist, respawn
+  void toggleSection(int i);                        // collapse/expand slider group i (persist + resize)
+  void resizeToContent();                           // resize the window to the current laid-out height
   void applyRing();                                // commit+clamp the latency box, persist, respawn
   void commitRingEdit();                           // normalize ringEdit_ to the clamped pending value
   int  ringParse() const;                          // ringEdit_ digits -> int (0 if empty/non-digit)
@@ -74,6 +76,15 @@ class AppWindow {
   bool pushedTuning_ = false;   // seeded profile tuning sent to the worker once it became ready
   RespawnPolicy respawn_;  // auto-respawn-with-backoff on post-ready worker death (device loss)
 
+  // F5: gate the WM_TIMER repaint. The worker publishes telemetry (meter + all aggregates) only
+  // ~1 Hz, so a fixed 10 Hz repaint drew the same pixels 9 times out of 10. Repaint from a tick
+  // only when a paint-relevant input changed: telemetry seq advanced, the status kind changed, or
+  // the respawn attempt count changed. Interaction (hover/drag/clicks/pickers) still invalidates on
+  // its own events, so the window stays responsive while idle ticks cost nothing.
+  uint32_t   lastPaintSeq_ = 0xFFFFFFFFu;         // sentinel -> forces a paint on the first tick
+  StatusKind lastPaintKind_ = StatusKind::Down;
+  int        lastPaintAttempts_ = -1;
+
   ID2D1Factory* d2dFactory_ = nullptr;
   IDWriteFactory* dwFactory_ = nullptr;
   IDWriteTextFormat* textFmt_ = nullptr;    // status line: left-aligned, wrapped
@@ -84,6 +95,9 @@ class AppWindow {
 
   int hot_ = -1;   // control under the cursor (see hitControl); drives hover highlight
   int helpHot_ = -1;   // control under the cursor for the help strip (see helpTargetAt/helpText)
+  int hotSec_ = -1;    // slider-group header under the cursor (hover highlight)
+  bool secOpen_[3] = {true, true, true};   // DENOISE / VOICE LEVEL / CLEANUP expanded? (seeded from settings)
+  float contentH_ = 956.0f;                // laid-out client height (drives the window resize)
   std::wstring ringEdit_;      // latency box edit buffer (digits); seeded from settings_->ringFrames
   bool ringFocused_ = false;   // latency box has keyboard focus (caret shown)
 
@@ -92,6 +106,7 @@ class AppWindow {
   D2D1_RECT_F rcEngineRnn_{}, rcEngineDfn_{}, rcBypass_{}, rcRelaunch_{}, rcQuit_{}, rcHelp_{};
   D2D1_RECT_F rcRingBox_{}, rcRingApply_{};   // editable latency box + Apply button
   D2D1_RECT_F rcLowLat_{};                    // low-latency checkbox (footer-left)
+  D2D1_RECT_F rcSecHdr_[3]{};                 // clickable slider-group header rows
 
   Slider sldGain_{-30.0f, -6.0f, -20.0f, SliderFmt::Dbfs};
   Slider sldAggr_{0.0f, 1.0f, 0.0f, SliderFmt::Ratio2};
@@ -102,6 +117,7 @@ class AppWindow {
   Slider sldGate_{0.0f, 1.0f, 0.0f, SliderFmt::Ratio2};
   Slider sldMix_{0.0f, 1.0f, 1.0f, SliderFmt::Ratio2};
   D2D1_RECT_F rcGain_{}, rcAggr_{}, rcHpf_{}, rcLim_{}, rcDck_{}, rcVfl_{}, rcGate_{}, rcMix_{};   // track rects
+  float secY_[3] = {356.0f, 464.0f, 572.0f};   // section-header baselines: DENOISE / VOICE LEVEL / CLEANUP
   int grabbed_ = -1;        // slider being dragged: 0=gain 1=aggr 2=hpf 3=lim, -1=none
 };
 

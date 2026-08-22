@@ -10,6 +10,8 @@
 active_capture_id = ""
 render_id         = ""
 ring_frames       = 8
+# UI: bitmask of collapsed slider groups — bit0 DENOISE, bit1 VOICE LEVEL, bit2 CLEANUP (0 = all open).
+collapsed_sections = 0
 
 # One [mic."<wasapi-id>"] profile per microphone is written by the app, e.g.:
 # [mic."{0.0.1.00000000}.{...}"]

@@ -1,16 +1,31 @@
 #include "app_window.h"
 #include "tray.h"
 #include "device_enum.h"
+#include "resource.h"   // IDI_ACTIVE (window + taskbar icon)
 #include <windowsx.h>   // GET_X_LPARAM / GET_Y_LPARAM
+#include <dwmapi.h>     // DwmSetWindowAttribute (dark, color-matched title bar)
 #include <string>
 #include <vector>
 
 #pragma comment(lib, "d2d1.lib")
 #pragma comment(lib, "dwrite.lib")
+#pragma comment(lib, "dwmapi.lib")
+
+// Present on Win10 2004+/Win11 SDKs, but guard so an older SDK still compiles.
+#ifndef DWMWA_USE_IMMERSIVE_DARK_MODE
+#define DWMWA_USE_IMMERSIVE_DARK_MODE 20
+#endif
+#ifndef DWMWA_CAPTION_COLOR
+#define DWMWA_CAPTION_COLOR 35
+#endif
+#ifndef DWMWA_TEXT_COLOR
+#define DWMWA_TEXT_COLOR 36
+#endif
 
 namespace vc::ui {
 
 static const wchar_t* kClass = L"VoiceCleanerWindow";
+static const int  kClientW = 460;   // fixed client width; height flexes with collapsed sections
 static const UINT kTimerId = 1;
 static const float kRowH = 34.0f;   // dropdown row height
 static const int kRingMin = 4;      // below the worker's floor of 3; keeps the value meaningful
@@ -75,17 +90,36 @@ bool AppWindow::create(const wchar_t* title) {
   WNDCLASSW wc{};
   wc.lpfnWndProc = &AppWindow::WndProc;
   wc.hInstance = hInst_;
+  wc.hIcon = LoadIconW(hInst_, MAKEINTRESOURCEW(IDI_ACTIVE));   // taskbar / Alt-Tab / default
   wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
   wc.lpszClassName = kClass;
   RegisterClassW(&wc);
 
-  // Fixed, non-resizable window sized so the client area is exactly kClientW x kClientH.
+  // Seed slider-group collapse state, then lay out once to learn the initial client height.
+  if (settings_) for (int i = 0; i < 3; ++i) secOpen_[i] = !((settings_->collapsedSections >> i) & 1u);
+  layout(D2D1::SizeF((float)kClientW, 0.0f));   // computes contentH_ (Y math is height-independent)
+
+  // Fixed-width, non-resizable window; height flexes with the collapsed sections (contentH_).
   const DWORD style = WS_OVERLAPPEDWINDOW & ~WS_MAXIMIZEBOX & ~WS_THICKFRAME;
-  RECT wr{0, 0, 460, 908};   // +44 px for the STRENGTH row (was 864: LATENCY row)
+  RECT wr{0, 0, kClientW, (int)contentH_};
   AdjustWindowRectEx(&wr, style, FALSE, 0);
   hwnd_ = CreateWindowExW(0, kClass, title, style, CW_USEDEFAULT, CW_USEDEFAULT,
                           wr.right - wr.left, wr.bottom - wr.top, nullptr, nullptr, hInst_, this);
   if (!hwnd_) return false;
+  // Dark, color-matched title bar so the caption blends with the client background (#1B1C21).
+  { BOOL dark = TRUE;
+    DwmSetWindowAttribute(hwnd_, DWMWA_USE_IMMERSIVE_DARK_MODE, &dark, sizeof(dark));
+    COLORREF caption = RGB(27, 28, 33);      // #1B1C21 — same as the painted background
+    DwmSetWindowAttribute(hwnd_, DWMWA_CAPTION_COLOR, &caption, sizeof(caption));
+    COLORREF capText = RGB(237, 237, 242);   // #EDEDF2 — light caption text
+    DwmSetWindowAttribute(hwnd_, DWMWA_TEXT_COLOR, &capText, sizeof(capText)); }
+  // Crisp per-size icons for the title bar (small) and Alt-Tab (big); class hIcon covers the taskbar.
+  HICON hbig = (HICON)LoadImageW(hInst_, MAKEINTRESOURCEW(IDI_ACTIVE), IMAGE_ICON,
+      GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), LR_SHARED);
+  if (hbig) SendMessageW(hwnd_, WM_SETICON, ICON_BIG, (LPARAM)hbig);
+  HICON hsmall = (HICON)LoadImageW(hInst_, MAKEINTRESOURCEW(IDI_ACTIVE), IMAGE_ICON,
+      GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_SHARED);
+  if (hsmall) SendMessageW(hwnd_, WM_SETICON, ICON_SMALL, (LPARAM)hsmall);
   SetTimer(hwnd_, kTimerId, 100, nullptr);   // ~10 Hz telemetry poll
   refreshDevices();                           // initial enumeration + active seed
   if (settings_) ringEdit_ = std::to_wstring((int)settings_->ringFrames);   // seed the latency box
@@ -148,20 +182,43 @@ void AppWindow::layout(D2D1_SIZE_F sz) {
   rcEngineDfn_ = D2D1::RectF(mid + gap*0.5f, 232, sz.width - pad,  232 + h);
   rcBypass_    = D2D1::RectF(pad, 300, sz.width - pad, 300 + h);
   const float tw = sz.width - pad;
-  rcGain_ = D2D1::RectF(pad, 372, tw, 384);   // 12px track; caption row is drawn above it
-  rcAggr_ = D2D1::RectF(pad, 416, tw, 428);
-  rcHpf_  = D2D1::RectF(pad, 460, tw, 472);
-  rcLim_  = D2D1::RectF(pad, 504, tw, 516);
-  rcDck_  = D2D1::RectF(pad, 548, tw, 560);
-  rcVfl_  = D2D1::RectF(pad, 592, tw, 604);
-  rcGate_ = D2D1::RectF(pad, 636, tw, 648);
-  rcMix_  = D2D1::RectF(pad, 680, tw, 692);
-  rcRingBox_   = D2D1::RectF(pad, 728, pad + 120, 728 + h);            // editable latency box
-  rcRingApply_ = D2D1::RectF(sz.width - pad - 100, 728, sz.width - pad, 728 + h);
-  rcHelp_      = D2D1::RectF(pad, 784, sz.width - pad, 868);           // hover help strip
-  rcRelaunch_  = D2D1::RectF(pad, 784, sz.width - pad, 784 + h);       // only when Down (shares the help band)
-  rcQuit_      = D2D1::RectF(sz.width - pad - 90, sz.height - 36, sz.width - pad, sz.height - 10);
-  rcLowLat_    = D2D1::RectF(pad, sz.height - 34, pad + 210, sz.height - 10);   // footer-left checkbox
+
+  // Collapsible slider groups. Positions flow from a running cursor so collapsing a group reflows
+  // everything below it and shrinks the window (contentH_). The index->parameter mapping is unchanged
+  // (see sliderByIndex/helpText); only the Y positions, draw order, and visibility change per group.
+  static const int denoise[2] = {7, 1};        // STRENGTH, AGGRESSION
+  static const int voice[2]   = {0, 3};        // TARGET LOUDNESS, LIMITER
+  static const int cleanup[4] = {2, 6, 4, 5};  // HPF, NOISE GATE, DE-CLICK, SPEECH DECLICK
+  const int* groups[3] = {denoise, voice, cleanup};
+  const int  counts[3] = {2, 2, 4};
+  const D2D1_RECT_F hidden = D2D1::RectF(-1000, -1000, -1000, -1000);
+
+  float y = 350.0f;
+  for (int s = 0; s < 3; ++s) {
+    secY_[s]     = y;
+    rcSecHdr_[s] = D2D1::RectF(pad, y - 4, sz.width - pad, y + 16);   // clickable header row
+    if (secOpen_[s]) {
+      float t = y + 42.0f;                                            // header -> first track
+      for (int k = 0; k < counts[s]; ++k) {
+        trackByIndex(groups[s][k]) = D2D1::RectF(pad, t, tw, t + 12);
+        t += 44.0f;
+      }
+      y = t - 22.0f;                                                  // last track bottom + a section gap
+    } else {
+      for (int k = 0; k < counts[s]; ++k) trackByIndex(groups[s][k]) = hidden;
+      y += 24.0f;                                                     // collapsed: header block only
+    }
+  }
+
+  const float rbTop = y + 14.0f;
+  rcRingBox_   = D2D1::RectF(pad, rbTop, pad + 120, rbTop + h);        // editable latency box
+  rcRingApply_ = D2D1::RectF(sz.width - pad - 100, rbTop, sz.width - pad, rbTop + h);
+  const float yHelp = rbTop + h + 16.0f;
+  rcHelp_      = D2D1::RectF(pad, yHelp, sz.width - pad, yHelp + 84);  // hover help strip
+  rcRelaunch_  = D2D1::RectF(pad, yHelp, sz.width - pad, yHelp + h);   // only when Down (shares the help band)
+  contentH_    = yHelp + 84.0f + 40.0f;                               // + footer band -> total client height
+  rcQuit_      = D2D1::RectF(sz.width - pad - 90, contentH_ - 36, sz.width - pad, contentH_ - 10);
+  rcLowLat_    = D2D1::RectF(pad, contentH_ - 34, pad + 210, contentH_ - 10);   // footer-left checkbox
 }
 
 void AppWindow::paint() {
@@ -173,9 +230,10 @@ void AppWindow::paint() {
   layout(sz);
 
   ID2D1SolidColorBrush *text=nullptr,*dim=nullptr,*accent=nullptr,*accentHot=nullptr,
-                       *panel=nullptr,*panelHot=nullptr,*disabled=nullptr,*amber=nullptr;
+                       *panel=nullptr,*panelHot=nullptr,*disabled=nullptr,*amber=nullptr,*section=nullptr;
   rt_->CreateSolidColorBrush(D2D1::ColorF(0.93f,0.93f,0.95f), &text);
   rt_->CreateSolidColorBrush(D2D1::ColorF(0.53f,0.55f,0.62f), &dim);
+  rt_->CreateSolidColorBrush(D2D1::ColorF(0.60f,0.64f,0.78f), &section);   // group headers (brighter than dim)
   rt_->CreateSolidColorBrush(D2D1::ColorF(0.16f,0.51f,0.94f), &accent);
   rt_->CreateSolidColorBrush(D2D1::ColorF(0.30f,0.61f,0.98f), &accentHot);
   rt_->CreateSolidColorBrush(D2D1::ColorF(0.20f,0.21f,0.25f), &panel);
@@ -252,14 +310,22 @@ void AppWindow::paint() {
     D2D1_RECT_F thumb = D2D1::RectF(cx - 6, tr.top - 6, cx + 6, tr.bottom + 6);
     box(thumb, enabled ? (grabbed_==i ? accentHot : accent) : disabled);
   };
-  drawSlider(L"TARGET LOUDNESS", 0, true);
-  drawSlider(L"AGGRESSION",  1, aggressionEnabled());
-  drawSlider(L"HPF",         2, true);
-  drawSlider(L"LIMITER",     3, true);
-  drawSlider(L"DE-CLICK",    4, true);
-  drawSlider(L"SPEECH DECLICK", 5, true);
-  drawSlider(L"NOISE GATE",  6, true);
-  drawSlider(L"STRENGTH",    7, true);
+  // Collapsible section header: chevron (open/collapsed) + caps label + a hairline rule to the edge.
+  // The header brightens on hover (hotSec_). Clicking the row toggles the group (see toggleSection).
+  auto sectionHdr = [&](const wchar_t* s, int i, float labelW) {
+    std::wstring lbl = (secOpen_[i] ? L"\x25BE  " : L"\x25B8  ") + std::wstring(s);   // ▾ open / ▸ collapsed
+    label(lbl, D2D1::RectF(pad, secY_[i] - 2, sz.width - pad, secY_[i] + 16),
+          hotSec_ == i ? text : section, capFmt_);
+    float ly = secY_[i] + 8.0f;
+    rt_->DrawLine(D2D1::Point2F(pad + labelW, ly), D2D1::Point2F(sz.width - pad, ly), section, 1.0f);
+  };
+  sectionHdr(L"DENOISE", 0, 100);
+  if (secOpen_[0]) { drawSlider(L"STRENGTH", 7, true); drawSlider(L"AGGRESSION", 1, aggressionEnabled()); }
+  sectionHdr(L"VOICE LEVEL", 1, 120);
+  if (secOpen_[1]) { drawSlider(L"TARGET LOUDNESS", 0, true); drawSlider(L"LIMITER", 3, true); }
+  sectionHdr(L"CLEANUP", 2, 100);
+  if (secOpen_[2]) { drawSlider(L"HPF", 2, true); drawSlider(L"NOISE GATE", 6, true);
+                     drawSlider(L"DE-CLICK", 4, true); drawSlider(L"SPEECH DECLICK", 5, true); }
 
   // 6b. Latency (ring frames): editable box + approx-ms readout + Apply (restarts the worker)
   label(L"LATENCY (ring frames)", D2D1::RectF(pad, rcRingBox_.top - 20, sz.width - pad, rcRingBox_.top - 4), dim, capFmt_);
@@ -312,7 +378,7 @@ void AppWindow::paint() {
   }
 
   text->Release(); dim->Release(); accent->Release(); accentHot->Release();
-  panel->Release(); panelHot->Release(); disabled->Release(); amber->Release();
+  panel->Release(); panelHot->Release(); disabled->Release(); amber->Release(); section->Release();
   if (rt_->EndDraw() == D2DERR_RECREATE_TARGET) discardRenderTarget();
 }
 
@@ -453,6 +519,27 @@ void AppWindow::toggleLowLatency() {
   else InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
+void AppWindow::resizeToContent() {
+  layout(D2D1::SizeF((float)kClientW, 0.0f));   // recompute contentH_ for the current collapse state
+  RECT wr{0, 0, kClientW, (int)contentH_};
+  const DWORD style = (DWORD)GetWindowLongPtrW(hwnd_, GWL_STYLE);
+  AdjustWindowRectEx(&wr, style, FALSE, 0);
+  SetWindowPos(hwnd_, nullptr, 0, 0, wr.right - wr.left, wr.bottom - wr.top,
+               SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);   // keep top-left; height follows content
+}
+
+void AppWindow::toggleSection(int i) {
+  if (i < 0 || i > 2) return;
+  secOpen_[i] = !secOpen_[i];
+  if (settings_) {
+    if (secOpen_[i]) settings_->collapsedSections &= ~(1u << i);
+    else             settings_->collapsedSections |=  (1u << i);
+    settings_->save(configPath_);
+  }
+  resizeToContent();
+  InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
 void AppWindow::applyRing() {
   if (!settings_) return;
   commitRingEdit();
@@ -556,7 +643,16 @@ void AppWindow::tick() {
     sup_->startOrAttach();
   }
   if (tray_) tray_->update(*state_);
-  InvalidateRect(hwnd_, nullptr, FALSE);
+  // F5: only repaint when a paint-relevant input actually changed. All tick-driven visuals derive
+  // from the telemetry snapshot (keyed by seq, which bumps ~1 Hz on each aggregate publish), the
+  // status kind, or the respawn attempt count. Interaction repaints happen on their own WM events.
+  const uint32_t seq = r.alive ? r.telemetry.seq : 0u;
+  const StatusKind kind = state_->statusKind();
+  const int attempts = respawn_.attempts();
+  if (seq != lastPaintSeq_ || kind != lastPaintKind_ || attempts != lastPaintAttempts_) {
+    lastPaintSeq_ = seq; lastPaintKind_ = kind; lastPaintAttempts_ = attempts;
+    InvalidateRect(hwnd_, nullptr, FALSE);
+  }
 }
 
 LRESULT AppWindow::handle(UINT msg, WPARAM w, LPARAM l) {
@@ -579,6 +675,7 @@ LRESULT AppWindow::handle(UINT msg, WPARAM w, LPARAM l) {
       if (hit(rcMicField_, x, y)) { refreshDevices(); picker_.open(PickerKind::Capture); InvalidateRect(hwnd_, nullptr, FALSE); return 0; }
       if (hit(rcOutField_, x, y)) { refreshDevices(); picker_.open(PickerKind::Render);  InvalidateRect(hwnd_, nullptr, FALSE); return 0; }
       if (hit(rcRingBox_, x, y)) { ringFocused_ = true; InvalidateRect(hwnd_, nullptr, FALSE); return 0; }
+      for (int i = 0; i < 3; ++i) if (hit(rcSecHdr_[i], x, y)) { toggleSection(i); return 0; }
       { int s = trackHit(x, y);
         if (s >= 0) { grabbed_ = s; setSliderFromX(s, x); sendCurrent(applySlider(s)); InvalidateRect(hwnd_, nullptr, FALSE); return 0; } }
       switch (hitControl(x, y)) {
@@ -619,6 +716,9 @@ LRESULT AppWindow::handle(UINT msg, WPARAM w, LPARAM l) {
       if (h != hot_) { hot_ = h; InvalidateRect(hwnd_, nullptr, FALSE); }
       int hp = helpTargetAt(GET_X_LPARAM(l), GET_Y_LPARAM(l));           // hovered control for the help strip
       if (hp != helpHot_) { helpHot_ = hp; InvalidateRect(hwnd_, nullptr, FALSE); }
+      int hsec = -1;                                                     // hovered slider-group header
+      for (int i = 0; i < 3; ++i) if (hit(rcSecHdr_[i], GET_X_LPARAM(l), GET_Y_LPARAM(l))) hsec = i;
+      if (hsec != hotSec_) { hotSec_ = hsec; InvalidateRect(hwnd_, nullptr, FALSE); }
       TRACKMOUSEEVENT tme{ sizeof(TRACKMOUSEEVENT), TME_LEAVE, hwnd_, 0 };
       TrackMouseEvent(&tme);                                             // so WM_MOUSELEAVE fires
       return 0;
@@ -627,10 +727,10 @@ LRESULT AppWindow::handle(UINT msg, WPARAM w, LPARAM l) {
       if (grabbed_ >= 0) { persistTuning(); grabbed_ = -1; }   // persist on drag-end
       return 0;
     case WM_MOUSELEAVE:
-      if (hot_ != -1 || helpHot_ != -1) { hot_ = -1; helpHot_ = -1; InvalidateRect(hwnd_, nullptr, FALSE); }
+      if (hot_ != -1 || helpHot_ != -1 || hotSec_ != -1) { hot_ = -1; helpHot_ = -1; hotSec_ = -1; InvalidateRect(hwnd_, nullptr, FALSE); }
       return 0;
     case WM_SETCURSOR:
-      if (LOWORD(l)==HTCLIENT && hot_ != -1) { SetCursor(LoadCursor(nullptr, IDC_HAND)); return TRUE; }
+      if (LOWORD(l)==HTCLIENT && (hot_ != -1 || hotSec_ != -1)) { SetCursor(LoadCursor(nullptr, IDC_HAND)); return TRUE; }
       break;
     case WM_COMMAND:
       switch (LOWORD(w)) {

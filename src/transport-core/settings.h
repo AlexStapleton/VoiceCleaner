@@ -29,6 +29,7 @@ struct Settings {
   std::string renderId;           // [global].render_id
   size_t      ringFrames = 8;     // [global].ring_frames (shipped default ~40 ms buffered)
   bool        lowLatency = false; // [global].low_latency — skip the DFN3 delay pin (RNNoise ~0 latency)
+  unsigned    collapsedSections = 0;  // [global].collapsed_sections — UI slider-group collapse bitmask
   std::vector<MicProfile> mics;   // all [mic."<id>"] sections
 
   static Settings load(const std::string& path);   // new schema OR flat back-compat; missing/bad file => empty

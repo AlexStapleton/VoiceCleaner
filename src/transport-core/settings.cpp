@@ -31,6 +31,7 @@ Settings Settings::load(const std::string& path) {
     s.renderId        = (*g)["render_id"].value_or(std::string(""));
     s.ringFrames      = (size_t)(*g)["ring_frames"].value_or((int64_t)8);
     s.lowLatency      = (*g)["low_latency"].value_or(false);
+    s.collapsedSections = (unsigned)(*g)["collapsed_sections"].value_or((int64_t)0);
     if (auto mics = t["mic"].as_table()) {
       for (auto&& [key, val] : *mics) {
         if (auto p = val.as_table()) {
@@ -90,6 +91,7 @@ void Settings::save(const std::string& path) const {
   g.insert_or_assign("render_id", renderId);
   g.insert_or_assign("ring_frames", (int64_t)ringFrames);
   g.insert_or_assign("low_latency", lowLatency);
+  g.insert_or_assign("collapsed_sections", (int64_t)collapsedSections);
 
   toml::table micTbl;
   for (const auto& m : mics) {

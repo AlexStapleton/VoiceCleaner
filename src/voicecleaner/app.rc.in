@@ -1,0 +1,8 @@
+// Configured by CMake (configure_file, @ONLY) into the build tree as app.rc.
+// Absolute paths are injected so the resource compiler finds the header and the
+// icon files regardless of its working directory.
+#include "@VC_RC_HEADER@"
+
+IDI_ACTIVE    ICON    "@VC_BRANDING_DIR@/voicecleaner.ico"
+IDI_BYPASSED  ICON    "@VC_BRANDING_DIR@/voicecleaner-bypassed.ico"
+IDI_DOWN      ICON    "@VC_BRANDING_DIR@/voicecleaner-down.ico"
