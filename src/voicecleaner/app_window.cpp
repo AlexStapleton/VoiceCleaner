@@ -263,7 +263,7 @@ void AppWindow::paint() {
     D2D1_RECT_F br = D2D1::RectF(rcRingBox_.left + 12, rcRingBox_.top + 9, rcRingBox_.right - 8, rcRingBox_.bottom);
     rt_->DrawText(shown.c_str(), (UINT32)shown.size(), textFmt_, br, text);
     wchar_t ms[32];
-    swprintf(ms, 32, L"\xE2\x89\x88 %d ms", ringParse() * 5);   // buffered delay ~= frames x 5 ms
+    swprintf(ms, 32, L"\x2248 %d ms", ringParse() * 5);   // U+2248 (almost-equal); delay ~= frames x 5 ms
     D2D1_RECT_F mr = D2D1::RectF(rcRingBox_.right + 12, rcRingBox_.top + 9, rcRingApply_.left - 8, rcRingBox_.bottom);
     rt_->DrawText(ms, (UINT32)wcslen(ms), textFmt_, mr, dim);
   }
@@ -357,7 +357,7 @@ std::wstring AppWindow::helpText() const {
     case 200: return L"ENGINE: RNNoise — lighter, low-latency denoiser. Best at keyboard/mouse clicks — use this in a clicky room.";
     case 201: return L"ENGINE: DeepFilterNet3 — stronger on steady background noise, but passes short clicks (use DE-CLICK or RNNoise for those).";
     case 202: return L"BYPASS — pass your mic through untouched with denoising off. Click to toggle (A/B your setup).";
-    case 102: return L"LATENCY — audio buffer depth in frames (1 frame = 10 ms audio; buffered delay \xE2\x89\x88 frames \xC3\x97 5 ms). Higher tolerates glitches better but adds delay. Applying restarts the audio engine (brief dropout).";
+    case 102: return L"LATENCY — audio buffer depth in frames (1 frame = 10 ms audio; buffered delay \x2248 frames \x00D7 5 ms). Higher tolerates glitches better but adds delay. Applying restarts the audio engine (brief dropout).";
     default:  return L"Hover a slider or control to see what it does and how to use it.";
   }
 }
