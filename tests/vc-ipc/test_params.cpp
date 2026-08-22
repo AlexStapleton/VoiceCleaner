@@ -30,3 +30,6 @@ TEST(Params, DeclickDefaultsOff) {
   EXPECT_FLOAT_EQ(p.declickVoiceFloor, 0.0f);
   EXPECT_FLOAT_EQ(p.gateStrength, 0.0f);
 }
+TEST(Params, MixStrengthDefaultsFullWet) {
+  EXPECT_FLOAT_EQ(vc::ipc::Params::defaults().mixStrength, 1.0f);
+}

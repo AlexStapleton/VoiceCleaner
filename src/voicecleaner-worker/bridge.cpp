@@ -154,6 +154,7 @@ void Bridge::relayLoop() {
         chain_->setDeclickStrength(sp.declickStrength);
         chain_->setDeclickVoiceFloor(sp.declickVoiceFloor);
         chain_->setGateStrength(sp.gateStrength);
+        chain_->setMixStrength(sp.mixStrength);
         chain_->setBypass(sp.bypass != 0);
       }
       if (engine_) engine_->SetAggression(sp.aggression);   // DFN3-only; RNNoise/passthrough no-op
