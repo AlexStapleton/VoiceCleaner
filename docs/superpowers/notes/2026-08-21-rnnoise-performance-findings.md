@@ -106,6 +106,14 @@ Worker-level in-place device reconnect; the 8-hour endurance run.
 
 ---
 
+## Status
+- **Workstream A (RNNoise STRENGTH) — DONE, merged to master 2026-08-21.** New pure `DryWetMix`
+  (engine-delay-aligned) in `DspChain` after the engine; `Params.mixStrength` / `MicProfile.mix_strength`
+  default **1.0 = full wet** (DFN3 default unchanged); 8th "STRENGTH" D2D slider (live/seeded/persisted).
+  **186 tests** green (Debug + Release); DFN3 golden untouched (`src/dfn3`/`src/offline-cli` diff empty).
+  **STILL OWED:** by-ear hardware validation of the knob (Phase V) — no GUI run happened this session.
+- Workstreams B (latency), C (stability/measurement), Phase V (hardware) — not started.
+
 ## Decisions log
 - **2026-08-21** — DFN3 stays shipped untouched; work is RNNoise + performance only. (User.)
 - **2026-08-21** — Wet/dry "STRENGTH" mix chosen for RNNoise quality; default 1.0 so DFN3 default behavior
