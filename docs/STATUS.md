@@ -1,8 +1,22 @@
 # VoiceCleaner — Project Status & Resume Guide
 
-_Last updated: 2026-08-18_
+_Last updated: 2026-08-21_
 
-**Active work:** COMPLETE (software; hardware A/B in progress) — **OUTPUT GAIN diagnosis → TARGET LOUDNESS + noise gate.**
+**Active work:** COMPLETE — **RNNoise quality + performance pass (DFN3 frozen).** Project pivoted to
+RNNoise-path + performance only; DFN3 stays shipped/selectable but untouched. Three workstreams merged to
+`master` (198 tests, Debug+Release): **A** — RNNoise **STRENGTH** control (a delay-aligned wet/dry `DryWetMix`
+in `DspChain`; `mixStrength`/`mix_strength` default 1.0 = full wet, so DFN3 default is unchanged; 8th slider).
+**B** — **low-latency mode** (`[global].low_latency` skips the DFN3 delay pin → RNNoise ~0 ms; in-app **LOW
+LATENCY** checkbox) + shipped **`ring_frames` default 16→8** (~40 ms). **C** — `reset()`-able counters + wired
+`ResetCounters`, populated `ringAOcc`/`ringBHigh`/`uptimeMs` telemetry, and **supervisor auto-respawn** (pure
+`RespawnPolicy`: backoff 0.5→8 s, cap 5, reconnect latch; "Reconnecting… (n/5)"). **Hardware-validated
+(2026-08-21):** STRENGTH + latency confirmed good on the K688→VB-Cable rig. **STILL OWED:** by-ear check of
+auto-respawn (unplug/replug); optional deferred R&D (spectral declicker, `IAudioClient3`, RNNoise model swap,
+8-hr endurance, worker-level in-place reconnect). Plan: `docs/superpowers/plans/2026-08-21-rnnoise-performance-plan.md`;
+findings: `docs/superpowers/notes/2026-08-21-rnnoise-performance-findings.md`.
+
+---
+_(historical)_ **OUTPUT GAIN diagnosis → TARGET LOUDNESS + noise gate.**
 Hardware testing found the "OUTPUT GAIN slider does nothing" + "static when typing" issues. Root cause (by
 elimination — DE-CLICK proves live param delivery; a new chain test proves the AGC follows its target under
 active VAD): the slider drives the **AGC target**, which only acts while VAD is open and auto-normalizes — so it

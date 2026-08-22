@@ -130,6 +130,11 @@ Worker-level in-place device reconnect; the 8-hour endurance run.
     replug device → audio recovers unattended; watch the new telemetry; ResetCounters zeroes the window.
 - Phase V (hardware) — not started.
 
+## Hardware validation (rolling)
+- **2026-08-21 (user, K688→VB-Cable):** **STRENGTH knob works** — the wet/dry mix does what it should by ear.
+  **Latency works** — the low-latency path is confirmed good on hardware. ✅ A and B validated.
+  Auto-respawn (C) not yet exercised on hardware.
+
 ## Decisions log
 - **2026-08-21** — DFN3 stays shipped untouched; work is RNNoise + performance only. (User.)
 - **2026-08-21** — Wet/dry "STRENGTH" mix chosen for RNNoise quality; default 1.0 so DFN3 default behavior

@@ -4,6 +4,13 @@
 /out/
 *.csv
 *.log
+# generated audio scratch (offline-cli / --record output, A/B clips)
+*.wav
+# python bytecode cache
+__pycache__/
+# machine-specific test harnesses (device IDs), like drift.toml below
+test-lean-rnnoise.toml
+test-phase2c.ps1
 # machine-specific runtime config (device IDs); see docs/runbooks for how to generate
 drift.toml
 # visual-companion brainstorming scratch
