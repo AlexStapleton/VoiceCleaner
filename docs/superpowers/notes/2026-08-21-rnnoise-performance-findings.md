@@ -112,7 +112,13 @@ Worker-level in-place device reconnect; the 8-hour endurance run.
   default **1.0 = full wet** (DFN3 default unchanged); 8th "STRENGTH" D2D slider (live/seeded/persisted).
   **186 tests** green (Debug + Release); DFN3 golden untouched (`src/dfn3`/`src/offline-cli` diff empty).
   **STILL OWED:** by-ear hardware validation of the knob (Phase V) — no GUI run happened this session.
-- Workstreams B (latency), C (stability/measurement), Phase V (hardware) — not started.
+- **Workstream B1 (low-latency no-pin mode) — DONE, merged 2026-08-21.** Global `low_latency` flag
+  (`Config`/`Settings`, TOML `[global].low_latency`, default off) → bridge passes `delaySamples[1]=0` so
+  RNNoise runs at native ~0 latency (reclaims ~30 ms); switching to DFN3 then costs a one-time ~30 ms shift.
+  Enable for testing: add `low_latency = true` under `[global]` in settings.toml. **189 tests** green.
+  **B2 (measure end-to-end latency + tune the ring default) is a HARDWARE task → Phase V.** UI checkbox for
+  the flag deferred until B2 quantifies the win.
+- Workstream C (stability/measurement), Phase V (hardware) — not started.
 
 ## Decisions log
 - **2026-08-21** — DFN3 stays shipped untouched; work is RNNoise + performance only. (User.)
