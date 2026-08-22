@@ -10,9 +10,13 @@ struct Telemetry {
   float    inputPeak;
   uint32_t vadActive;      // 0 / 1
   // ~1 Hz aggregates.
-  float    frameP50Ms;
+  float    frameP50Ms;     // engine+chain compute only
   float    frameP99Ms;
   float    frameMaxMs;
+  float    hopP50Ms;       // whole relay hop: pop -> params -> engine/chain -> telemetry -> drift/resample -> push
+  float    hopP99Ms;
+  float    hopMaxMs;
+  float    estLatencyMs;   // app-controlled latency (capture+framer+ring+engine+render), computed at start
   uint32_t ringAOcc;       // not yet populated by the worker (deferred)
   uint32_t ringBOcc;
   uint32_t ringBHigh;      // not yet populated by the worker (deferred)

@@ -40,6 +40,8 @@ bool WasapiCapture::start(IMMDevice* dev, SampleCb onSamples, ErrorCb onError) {
   hr = client_->GetService(__uuidof(IAudioCaptureClient), (void**)&capture_);
   if (FAILED(hr)) return false;
 
+  client_->GetBufferSize(&bufferFrames_);   // for the latency budget; non-fatal if it fails (stays 0)
+
   scratch_.reserve((size_t)channels_ * 4800);   // ~100 ms headroom, avoids steady-state realloc
 
   running_.store(true, std::memory_order_release);

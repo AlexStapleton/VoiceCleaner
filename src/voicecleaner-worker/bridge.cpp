@@ -8,6 +8,7 @@
 #include "device_enumerator.h"
 #include "mmcss_thread.h"
 #include "rt_memory.h"
+#include "latency.h"
 namespace vc {
 
 static std::wstring widen(const std::string& s) { return std::wstring(s.begin(), s.end()); } // ASCII device IDs
@@ -35,6 +36,11 @@ bool Bridge::start() {
 
   lockedA_ = rt_lock_and_touch(ringA_.data(), ringA_.byte_size());
   lockedB_ = rt_lock_and_touch(ringB_.data(), ringB_.byte_size());
+  // The reframing FIFOs are alloc-free (fixed capacity) but still live on the RT threads; lock+touch
+  // them so those threads never take a soft page fault on the buffers either (best-effort, like rings).
+  lockedAccum_   = rt_lock_and_touch(accum_.data(),   accum_.byte_size());
+  lockedReframe_ = rt_lock_and_touch(reframe_.data(), reframe_.byte_size());
+  lockedDist_    = rt_lock_and_touch(dist_.data(),    dist_.byte_size());
 
   Frame silent{}; silent.fill(0.0f);
   for (size_t i = 0; i < ringB_.capacity() / 2; ++i) ringB_.try_push(silent);  // prime half-full
@@ -103,6 +109,23 @@ bool Bridge::start() {
   }
 
   capDev->Release(); renDev->Release();   // WASAPI classes Activated their own client; device no longer needed
+
+  // Latency budget (F3): computed from the ACTUAL queried WASAPI buffer sizes + this session's config,
+  // so it's a real per-device figure, not the doc estimate. App-controlled stages only (analog/driver
+  // latency is outside the process). Republished each telemetry hop via estLatencyMs_.
+  {
+    LatencyInputs li;
+    li.captureBufferFrames = capture_.bufferFrames();
+    li.renderBufferFrames  = render_.bufferFrames();
+    li.ringPrimedFrames    = (uint32_t)(ringB_.capacity() / 2);
+    li.engineDelaySamples  = engine_ ? engine_->AlgorithmicDelaySamples() : 0u;
+    li.sampleRate          = 48000.0;
+    const LatencyBreakdown lb = compute_latency(li);
+    estLatencyMs_ = (float)lb.totalMs;
+    std::printf("latency (app-controlled, ms): capture=%.1f + framer=%.1f + ring=%.1f + engine=%.1f + render=%.1f = %.1f total\n",
+                lb.captureMs, lb.framerMs, lb.ringMs, lb.engineMs, lb.renderMs, lb.totalMs);
+  }
+
   std::printf("bridge running: ring=%zu frames (primed %zu), engine=%s, warm_standby=%s, dsp_chain=%s, csv=%s\n",
               ringB_.capacity(), ringB_.capacity()/2, cfg_.engine.c_str(),
               cfg_.warmStandby ? "on" : "off", cfg_.dspChain ? "on" : "off", cfg_.csvPath.c_str());
@@ -153,9 +176,10 @@ void Bridge::relayLoop() {
     WaitForSingleObject(static_cast<HANDLE>(frameReady_), 200);
     if (!running_.load(std::memory_order_acquire)) break;
     if (statsResetRequested_.exchange(false, std::memory_order_relaxed)) {
-      frameStats_.reset(); ringBHigh_ = 0;   // relay owns these -> reset here (race-free)
+      frameStats_.reset(); hopStats_.reset(); ringBHigh_ = 0;   // relay owns these -> reset here (race-free)
     }
     while (ringA_.try_pop(f)) {
+      const auto hop0 = std::chrono::steady_clock::now();   // whole-hop timing start (F2): pop..push, everything below
       const vc::ipc::Params sp = params_.snapshot();
       if (chain_) {
         chain_->setHpfCutoffHz(sp.hpfCutoffHz);
@@ -194,6 +218,10 @@ void Bridge::relayLoop() {
           t.frameP50Ms = (float)frameStats_.percentileMs(50.0);
           t.frameP99Ms = (float)frameStats_.percentileMs(99.0);
           t.frameMaxMs = (float)frameStats_.maxMs();
+          t.hopP50Ms = (float)hopStats_.percentileMs(50.0);
+          t.hopP99Ms = (float)hopStats_.percentileMs(99.0);
+          t.hopMaxMs = (float)hopStats_.maxMs();
+          t.estLatencyMs = estLatencyMs_;
           t.ringAOcc = (uint32_t)ringA_.size();
           t.ringBOcc = (uint32_t)ringB_.size();
           t.ringBHigh = ringBHigh_;   // monotonic since start/last ResetCounters
@@ -224,6 +252,11 @@ void Bridge::relayLoop() {
         Frame pf; for (size_t i = 0; i < FRAME_SAMPLES; ++i) pf[i] = src[i];
         if (!ringB_.try_push(pf)) dropouts_.record_overrun();
       }
+      // Whole-hop time (F2): everything from ringA pop through ringB push — the engine+chain
+      // slice (frameStats_) plus params snapshot, telemetry aggregation, drift + resample +
+      // reframe. Reveals the per-hop cost that the narrower frameStats_ window excludes.
+      hopStats_.record(std::chrono::duration<double, std::milli>(
+                           std::chrono::steady_clock::now() - hop0).count());
     }
   }
 }
@@ -252,6 +285,13 @@ void Bridge::stop() {
                   frameStats_.percentileMs(50.0), frameStats_.percentileMs(99.0), frameStats_.percentileMs(99.9),
                   frameStats_.fractionOverMs(10.0) * 100.0);
     }
+    if (hopStats_.count() > 0) {
+      std::printf("hop-time  (whole relay hop, ms): n=%llu mean=%.2f max=%.2f p50=%.2f p99=%.2f p99.9=%.2f  over_10ms=%.2f%%\n",
+                  (unsigned long long)hopStats_.count(),
+                  hopStats_.meanMs(), hopStats_.maxMs(),
+                  hopStats_.percentileMs(50.0), hopStats_.percentileMs(99.0), hopStats_.percentileMs(99.9),
+                  hopStats_.fractionOverMs(10.0) * 100.0);
+    }
     {
       std::lock_guard<std::mutex> lk(engMutex_);   // dfn3Adapter_ may be written by a --dev-keys request_engine
       const uint64_t dfn3Failed = dfn3FailedHopsRetired_ + (dfn3Adapter_ ? dfn3Adapter_->failedHops() : 0);
@@ -266,6 +306,9 @@ void Bridge::stop() {
   if (frameReady_) { CloseHandle(static_cast<HANDLE>(frameReady_)); frameReady_ = nullptr; }
   if (lockedA_) { rt_unlock(ringA_.data(), ringA_.byte_size()); lockedA_ = false; }
   if (lockedB_) { rt_unlock(ringB_.data(), ringB_.byte_size()); lockedB_ = false; }
+  if (lockedAccum_)   { rt_unlock(accum_.data(),   accum_.byte_size());   lockedAccum_ = false; }
+  if (lockedReframe_) { rt_unlock(reframe_.data(), reframe_.byte_size()); lockedReframe_ = false; }
+  if (lockedDist_)    { rt_unlock(dist_.data(),    dist_.byte_size());    lockedDist_ = false; }
 }
 
 bool Bridge::reselectCapture(const std::string& deviceId, double driftSeedPpm) {

@@ -69,6 +69,7 @@ private:
   std::atomic<double> ratioPpm_{0.0};
   std::atomic<double> filtOcc_{0.0};
   FrameTimeStats     frameStats_;   // per-hop engine+chain compute times (written by relay thread only)
+  FrameTimeStats     hopStats_;     // per-hop WHOLE relay hop times (pop->push; relay thread only)
   FrameAccumulator   accum_;      // capture side only
   FrameDistributor   dist_;       // render (onFill) side only
   std::vector<float> mono_;       // capture ch0 scratch
@@ -81,6 +82,9 @@ private:
   Logger             logger_;
   bool               lockedA_ = false;
   bool               lockedB_ = false;
+  bool               lockedAccum_ = false;    // capture-thread reframing FIFO, VirtualLock'd like the rings
+  bool               lockedReframe_ = false;  // relay-thread reframing FIFO
+  bool               lockedDist_ = false;     // render-thread reframing FIFO
   vc::ipc::ParamStore      params_;
   vc::ipc::TelemetryWriter telemetry_;
   bool                     telemetryOn_ = false;
@@ -91,5 +95,6 @@ private:
   std::atomic<bool>        statsResetRequested_{false};  // main tick -> relay clears frameStats_/ringBHigh_ next hop
   uint32_t                 ringBHigh_ = 0;               // relay-owned running max of ringB occupancy (telemetry)
   std::chrono::steady_clock::time_point start_{};        // set in start(); telemetry uptimeMs
+  float                    estLatencyMs_ = 0.0f;         // app-controlled latency, computed in start() (telemetry)
 };
 }

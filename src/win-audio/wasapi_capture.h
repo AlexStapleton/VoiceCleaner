@@ -19,6 +19,7 @@ public:
   void stop();
   ~WasapiCapture();
   int channels() const { return channels_; }
+  uint32_t bufferFrames() const { return bufferFrames_; }   // shared capture buffer; latency input
 private:
   void run();
   IAudioClient*        client_  = nullptr;
@@ -29,6 +30,7 @@ private:
   SampleCb             onSamples_;
   ErrorCb              onError_;
   int                  channels_ = 0;
+  UINT32               bufferFrames_ = 0;    // shared capture buffer size (GetBufferSize); latency input
   SampleKind           kind_ = SampleKind::Unsupported;
   std::vector<float>   scratch_;             // pcm16->float / silence buffer
 };
