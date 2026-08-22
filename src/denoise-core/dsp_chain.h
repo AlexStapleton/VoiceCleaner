@@ -6,6 +6,7 @@
 #include "limiter.h"
 #include "declicker.h"
 #include "noise_gate.h"
+#include "dry_wet_mix.h"
 #include "frame.h"
 namespace vc {
 // Composes the DSP leaves per blueprint §7.1:
@@ -18,6 +19,7 @@ public:
     float hpfCutoffHz = 80.0f;
     float agcTargetDb = -20.0f;
     float limiterCeilingDb = -1.0f;
+    float mixStrength = 1.0f;       // 0..1 engine wet/dry (1 = full denoise; RNNoise "STRENGTH")
     float declickStrength = 0.0f;   // 0..1 transient/click ducker (0 = off)
     float declickVoiceFloor = 0.0f; // 0..1 fraction of the duck kept during voice (0 = fully voice-safe)
     float gateStrength = 0.0f;      // 0..1 noise gate depth (0 = off; silences non-speech gaps)
@@ -33,6 +35,7 @@ public:
   void setHpfCutoffHz(float hz) noexcept          { hpfTarget_ = hz; }
   void setAgcTargetDb(float db) noexcept          { agcTarget_ = db; }
   void setLimiterCeilingDb(float db) noexcept     { limTarget_ = db; }
+  void setMixStrength(float s) noexcept           { mixTarget_ = s; }
   void setDeclickStrength(float s) noexcept       { dckTarget_ = s; }
   void setDeclickVoiceFloor(float f) noexcept     { declick_.setVoiceFloor(f); }
   void setGateStrength(float s) noexcept          { gateTarget_ = s; }
@@ -40,6 +43,7 @@ public:
   float currentHpfCutoffHz() const noexcept       { return hpfCur_; }
   float currentAgcTargetDb() const noexcept       { return agcCur_; }
   float currentLimiterCeilingDb() const noexcept  { return limCur_; }
+  float currentMixStrength() const noexcept       { return mixCur_; }
   float currentDeclickStrength() const noexcept   { return dckCur_; }
   float currentDeclickVoiceFloor() const noexcept { return declick_.currentVoiceFloor(); }
   float currentGateStrength() const noexcept      { return gateCur_; }
@@ -51,6 +55,7 @@ private:
   Limiter   lim_;
   Declicker declick_;
   NoiseGate gate_;
+  DryWetMix mix_;
   float open_;
   float close_;
   bool  vadActive_ = false;
@@ -64,6 +69,7 @@ private:
   float limCur_, limTarget_;
   float dckCur_, dckTarget_;
   float gateCur_, gateTarget_;
+  float mixCur_, mixTarget_;
   bool  bypass_ = false;
   static constexpr float kRampCoef = 0.6065f;   // e^{-10ms/20ms}
 };
