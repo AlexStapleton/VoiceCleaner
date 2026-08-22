@@ -81,6 +81,7 @@ bool Bridge::start() {
   }
 
   frameReady_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+  start_ = std::chrono::steady_clock::now();   // telemetry uptimeMs baseline
   running_.store(true, std::memory_order_release);
   deviceLost_.store(false, std::memory_order_release);   // reset any prior fatal state
   logger_.start();
@@ -182,6 +183,7 @@ void Bridge::relayLoop() {
         }
         if (framePeak > winPeak_) winPeak_ = framePeak;
         winSumSq_ += frameSumSq;
+        { const uint32_t occ = (uint32_t)ringB_.size(); if (occ > ringBHigh_) ringBHigh_ = occ; }  // running high-water
         if (++hopsSincePublish_ >= 100) {   // ~1 s at 10 ms/hop
           const double n = (double)hopsSincePublish_ * (double)FRAME_SAMPLES;
           vc::ipc::Telemetry t{};
@@ -192,7 +194,11 @@ void Bridge::relayLoop() {
           t.frameP50Ms = (float)frameStats_.percentileMs(50.0);
           t.frameP99Ms = (float)frameStats_.percentileMs(99.0);
           t.frameMaxMs = (float)frameStats_.maxMs();
+          t.ringAOcc = (uint32_t)ringA_.size();
           t.ringBOcc = (uint32_t)ringB_.size();
+          t.ringBHigh = ringBHigh_;   // monotonic since start/last ResetCounters
+          t.uptimeMs = (uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
+                           std::chrono::steady_clock::now() - start_).count();
           t.dropouts = (uint32_t)dropouts_.overruns();
           t.activeEngine = dyn_ ? (uint32_t)dyn_->activeIndex()
                                 : (cfg_.engine == "dfn3" ? 1u : 0u);
