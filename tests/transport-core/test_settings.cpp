@@ -186,3 +186,17 @@ TEST(Settings, MixStrengthRoundTrips) {
   ASSERT_EQ(r.mics.size(), 1u);
   EXPECT_FLOAT_EQ(r.mics[0].mixStrength, 0.65f);
 }
+TEST(Settings, LowLatencyDefaultsOff) {
+  EXPECT_FALSE(Settings{}.lowLatency);
+  EXPECT_FALSE(Settings{}.resolveActive().lowLatency);
+}
+TEST(Settings, LowLatencyRoundTripsAndResolves) {
+  Settings s; s.activeCaptureId = "cap-1"; s.renderId = "ren-1";
+  s.ensureProfile("cap-1", "K688");
+  s.lowLatency = true;
+  auto p = (std::filesystem::temp_directory_path() / "vc_tmp_settings_ll.toml").string();
+  s.save(p);
+  Settings r = Settings::load(p);
+  EXPECT_TRUE(r.lowLatency);
+  EXPECT_TRUE(r.resolveActive().lowLatency);   // flows into the worker's flat Config
+}
