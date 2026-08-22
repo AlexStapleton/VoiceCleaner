@@ -19,6 +19,7 @@ struct MicProfile {
   float declickStrength = 0.0f;   // .declick_strength
   float declickVoiceFloor = 0.0f; // .declick_voice_floor
   float gateStrength = 0.0f;      // .gate_strength
+  float mixStrength = 1.0f;       // .mix_strength (1 = full denoise)
 };
 
 // The full settings.toml as the UI owns it: a [global] block + every [mic."<id>"] profile.
