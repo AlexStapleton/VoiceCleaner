@@ -227,7 +227,10 @@ void AppWindow::paint() {
   // 5. Relaunch (only when the worker is down) OR the hover help strip (otherwise) — they share the band.
   if (state_->statusKind()==StatusKind::Down) {
     box(rcRelaunch_, hot_==3 ? accentHot : accent);
-    label(L"Relaunch worker", rcRelaunch_, text, centerFmt_);
+    std::wstring rlbl = respawn_.reconnecting()
+        ? (L"Reconnecting\x2026 (" + std::to_wstring(respawn_.attempts()) + L"/" + std::to_wstring(respawn_.maxAttempts()) + L")")
+        : L"Relaunch worker";
+    label(rlbl.c_str(), rcRelaunch_, text, centerFmt_);
   } else {
     box(rcHelp_, panel);
     D2D1_RECT_F htr = D2D1::RectF(rcHelp_.left + 12, rcHelp_.top + 8, rcHelp_.right - 12, rcHelp_.bottom - 8);
@@ -498,6 +501,8 @@ void AppWindow::applyPick(PickerKind k, size_t rowIndex) {
 }
 
 void AppWindow::requestRelaunch() {
+  respawn_.reset();          // manual relaunch clears any auto-respawn episode
+  pushedTuning_ = false;
   sup_->startOrAttach();
   InvalidateRect(hwnd_, nullptr, FALSE);
 }
@@ -512,7 +517,8 @@ void AppWindow::tick() {
     if (tray_) tray_->update(*state_);
     return;
   }
-  PollResult r = sup_->poll(GetTickCount64());
+  const uint64_t nowMs = GetTickCount64();
+  PollResult r = sup_->poll(nowMs);
   if (!r.alive) state_->onWorkerDown();
   else {
     state_->onTelemetry(r.telemetry, r.ready);
@@ -521,6 +527,11 @@ void AppWindow::tick() {
       vc::ipc::Command c; c.type = vc::ipc::CmdType::SetParams; c.params = state_->current();
       sup_->send(c);
     }
+  }
+  // Auto-respawn on a post-ready death (e.g. device loss); launch failures do not loop (design C3).
+  if (respawn_.onTick(r.alive, r.ready, !r.launchFailure, nowMs) == RespawnPolicy::Action::Respawn) {
+    pushedTuning_ = false;             // re-push the seeded tuning once the fresh worker is ready
+    sup_->startOrAttach();
   }
   if (tray_) tray_->update(*state_);
   InvalidateRect(hwnd_, nullptr, FALSE);

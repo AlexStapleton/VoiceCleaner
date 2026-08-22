@@ -118,7 +118,17 @@ Worker-level in-place device reconnect; the 8-hour endurance run.
   Enable for testing: add `low_latency = true` under `[global]` in settings.toml. **189 tests** green.
   **B2 (measure end-to-end latency + tune the ring default) is a HARDWARE task → Phase V.** UI checkbox for
   the flag deferred until B2 quantifies the win.
-- Workstream C (stability/measurement), Phase V (hardware) — not started.
+- **Workstream C (stability/measurement) — DONE, merged 2026-08-21.**
+  - C1: `reset()` on `DropoutCounter` + `FrameTimeStats`; `Bridge::reset_counters()` (dropouts reset directly,
+    relay-owned stats cleared via an atomic flag next hop); `ResetCounters` pipe command wired.
+  - C2: worker now populates `ringAOcc` / `ringBHigh` (monotonic high-water since start/last reset) /
+    `uptimeMs` telemetry.
+  - C3: pure `RespawnPolicy` (backoff 0.5→8 s, cap 5, reconnect-episode latch) + `AppWindow` auto-respawn on
+    post-ready worker death; launch failures do not loop; manual Relaunch resets the episode and the Down
+    band shows "Reconnecting… (n/5)". Own plan: `../plans/2026-08-21-supervisor-auto-respawn.md`.
+  - **198 tests** green (Debug + Release); DFN3 golden untouched. **STILL OWED (Phase V hardware):** unplug/
+    replug device → audio recovers unattended; watch the new telemetry; ResetCounters zeroes the window.
+- Phase V (hardware) — not started.
 
 ## Decisions log
 - **2026-08-21** — DFN3 stays shipped untouched; work is RNNoise + performance only. (User.)
