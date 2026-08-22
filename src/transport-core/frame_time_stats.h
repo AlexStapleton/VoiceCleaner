@@ -38,6 +38,11 @@ public:
     if (ms > maxMs_) maxMs_ = ms;
   }
 
+  void reset() noexcept {   // clear the histogram (call from the writer thread only)
+    for (size_t i = 0; i <= NUM_BUCKETS; ++i) buckets_[i] = 0;
+    count_ = 0; sumMs_ = 0.0; maxMs_ = 0.0;
+  }
+
   uint64_t count()  const noexcept { return count_; }
   double   maxMs()  const noexcept { return count_ ? maxMs_ : 0.0; }
   double   meanMs() const noexcept { return count_ ? sumMs_ / static_cast<double>(count_) : 0.0; }

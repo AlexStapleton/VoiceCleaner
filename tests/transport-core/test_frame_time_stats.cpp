@@ -74,3 +74,14 @@ TEST(FrameTimeStats, OverflowBucketCountsAndMaxExact) {
   EXPECT_GE(p, 20.0);
   EXPECT_LE(p, 25.0);
 }
+TEST(FrameTimeStats, ResetClearsHistogram) {
+  FrameTimeStats s;
+  s.record(1.0); s.record(5.0); s.record(25.0);
+  s.reset();
+  EXPECT_EQ(s.count(), 0u);
+  EXPECT_DOUBLE_EQ(s.maxMs(), 0.0);
+  EXPECT_DOUBLE_EQ(s.meanMs(), 0.0);
+  s.record(3.0);                       // usable again after reset
+  EXPECT_EQ(s.count(), 1u);
+  EXPECT_DOUBLE_EQ(s.maxMs(), 3.0);
+}

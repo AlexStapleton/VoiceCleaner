@@ -8,6 +8,7 @@
 #include "device_picker.h"
 #include "settings.h"
 #include "slider.h"
+#include "respawn_policy.h"
 
 namespace vc::ui {
 
@@ -70,6 +71,7 @@ class AppWindow {
   DevicePicker picker_;
   bool spawned_ = false;   // worker spawned/attached (startup or via a device pick)
   bool pushedTuning_ = false;   // seeded profile tuning sent to the worker once it became ready
+  RespawnPolicy respawn_;  // auto-respawn-with-backoff on post-ready worker death (device loss)
 
   ID2D1Factory* d2dFactory_ = nullptr;
   IDWriteFactory* dwFactory_ = nullptr;

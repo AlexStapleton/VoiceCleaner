@@ -14,3 +14,12 @@ TEST(Dropout, StopsCountingAfterShutdown) {
   EXPECT_EQ(c.underruns(), 0u);
   EXPECT_EQ(c.overruns(), 0u);
 }
+TEST(Dropout, ResetZeroesCountsAndReenablesAccounting) {
+  DropoutCounter c;
+  c.record_underrun(); c.record_overrun(); c.record_overrun();
+  c.reset();
+  EXPECT_EQ(c.underruns(), 0u);
+  EXPECT_EQ(c.overruns(), 0u);
+  c.record_underrun();                 // accounting is live again after reset
+  EXPECT_EQ(c.underruns(), 1u);
+}
