@@ -1,14 +1,18 @@
-# Build VoiceCleaner with MSVC on a Windows runner, run the unit tests, and publish a GitHub Release
-# with a ready-to-run zip. Triggered by pushing a version tag (v1.2.0, v1.2.0-rc1, ...). A tag that
-# contains a '-' (e.g. -rc1) is published as a PRE-release.
+# Build VoiceCleaner with MSVC on a Windows runner, run the unit tests, and package a ready-to-run zip.
 #
-# Manual runs (workflow_dispatch) build + test + upload the zip as a workflow artifact only; they never
-# create a release.
+#   * push to main / claude/** branches, or a manual run -> build + test + zip as a workflow ARTIFACT
+#     (download it from the run's summary page). Never creates a release.
+#   * push of a version tag (v1.2.0, v1.2.0-rc1, ...)   -> also creates the GitHub Release and attaches
+#     the zip. A tag containing '-' (e.g. -rc1) is published as a PRE-release.
+#   * a release published from the GitHub UI             -> builds that tag and attaches the zip to it.
 name: release
 
 on:
   push:
+    branches: ['main', 'claude/**']
     tags: ['v*']
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
