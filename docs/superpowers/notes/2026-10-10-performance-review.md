@@ -355,8 +355,16 @@ but the picker exists now. Trivial copy fix.
   include 11 new tests.
 - **Syntax-checked only (MinGW cross-compiler, `-Wall -Wextra`):** `mmcss_thread.cpp`,
   `pipe.cpp`, `bridge.cpp`, `app_window.cpp` and `test_pipe.cpp`. No new warnings.
-- **Not run (needs Windows):** the full MSVC build, `win-ipc-tests` (including the new burst
-  test), and on-device checks:
+- **Windows CI (`.github/workflows/release.yml`, `windows-latest`, MSVC):** full Release build
+  plus ctest **218/218** green
+  ([run #3](https://github.com/AlexStapleton/VoiceCleaner/actions/runs/38020515337)). Run #2
+  failed only on the new `PipeClient.BackToBackSendsAreAllDelivered`, and that was a real bug the
+  B1 client retry had exposed. A client could connect, write and close before the server called
+  `ConnectNamedPipe`. The server then got `ERROR_NO_DATA` and discarded the message, while
+  `send()` had returned true. Fixed in `6c938ed`: the server now reads messages on
+  `ERROR_NO_DATA`, and the client calls `FlushFileBuffers` before closing, so a send only counts
+  as delivered once the server has read it.
+- **Still not run (needs real audio hardware):** on-device checks:
   1. Drag a slider fast and release. The audio should match the final position.
   2. Switch mic, then output. The latency readout should return to the normal value right away,
      not about 40 ms higher, and there should be no new dropouts.
