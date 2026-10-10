@@ -107,3 +107,27 @@ TEST(FloatFifo, OverflowGuardDropsNewestAndStaysBounded) {
   EXPECT_EQ(f.read(out, 8), 8u);
   for (int i = 0; i < 8; ++i) EXPECT_FLOAT_EQ(out[i], 1.0f);   // the samples it kept are intact
 }
+
+TEST(FloatFifo, ClearDiscardsBufferedSamplesAndKeepsFullCapacity) {
+  vc::FloatFifo f(8);
+  float in[8] = {1, 2, 3, 4, 5, 6, 7, 8}, out[8] = {};
+  f.write(in, 5);
+  ASSERT_EQ(f.read(out, 3), 3u);   // indices now mid-buffer
+  f.clear();
+  EXPECT_EQ(f.buffered(), 0u);
+  EXPECT_EQ(f.space(), 8u);
+  f.write(in, 8);
+  ASSERT_EQ(f.read(out, 8), 8u);
+  for (int i = 0; i < 8; ++i) EXPECT_EQ(out[i], in[i]);
+}
+
+TEST(FrameAccumulator, ClearDropsPartialFrameRemainder) {
+  FrameAccumulator acc;
+  std::vector<float> stale(300, 9.0f), fresh(FRAME_SAMPLES, 1.0f), out(FRAME_SAMPLES, 0.0f);
+  acc.write(stale.data(), stale.size());
+  acc.clear();
+  EXPECT_EQ(acc.buffered(), 0u);
+  acc.write(fresh.data(), fresh.size());
+  ASSERT_TRUE(acc.pop_frame(out.data()));
+  for (float s : out) EXPECT_EQ(s, 1.0f);   // no stale samples leaked into the first frame
+}

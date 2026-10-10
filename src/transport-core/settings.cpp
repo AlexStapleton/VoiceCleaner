@@ -1,6 +1,10 @@
 #include "settings.h"
 #include <toml++/toml.hpp>
+#include <chrono>
+#include <filesystem>
 #include <fstream>
+#include <system_error>
+#include <thread>
 namespace vc {
 
 Config Settings::resolveActive() const {
@@ -85,7 +89,7 @@ MicProfile& Settings::ensureProfile(const std::string& id, const std::string& na
   return mics.back();
 }
 
-void Settings::save(const std::string& path) const {
+bool Settings::save(const std::string& path) const {
   toml::table g;
   g.insert_or_assign("active_capture_id", activeCaptureId);
   g.insert_or_assign("render_id", renderId);
@@ -115,8 +119,33 @@ void Settings::save(const std::string& path) const {
   root.insert_or_assign("global", std::move(g));
   root.insert_or_assign("mic", std::move(micTbl));
 
-  std::ofstream out(path);
-  out << root;   // toml++ serializes [global] + [mic."<id>"] sections
+  // Crash-safe save: write a sibling temp file, then atomically rename it over the target. Writing the
+  // target in place would truncate it first, so a crash / kill / power loss mid-write left a partial
+  // file that load() rejects as a parse error -> silently empty settings (every mic profile lost),
+  // and a worker (re)starting mid-write failed Config::load. A rename leaves either the old or the
+  // new file, never a torn one.
+  namespace fs = std::filesystem;
+  const fs::path target(path);
+  fs::path tmp = target;
+  tmp += ".tmp";
+  std::error_code ec;
+  {
+    std::ofstream out(tmp, std::ios::out | std::ios::trunc);
+    if (!out) return false;
+    out << root;   // toml++ serializes [global] + [mic."<id>"] sections
+    out.flush();
+    if (!out) { out.close(); fs::remove(tmp, ec); return false; }
+  }
+  // std::filesystem::rename replaces an existing file (MoveFileExW + MOVEFILE_REPLACE_EXISTING on
+  // MSVC). On Windows it fails with a sharing violation while another process has the target open,
+  // e.g. the worker reading it in Config::load, so retry briefly before giving up.
+  for (int attempt = 0; attempt < 10; ++attempt) {
+    fs::rename(tmp, target, ec);
+    if (!ec) return true;
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  }
+  fs::remove(tmp, ec);   // give up: keep the previous (intact) settings file, drop the temp
+  return false;
 }
 
 }  // namespace vc

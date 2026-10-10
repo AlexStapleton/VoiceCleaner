@@ -32,9 +32,9 @@ Context: the UI's default profile is `engine = "rnnoise"` with `dsp_chain = true
 
 | # | Finding | Kind | Severity | Effort |
 |---|---|---|---|---|
-| **B1** | Slider changes can be silently dropped. The last drag position may never reach the worker | Bug | **High** | S |
-| **B2** | Device re-select overfills ring B, adding about 40 ms of latency for about 4.5 min plus overruns | Bug | **High** | S |
-| **P1** | No flush-to-zero / denormals-are-zero (FTZ/DAZ) on any audio thread. Measured 25× slowdown in silence | Perf | **High** | XS |
+| **B1** | ~~Slider changes can be silently dropped. The last drag position may never reach the worker~~ **FIXED 2026-10-10** | Bug | **High** | S |
+| **B2** | ~~Device re-select overfills ring B, adding about 40 ms of latency for about 4.5 min plus overruns~~ **FIXED 2026-10-10** | Bug | **High** | S |
+| **P1** | ~~No flush-to-zero / denormals-are-zero (FTZ/DAZ) on any audio thread. Measured 25× slowdown in silence~~ **FIXED 2026-10-10** | Perf | **High** | XS |
 | **P2** | Limiter look-ahead is O(n·L), the most expensive non-engine stage (60 µs/hop) | Perf | Medium | S |
 | **P3** | RNNoise is built scalar-only. The vendored SSE4.1/AVX2 kernels are unused | Perf | Medium | M |
 | **P4** | Worker logger wakes at 100 Hz all session and writes `drift.csv` without limit | Perf/hygiene | Medium | S |
@@ -49,6 +49,17 @@ Context: the UI's default profile is `engine = "rnnoise"` with `dsp_chain = true
 ## Bugs
 
 ### B1 — Slider updates can be silently dropped
+
+> **FIXED 2026-10-10.** New pure `ParamOutbox` (`voicecleaner/param_outbox.h`, 5 unit tests)
+> holds the newest undelivered `Params` and clears it only on a successful send. Drag moves are
+> throttled to at most one send per 30 ms. Drag end (WM_LBUTTONUP) and discrete clicks force a
+> send. `tick()` retries anything still pending once the worker is ready, and the ready-path
+> tuning push also goes through the outbox. `PipeClient::send` now retries the pipe-recycle gap:
+> `ERROR_PIPE_BUSY` → `WaitNamedPipeW`, up to 100 ms; `ERROR_FILE_NOT_FOUND` → up to 20 ms when
+> no server has been seen, so a dead worker still fails fast. A Windows regression test sends
+> 200 commands back to back and requires all of them, in order
+> (`PipeClient.BackToBackSendsAreAllDelivered`). This also covers the device-pick path, where the
+> engine/tuning push right after `SelectCaptureDevice` used to hit a worker busy rebuilding.
 
 **Where:** `app_window.cpp:706-713` (WM_MOUSEMOVE → `sendCurrent`), `app_window.cpp:726`
 (WM_LBUTTONUP), `pipe.cpp:19-22` (server), `pipe.cpp:85-93` (client).
@@ -79,6 +90,11 @@ Optional: keep one persistent client connection instead of connecting per messag
 
 ### B2 — Device re-select overfills ring B (latency bump plus overruns)
 
+> **FIXED 2026-10-10.** `Bridge::start()` now clears `ringA_`, `ringB_`, `accum_`, `reframe_`
+> and `dist_`, and resets the resampler, before priming. New `clear()` on `SpscRing` (documented
+> as only valid with no producer or consumer running) and on the FIFOs. 4 unit tests, including
+> the stop→start residue scenario (`SpscRing.ClearThenPrimeRestoresHalfFullAfterReselect`).
+
 **Where:** `bridge.cpp:45-46` (priming), `bridge.cpp:272-325` (`stop` / `reselect*`).
 
 - `stop()` stops the capture, relay and render threads but **never drains `ringA_`, `ringB_`,
@@ -105,6 +121,11 @@ occupancy == capacity/2.
 ## Performance
 
 ### P1 — No FTZ/DAZ on any audio thread (do this first)
+
+> **FIXED 2026-10-10.** Set in the `MmcssThread` constructor, which runs first on the capture,
+> render and relay threads. Not restored on destruction. Only those worker threads are affected:
+> the offline tools (`offline-cli`, the DFN3 parity scripts) don't use `MmcssThread`, so their
+> numbers are unchanged.
 
 **Where:** a repo-wide search finds `_MM_SET_FLUSH_ZERO_MODE` / `_MM_SET_DENORMALS_ZERO_MODE`
 **only in docs**. The Phase 0 spec deferred it "to Phase 1" and it was never added. Blueprint §9.5
@@ -260,6 +281,12 @@ These came from a second pass over the non-RT files: `settings.cpp`, `config.cpp
 
 ### S1 — `settings.toml` is rewritten in place (risk of losing all profiles)
 
+> **FIXED 2026-10-10.** `Settings::save` now returns `bool`. It writes `settings.toml.tmp`, checks
+> the stream, then calls `std::filesystem::rename` over the target (MSVC: `MoveFileExW` with
+> replace-existing). It retries for up to ~200 ms if the worker has the file open (sharing
+> violation). On failure it removes the temp file and leaves the old file intact. 2 unit tests.
+> The optional `.bak` fallback was not added.
+
 **Where:** `settings.cpp:118-119`, which does `std::ofstream out(path); out << root;`.
 
 - The file is saved on every slider release, device pick, ring change and low-latency toggle.
@@ -321,9 +348,24 @@ but the picker exists now. Trivial copy fix.
 - The DFN3 steady state is allocation-free in our code, except for ORT's internal arena.
 - UI repaint is gated on `seq` (F5) and the telemetry poll is 10 Hz. Both are fine.
 
+## Verification status of the 2026-10-10 fixes
+
+- **Run on Linux:** transport-core 75/75 and vc-ipc 13/13 pass. voicecleaner-core passes 45/45
+  without `respawn_policy`, which GCC can't compile (a GCC limitation; MSVC builds it). These
+  include 11 new tests.
+- **Syntax-checked only (MinGW cross-compiler, `-Wall -Wextra`):** `mmcss_thread.cpp`,
+  `pipe.cpp`, `bridge.cpp`, `app_window.cpp` and `test_pipe.cpp`. No new warnings.
+- **Not run (needs Windows):** the full MSVC build, `win-ipc-tests` (including the new burst
+  test), and on-device checks:
+  1. Drag a slider fast and release. The audio should match the final position.
+  2. Switch mic, then output. The latency readout should return to the normal value right away,
+     not about 40 ms higher, and there should be no new dropouts.
+  3. Mute the mic for a minute with DFN3 and with RNNoise. The hop p99 should stay flat.
+  4. Kill the UI while you drag a slider. `settings.toml` should still load.
+
 ## Suggested order
 
-1. **P1** (one-liner, biggest p99 lever), **B1**, **B2** — small, user-visible, low risk.
+1. ~~**P1**, **B1**, **B2**~~ and ~~**S1**~~: done 2026-10-10.
 2. **P2**, **P4** — small, self-contained, testable.
 3. **C1**, **C2** — cheap robustness.
 4. **P3**, then **P6** — bigger CPU wins that need numerical A/B validation.

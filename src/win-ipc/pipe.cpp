@@ -1,5 +1,6 @@
 #include "pipe.h"
 #include <windows.h>
+#include <chrono>
 #include <vector>
 namespace vc::ipc {
 
@@ -83,8 +84,37 @@ void PipeServer::stop() {
 }
 
 bool PipeClient::send(const std::wstring& name, const Command& c) {
-  HANDLE pipe = CreateFileW(name.c_str(), GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr);
-  if (pipe == INVALID_HANDLE_VALUE) return false;
+  // The server is single-instance and recycles the pipe after every client (disconnect, close,
+  // CreateNamedPipeW again), and it runs the command handler before recycling. A send landing in that
+  // window sees ERROR_PIPE_BUSY (instance still serving the previous client) or ERROR_FILE_NOT_FOUND
+  // (old instance closed, new one not created yet). Retry briefly instead of dropping the command.
+  // Budgets stay small because this runs on the UI thread: FILE_NOT_FOUND before the server has been
+  // seen at all usually means no worker, so it gives up after kNotFoundMs; once BUSY proves a live
+  // server, retries continue up to kBusyMs. Callers that must not lose a value retry later (the UI's
+  // ParamOutbox), so a timeout here is not a lost update.
+  using clock = std::chrono::steady_clock;
+  constexpr auto kNotFoundMs = std::chrono::milliseconds(20);
+  constexpr auto kBusyMs     = std::chrono::milliseconds(100);
+  const auto t0 = clock::now();
+  bool serverSeen = false;
+  HANDLE pipe = INVALID_HANDLE_VALUE;
+  for (;;) {
+    pipe = CreateFileW(name.c_str(), GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr);
+    if (pipe != INVALID_HANDLE_VALUE) break;
+    const DWORD err = GetLastError();
+    const auto elapsed = clock::now() - t0;
+    if (err == ERROR_PIPE_BUSY) {
+      serverSeen = true;
+      if (elapsed >= kBusyMs) return false;
+      const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(kBusyMs - elapsed).count();
+      WaitNamedPipeW(name.c_str(), (DWORD)(left > 0 ? left : 1));   // returns early if no instance exists
+    } else if (err == ERROR_FILE_NOT_FOUND) {
+      if (elapsed >= (serverSeen ? kBusyMs : kNotFoundMs)) return false;
+      Sleep(1);
+    } else {
+      return false;
+    }
+  }
   auto bytes = encode(c);
   DWORD written = 0;
   BOOL ok = WriteFile(pipe, bytes.data(), (DWORD)bytes.size(), &written, nullptr);

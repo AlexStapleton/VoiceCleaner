@@ -566,10 +566,21 @@ int AppWindow::overlayHit(int x, int y) const {
   return (idx >= 0 && idx < (int)rows.size()) ? idx : -1;
 }
 
-void AppWindow::sendCurrent(const vc::ipc::Params& p) {
-  vc::ipc::Command c; c.type = vc::ipc::CmdType::SetParams; c.params = p;
-  sup_->send(c);
+void AppWindow::sendCurrent(const vc::ipc::Params& p, bool throttled) {
+  outbox_.stage(p);
+  flushParams(/*force=*/!throttled);
   InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
+// Deliver the newest staged Params. A send can fail when it lands while the worker's single-instance
+// pipe is being recycled or the worker is busy (e.g. mid device-reselect); the value then stays
+// pending and is retried by the next drag move, the drag end, or tick(), instead of being dropped.
+void AppWindow::flushParams(bool force) {
+  if (!spawned_ || state_->statusKind() == StatusKind::Down) return;   // no worker: the ready-path re-push covers it
+  const uint64_t now = GetTickCount64();
+  if (!outbox_.due(now, force)) return;
+  vc::ipc::Command c; c.type = vc::ipc::CmdType::SetParams; c.params = outbox_.pending();
+  outbox_.onAttempt(now, sup_->send(c));
 }
 
 void AppWindow::onCommandEngine(uint32_t engine) { sendCurrent(state_->onSelectEngine(engine)); }
@@ -633,8 +644,9 @@ void AppWindow::tick() {
     state_->onTelemetry(r.telemetry, r.ready);
     if (r.ready && !pushedTuning_) {   // apply the seeded profile tuning once the worker is running
       pushedTuning_ = true;
-      vc::ipc::Command c; c.type = vc::ipc::CmdType::SetParams; c.params = state_->current();
-      sup_->send(c);
+      sendCurrent(state_->current());   // via the outbox, so a failed push is retried below
+    } else if (r.ready) {
+      flushParams(/*force=*/false);      // retry any value whose earlier send failed or was throttled
     }
   }
   // Auto-respawn on a post-ready death (e.g. device loss); launch failures do not loop (design C3).
@@ -706,7 +718,7 @@ LRESULT AppWindow::handle(UINT msg, WPARAM w, LPARAM l) {
     case WM_MOUSEMOVE: {
       if (grabbed_ >= 0) {   // dragging a slider
         setSliderFromX(grabbed_, GET_X_LPARAM(l));
-        sendCurrent(applySlider(grabbed_));
+        sendCurrent(applySlider(grabbed_), /*throttled=*/true);   // drag: <= 1 send / 30 ms
         InvalidateRect(hwnd_, nullptr, FALSE);
         return 0;
       }
@@ -724,7 +736,7 @@ LRESULT AppWindow::handle(UINT msg, WPARAM w, LPARAM l) {
       return 0;
     }
     case WM_LBUTTONUP:
-      if (grabbed_ >= 0) { persistTuning(); grabbed_ = -1; }   // persist on drag-end
+      if (grabbed_ >= 0) { flushParams(/*force=*/true); persistTuning(); grabbed_ = -1; }   // deliver final value + persist
       return 0;
     case WM_MOUSELEAVE:
       if (hot_ != -1 || helpHot_ != -1 || hotSec_ != -1) { hot_ = -1; helpHot_ = -1; hotSec_ = -1; InvalidateRect(hwnd_, nullptr, FALSE); }

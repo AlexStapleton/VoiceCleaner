@@ -201,3 +201,31 @@ TEST(Settings, LowLatencyRoundTripsAndResolves) {
   EXPECT_TRUE(r.lowLatency);
   EXPECT_TRUE(r.resolveActive().lowLatency);   // flows into the worker's flat Config
 }
+
+TEST(Settings, SaveAtomicallyReplacesExistingFileAndLeavesNoTemp) {
+  namespace fs = std::filesystem;
+  const fs::path p = fs::temp_directory_path() / "vc_atomic_settings.toml";
+  fs::path tmp = p; tmp += ".tmp";
+  std::ofstream(p) << "garbage that is not toml [[[";   // pre-existing (even corrupt) target
+  Settings s;
+  s.activeCaptureId = "cap-9";
+  s.renderId = "ren-9";
+  s.ensureProfile("cap-9", "Mic Nine").hpfHz = 120.0f;
+  ASSERT_TRUE(s.save(p.string()));
+  EXPECT_FALSE(fs::exists(tmp));                        // temp renamed away, not left behind
+  Settings r = Settings::load(p.string());
+  EXPECT_EQ(r.activeCaptureId, "cap-9");
+  ASSERT_EQ(r.mics.size(), 1u);
+  EXPECT_EQ(r.mics[0].name, "Mic Nine");
+  EXPECT_FLOAT_EQ(r.mics[0].hpfHz, 120.0f);
+  fs::remove(p);
+}
+
+TEST(Settings, SaveFailureReturnsFalseAndKeepsNothing) {
+  namespace fs = std::filesystem;
+  const fs::path p = fs::temp_directory_path() / "vc_no_such_dir_xyz" / "settings.toml";
+  fs::remove_all(p.parent_path());
+  Settings s; s.activeCaptureId = "cap-1";
+  EXPECT_FALSE(s.save(p.string()));                     // unwritable location: reported, no throw
+  EXPECT_FALSE(fs::exists(p));
+}

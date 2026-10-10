@@ -9,6 +9,7 @@
 #include "settings.h"
 #include "slider.h"
 #include "respawn_policy.h"
+#include "param_outbox.h"
 
 namespace vc::ui {
 
@@ -39,7 +40,8 @@ class AppWindow {
   void paint();
   void tick();                 // WM_TIMER: poll supervisor -> UiState -> InvalidateRect
   void layout(D2D1_SIZE_F sz); // recompute control rects
-  void sendCurrent(const vc::ipc::Params& p);
+  void sendCurrent(const vc::ipc::Params& p, bool throttled = false);   // stage p + try to deliver
+  void flushParams(bool force);          // deliver outbox_.pending() if due; keeps it pending on failure
   int  hitControl(int x, int y) const;   // 0=RNNoise 1=DFN3 2=Bypass 3=Relaunch, -1=none
   void refreshDevices();                 // enumerate WASAPI devices + seed picker active from settings
   D2D1_RECT_F overlayRect() const;       // the open dropdown's bounding rect
@@ -75,6 +77,7 @@ class AppWindow {
   bool spawned_ = false;   // worker spawned/attached (startup or via a device pick)
   bool pushedTuning_ = false;   // seeded profile tuning sent to the worker once it became ready
   RespawnPolicy respawn_;  // auto-respawn-with-backoff on post-ready worker death (device loss)
+  ParamOutbox outbox_;     // newest Params not yet delivered to the worker (throttle + retry, see param_outbox.h)
 
   // F5: gate the WM_TIMER repaint. The worker publishes telemetry (meter + all aggregates) only
   // ~1 Hz, so a fixed 10 Hz repaint drew the same pixels 9 times out of 10. Repaint from a tick

@@ -44,6 +44,12 @@ public:
     const size_t s = (h + cap_ - t) % cap_;
     return s <= (cap_ - 1) ? s : 0;
   }
+  // Discard all queued items. NOT thread-safe: call only while neither the producer nor the
+  // consumer is running (e.g. between Bridge::stop() and start(), with all threads joined).
+  void clear() noexcept {
+    head_.idx.store(0, std::memory_order_relaxed);
+    tail_.idx.store(0, std::memory_order_relaxed);
+  }
   size_t capacity() const noexcept { return cap_ - 1; }
   T* data() noexcept { return slots_.data(); }
   size_t byte_size() const noexcept { return slots_.size() * sizeof(T); }
