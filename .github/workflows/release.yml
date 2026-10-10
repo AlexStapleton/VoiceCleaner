@@ -1,0 +1,72 @@
+# Build VoiceCleaner with MSVC on a Windows runner, run the unit tests, and publish a GitHub Release
+# with a ready-to-run zip. Triggered by pushing a version tag (v1.2.0, v1.2.0-rc1, ...). A tag that
+# contains a '-' (e.g. -rc1) is published as a PRE-release.
+#
+# Manual runs (workflow_dispatch) build + test + upload the zip as a workflow artifact only; they never
+# create a release.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write   # create the release + upload the asset
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure (MSVC x64)
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+
+      # Builds every target (UI, worker, offline tools, all test executables). The voicecleaner
+      # target's post-build step co-locates the worker exe, onnxruntime.dll, models/dfn3 and the
+      # default settings.toml next to voicecleaner.exe.
+      - name: Build (Release)
+        run: cmake --build build --config Release --parallel
+
+      - name: Unit tests
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $ver = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME } else { "dev-$($env:GITHUB_SHA.Substring(0,7))" }
+          $src = "build/src/voicecleaner/Release"
+          $pkg = "VoiceCleaner-$ver-win-x64"
+          New-Item -ItemType Directory -Path $pkg | Out-Null
+          foreach ($f in 'voicecleaner.exe','voicecleaner-worker.exe','onnxruntime.dll','settings.toml') {
+            if (-not (Test-Path "$src/$f")) { throw "missing build output: $src/$f" }
+            Copy-Item "$src/$f" $pkg
+          }
+          Copy-Item -Recurse "$src/models" "$pkg/models"
+          Copy-Item LICENSE $pkg
+
+          # The project links the dynamic MSVC runtime (/MD). Ship the runtime DLLs app-local so the
+          # zip runs on machines without the VC++ 2015-2022 redistributable installed.
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
+          $crt = Get-ChildItem "$vs\VC\Redist\MSVC\*\x64\Microsoft.VC*.CRT" -Directory |
+                 Sort-Object FullName | Select-Object -Last 1
+          if (-not $crt) { throw "MSVC CRT redist directory not found" }
+          Copy-Item "$($crt.FullName)\*.dll" $pkg
+
+          Compress-Archive -Path "$pkg/*" -DestinationPath "$pkg.zip"
+          "PKG_ZIP=$pkg.zip" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Get-ChildItem -Recurse $pkg | Select-Object FullName, Length | Format-Table -AutoSize
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: voicecleaner-win-x64
+          path: ${{ env.PKG_ZIP }}
+
+      - name: Publish GitHub Release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.PKG_ZIP }}
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          generate_release_notes: true
