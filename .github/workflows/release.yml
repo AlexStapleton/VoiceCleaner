@@ -22,10 +22,12 @@ jobs:
   build:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
+      # No explicit -G: on Windows CMake defaults to the newest installed Visual Studio generator, so
+      # the workflow survives runner image upgrades (windows-latest moved past VS 2022).
       - name: Configure (MSVC x64)
-        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+        run: cmake -S . -B build -A x64
 
       # Builds every target (UI, worker, offline tools, all test executables). The voicecleaner
       # target's post-build step co-locates the worker exe, onnxruntime.dll, models/dfn3 and the
