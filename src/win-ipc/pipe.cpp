@@ -32,7 +32,11 @@ void PipeServer::run() {
     bool connected = false;
     BOOL ok = ConnectNamedPipe(pipe, &ov);
     DWORD err = GetLastError();
-    if (ok || err == ERROR_PIPE_CONNECTED) {
+    // ERROR_PIPE_CONNECTED: a client connected between CreateNamedPipeW and this call.
+    // ERROR_NO_DATA: a client connected, wrote and already closed in that same window. Its message
+    // can still be sitting in the pipe, so read it rather than discarding it (the read loop below
+    // ends cleanly on ERROR_BROKEN_PIPE once the buffer is drained).
+    if (ok || err == ERROR_PIPE_CONNECTED || err == ERROR_NO_DATA) {
       connected = true;
     } else if (err == ERROR_IO_PENDING) {
       HANDLE hs[2] = { ov.hEvent, static_cast<HANDLE>(stopEvent_) };
@@ -118,6 +122,13 @@ bool PipeClient::send(const std::wstring& name, const Command& c) {
   auto bytes = encode(c);
   DWORD written = 0;
   BOOL ok = WriteFile(pipe, bytes.data(), (DWORD)bytes.size(), &written, nullptr);
+  // Don't report success until the server has actually read the message: FlushFileBuffers on a pipe
+  // blocks until the other end has consumed everything written. Without it, a client could connect,
+  // write and close before the server had even called ConnectNamedPipe, and the message was lost while
+  // send() still returned true (the UI's ParamOutbox would then wrongly mark it delivered). It cannot
+  // stall on a busy worker: the server reads each message immediately after connecting, and while its
+  // handler runs it keeps the single instance, so later clients get PIPE_BUSY instead of connecting.
+  if (ok) ok = FlushFileBuffers(pipe);
   CloseHandle(pipe);
   return ok && written == bytes.size();
 }
