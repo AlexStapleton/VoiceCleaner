@@ -252,6 +252,63 @@ The worker main tick's `reclaimRetiredEngines()` (`main.cpp:183`) takes the same
 
 ---
 
+## Addendum: settings and UI shell (second pass)
+
+These came from a second pass over the non-RT files: `settings.cpp`, `config.cpp`,
+`voicecleaner/main.cpp`, `tray.cpp`, `ui_state.cpp`, `device_picker.cpp`,
+`respawn_policy.cpp`, `device_enumerator.cpp` and `rt_memory.cpp`.
+
+### S1 — `settings.toml` is rewritten in place (risk of losing all profiles)
+
+**Where:** `settings.cpp:118-119`, which does `std::ofstream out(path); out << root;`.
+
+- The file is saved on every slider release, device pick, ring change and low-latency toggle.
+- The write truncates the file first and is not atomic. A crash, kill or power loss mid-write
+  leaves a partial file.
+- On the next start, `Settings::load` catches the parse error and **silently returns empty
+  settings** (`settings.cpp:27`). All per-mic profiles are lost and the app falls back to
+  first-run.
+- The worker reads the same file through `Config::load`, which **throws** on a parse error.
+  If a respawn races a UI save, the worker exits with "config parse". Because it never became
+  ready, `RespawnPolicy` treats it as a launch failure and gives up instead of retrying.
+
+**Fix:** write to `settings.toml.tmp`, then
+`MoveFileExW(tmp, path, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)`. Optionally keep
+a `.bak` copy and fall back to it when parsing fails.
+
+### S2 — Settings path is narrowed character by character and lives next to the exe
+
+**Where:** `voicecleaner/main.cpp:14-19` and `:37-41`.
+
+- The wide path is narrowed one character at a time (`static_cast<char>(c)`, marked "ASCII
+  path"). If the install directory contains any non-ASCII character (for example
+  `C:\Users\José\…`), the UI loads and saves a **mangled path**. Settings never persist, while
+  the worker gets the correct wide path on its command line, so the two read different files.
+- The settings live in the exe directory. If the app is installed under Program Files, saves
+  fail silently because nobody checks the `ofstream` result.
+
+**Fix:**
+- Convert with `WideCharToMultiByte(CP_UTF8, …)` (`tray.cpp` already has the reverse helper).
+  Note that toml++ / `std::ofstream` on MSVC need a `std::filesystem::path` built from the wide
+  string to open non-ASCII paths, not a narrow `char*`.
+- Longer term, move settings to `%LOCALAPPDATA%\VoiceCleaner\`.
+
+### S3 — The tray icon is updated 10 times a second whether or not anything changed
+
+**Where:** `tray.cpp:54-63`, called from every `AppWindow::tick()`. Each call is a
+`Shell_NotifyIconW(NIM_MODIFY)` round-trip to Explorer, even when the tooltip and icon are
+unchanged.
+
+**Fix:** cache the last tooltip string and skip the call when neither the tooltip nor the icon
+changed. Low priority.
+
+### S4 — Stale first-run text
+
+`ui_state.cpp` `statusLine()` for `NoConfig` still says "the mic picker arrives in Phase 4",
+but the picker exists now. Trivial copy fix.
+
+---
+
 ## Explicitly checked and fine (no action)
 
 - SPSC ring ordering, the `size()` observer retry, and the VirtualLock + touch of rings and
