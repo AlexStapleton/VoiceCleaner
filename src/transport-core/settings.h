@@ -33,7 +33,7 @@ struct Settings {
   std::vector<MicProfile> mics;   // all [mic."<id>"] sections
 
   static Settings load(const std::string& path);   // new schema OR flat back-compat; missing/bad file => empty
-  void save(const std::string& path) const;        // Task 2
+  bool save(const std::string& path) const;        // atomic (temp + rename); false => target left untouched
   MicProfile* activeProfile();                      // Task 2
   MicProfile& ensureProfile(const std::string& id, const std::string& name);  // Task 2
   Config resolveActive() const;                     // flatten active profile -> the worker's flat Config

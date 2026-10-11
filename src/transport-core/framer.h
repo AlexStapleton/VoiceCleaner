@@ -45,6 +45,8 @@ public:
     return n;
   }
 
+  void clear() noexcept { head_ = tail_ = 0; }   // discard buffered samples (owner thread only)
+
   // Backing storage, for the owner to VirtualLock into the working set (the buffer is fixed at
   // construction and never reallocates, so this region is stable for the FIFO's lifetime).
   float*  data() noexcept      { return buf_.data(); }
@@ -63,6 +65,7 @@ public:
   void write(const float* in, size_t n);
   bool pop_frame(float* out480);   // true if a full frame was written
   size_t buffered() const noexcept { return fifo_.buffered(); }
+  void clear() noexcept { fifo_.clear(); }
   float* data() noexcept { return fifo_.data(); }              // lockable region (see FloatFifo::data)
   size_t byte_size() const noexcept { return fifo_.byte_size(); }
 private:
@@ -75,6 +78,7 @@ public:
   void push_frame(const float* in480);
   size_t read(float* out, size_t n);   // returns samples written (< n on underrun)
   size_t buffered() const noexcept { return fifo_.buffered(); }
+  void clear() noexcept { fifo_.clear(); }
   float* data() noexcept { return fifo_.data(); }              // lockable region (see FloatFifo::data)
   size_t byte_size() const noexcept { return fifo_.byte_size(); }
 private:

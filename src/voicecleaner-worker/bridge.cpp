@@ -42,6 +42,18 @@ bool Bridge::start() {
   lockedReframe_ = rt_lock_and_touch(reframe_.data(), reframe_.byte_size());
   lockedDist_    = rt_lock_and_touch(dist_.data(),    dist_.byte_size());
 
+  // Start from empty buffers. On a device reselect, stop() joined every thread but left the rings and
+  // FIFOs holding the previous session's audio (ring B sits at ~capacity/2, the drift setpoint).
+  // Priming on top of that would start ring B nearly full: ~+capacity/2 hops of latency that the
+  // drift controller can only drain at driftMaxPpm (minutes), plus overruns and stale mic audio.
+  // No thread is running here, so the non-thread-safe clear()s are safe.
+  ringA_.clear();
+  ringB_.clear();
+  accum_.clear();
+  reframe_.clear();
+  dist_.clear();
+  resampler_.reset();   // drop the old stream's interpolation history (ratio is re-set every hop)
+
   Frame silent{}; silent.fill(0.0f);
   for (size_t i = 0; i < ringB_.capacity() / 2; ++i) ringB_.try_push(silent);  // prime half-full
 
