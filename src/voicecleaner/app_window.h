@@ -111,7 +111,7 @@ class AppWindow {
   D2D1_RECT_F rcLowLat_{};                    // low-latency checkbox (footer-left)
   D2D1_RECT_F rcSecHdr_[3]{};                 // clickable slider-group header rows
 
-  Slider sldGain_{-30.0f, -6.0f, -20.0f, SliderFmt::Dbfs};
+  Slider sldGain_{-30.0f, -6.0f, -16.0f, SliderFmt::Dbfs};
   Slider sldAggr_{0.0f, 1.0f, 0.0f, SliderFmt::Ratio2};
   Slider sldHpf_{40.0f, 200.0f, 80.0f, SliderFmt::Hz};
   Slider sldLim_{-6.0f, 0.0f, -1.0f, SliderFmt::Db};
@@ -119,7 +119,8 @@ class AppWindow {
   Slider sldVfl_{0.0f, 1.0f, 0.0f, SliderFmt::Ratio2};
   Slider sldGate_{0.0f, 1.0f, 0.0f, SliderFmt::Ratio2};
   Slider sldMix_{0.0f, 1.0f, 1.0f, SliderFmt::Ratio2};
-  D2D1_RECT_F rcGain_{}, rcAggr_{}, rcHpf_{}, rcLim_{}, rcDck_{}, rcVfl_{}, rcGate_{}, rcMix_{};   // track rects
+  Slider sldBoost_{0.0f, 30.0f, 18.0f, SliderFmt::Db};   // AGC max boost (MAX BOOST)
+  D2D1_RECT_F rcGain_{}, rcAggr_{}, rcHpf_{}, rcLim_{}, rcDck_{}, rcVfl_{}, rcGate_{}, rcMix_{}, rcBoost_{};   // track rects
   float secY_[3] = {356.0f, 464.0f, 572.0f};   // section-header baselines: DENOISE / VOICE LEVEL / CLEANUP
   int grabbed_ = -1;        // slider being dragged: 0=gain 1=aggr 2=hpf 3=lim, -1=none
 };

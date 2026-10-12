@@ -17,12 +17,13 @@ struct Params {
   float    declickVoiceFloor;   // 0..1 duck fraction kept during voice (0 = fully voice-safe)
   float    gateStrength;        // 0..1 noise gate depth (0 = off; silences non-speech gaps)
   float    mixStrength;         // 0..1 engine wet/dry (1 = full denoise; RNNoise "STRENGTH")
+  float    agcMaxGainDb;        // AGC max boost in dB ("MAX BOOST"); caps how far a quiet mic is raised
 
   static constexpr Params defaults() {
     return Params{
         /*aggression*/ 0.0f,
         /*hpfCutoffHz*/ 80.0f,
-        /*agcTargetDbfs*/ -20.0f,
+        /*agcTargetDbfs*/ -16.0f,
         /*limiterCeilingDbfs*/ -1.0f,
         /*engine*/ 1u,
         /*bypass*/ 0u,
@@ -33,6 +34,7 @@ struct Params {
         /*declickVoiceFloor*/ 0.0f,
         /*gateStrength*/ 0.0f,
         /*mixStrength*/ 1.0f,
+        /*agcMaxGainDb*/ 18.0f,
     };
   }
 };

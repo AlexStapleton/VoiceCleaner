@@ -17,7 +17,8 @@ public:
   struct Config {
     float fs = 48000.0f;
     float hpfCutoffHz = 80.0f;
-    float agcTargetDb = -20.0f;
+    float agcTargetDb = -16.0f;
+    float agcMaxGainDb = 18.0f;     // AGC max boost ("MAX BOOST"); quiet mics need more than the old fixed +9 dB
     float limiterCeilingDb = -1.0f;
     float mixStrength = 1.0f;       // 0..1 engine wet/dry (1 = full denoise; RNNoise "STRENGTH")
     float declickStrength = 0.0f;   // 0..1 transient/click ducker (0 = off)
@@ -34,6 +35,8 @@ public:
   float currentAgcGainDb() const noexcept { return agc_.currentGainDb(); }   // live AGC gain (readout)
   void setHpfCutoffHz(float hz) noexcept          { hpfTarget_ = hz; }
   void setAgcTargetDb(float db) noexcept          { agcTarget_ = db; }
+  void setAgcMaxGainDb(float db) noexcept         { agc_.setMaxGainDb(db); }
+  float currentAgcMaxGainDb() const noexcept      { return agc_.maxGainDb(); }
   void setLimiterCeilingDb(float db) noexcept     { limTarget_ = db; }
   void setMixStrength(float s) noexcept           { mixTarget_ = s; }
   void setDeclickStrength(float s) noexcept       { dckTarget_ = s; }

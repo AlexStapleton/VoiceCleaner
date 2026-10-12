@@ -47,7 +47,8 @@ Settings Settings::load(const std::string& path) {
           m.dspChain    = (*p)["dsp_chain"].value_or(true);
           m.aggression     = (float)(*p)["aggression"].value_or(0.0);
           m.hpfHz          = (float)(*p)["hpf_hz"].value_or(80.0);
-          m.outputGainDbfs = (float)(*p)["output_gain_dbfs"].value_or(-20.0);
+          m.outputGainDbfs = (float)(*p)["output_gain_dbfs"].value_or(-16.0);
+          m.maxBoostDb     = (float)(*p)["max_boost_db"].value_or(18.0);   // absent in pre-v1.4 files -> 18
           m.limiterDbfs    = (float)(*p)["limiter_dbfs"].value_or(-1.0);
           m.declickStrength = (float)(*p)["declick_strength"].value_or(0.0);
           m.declickVoiceFloor = (float)(*p)["declick_voice_floor"].value_or(0.0);
@@ -112,6 +113,7 @@ bool Settings::save(const std::string& path) const {
     p.insert_or_assign("declick_voice_floor", (double)m.declickVoiceFloor);
     p.insert_or_assign("gate_strength", (double)m.gateStrength);
     p.insert_or_assign("mix_strength", (double)m.mixStrength);
+    p.insert_or_assign("max_boost_db", (double)m.maxBoostDb);
     micTbl.insert_or_assign(m.id, std::move(p));
   }
 

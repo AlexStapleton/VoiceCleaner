@@ -5,7 +5,7 @@ namespace vc {
 DspChain::DspChain(INoiseFilter* engine, const Config& c)
     : engine_(engine),
       hpf_(Biquad::highpass(c.fs, c.hpfCutoffHz)),
-      agc_({c.agcTargetDb, 50.0f, 500.0f, 9.0f, -10.0f, c.fs}),   // maxGain 18->9 dB: cap noise over-amplification
+      agc_({c.agcTargetDb, 50.0f, 500.0f, c.agcMaxGainDb, -10.0f, c.fs}),   // max boost is user-set (MAX BOOST)
       lim_(c.limiterCeilingDb, 144, 50.0f, c.fs),
       declick_(Declicker::Config{c.fs}),
       gate_(NoiseGate::Config{c.fs}),

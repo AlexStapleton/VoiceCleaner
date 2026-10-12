@@ -113,7 +113,8 @@ TEST(Settings, OlderProfileWithoutTuningLoadsDefaults) {
   ASSERT_EQ(r.mics.size(), 1u);
   EXPECT_FLOAT_EQ(r.mics[0].aggression, 0.0f);
   EXPECT_FLOAT_EQ(r.mics[0].hpfHz, 80.0f);
-  EXPECT_FLOAT_EQ(r.mics[0].outputGainDbfs, -20.0f);
+  EXPECT_FLOAT_EQ(r.mics[0].outputGainDbfs, -16.0f);
+  EXPECT_FLOAT_EQ(r.mics[0].maxBoostDb, 18.0f);   // pre-v1.4 files have no max_boost_db -> 18 (was a fixed 9)
   EXPECT_FLOAT_EQ(r.mics[0].limiterDbfs, -1.0f);
 }
 TEST(Settings, SaveLoadRoundTripIsIdentity) {
@@ -228,4 +229,14 @@ TEST(Settings, SaveFailureReturnsFalseAndKeepsNothing) {
   Settings s; s.activeCaptureId = "cap-1";
   EXPECT_FALSE(s.save(p.string()));                     // unwritable location: reported, no throw
   EXPECT_FALSE(fs::exists(p));
+}
+
+TEST(Settings, MaxBoostRoundTrips) {
+  auto p = (std::filesystem::temp_directory_path() / "vc_tmp_settings_boost.toml").string();
+  Settings s; s.activeCaptureId = "c1"; s.renderId = "r1";
+  s.ensureProfile("c1", "Mic").maxBoostDb = 24.0f;
+  ASSERT_TRUE(s.save(p));
+  Settings r = Settings::load(p);
+  ASSERT_EQ(r.mics.size(), 1u);
+  EXPECT_FLOAT_EQ(r.mics[0].maxBoostDb, 24.0f);
 }
