@@ -29,7 +29,7 @@ struct Config {
   bool        dspChain = false;     // wrap the engine in the DSP chain (see DspChain)
   bool        warmStandby = false;  // run rnnoise+dfn3 both warm, live switch. In this mode
                                     // `engine` selects the DEFAULT-active engine at startup: "dfn3" -> DFN3, else RNNoise.
-  bool        lowLatency = false;   // skip the DFN3 delay pin so RNNoise runs at native ~0 latency
+  bool        lowLatency = false;   // skip the DFN3 delay pin so RNNoise runs at its native 20 ms (960 samples)
                                     // (switching to DFN3 then causes a one-time ~30 ms timing shift)
   static Config load(const std::string& tomlPath);   // settings.toml ([global] + [mic."<id>"]); throws on a bad file
   void apply_cli(int argc, char** argv);

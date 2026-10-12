@@ -29,7 +29,7 @@ struct Settings {
   std::string activeCaptureId;    // [global].active_capture_id  ("" => none)
   std::string renderId;           // [global].render_id
   size_t      ringFrames = 8;     // [global].ring_frames, clamped to [kRingFramesMin, kRingFramesMax] (8 ~= 40 ms)
-  bool        lowLatency = false; // [global].low_latency — skip the DFN3 delay pin (RNNoise ~0 latency)
+  bool        lowLatency = false; // [global].low_latency — skip the DFN3 delay pin (RNNoise at its native 20 ms)
   unsigned    collapsedSections = 0;  // [global].collapsed_sections — UI slider-group collapse bitmask
   std::vector<MicProfile> mics;   // all [mic."<id>"] sections
 

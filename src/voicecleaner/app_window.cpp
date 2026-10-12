@@ -457,7 +457,7 @@ std::wstring AppWindow::helpTextFor(int target) {
     case kHelpEngineDfn:  return L"ENGINE: DeepFilterNet3 \x2014 stronger on steady background noise, but passes short clicks (use DE-CLICK or RNNoise for those).";
     case kHelpBypass:     return L"BYPASS \x2014 pass your mic through untouched with denoising off. Click to toggle (A/B your setup).";
     case kHelpLatency:    return L"LATENCY \x2014 audio buffer depth in frames (1 frame = 10 ms audio; buffered delay \x2248 frames \x00D7 5 ms). Higher tolerates glitches better but adds delay. Applying restarts the audio engine (brief dropout).";
-    case kHelpLowLatency: return L"LOW LATENCY \x2014 run RNNoise at its native \x223C 0 ms engine delay (drops the \x223C 30 ms DFN3 alignment pin). Switching to DFN3 later causes a one-time timing shift. Toggling restarts the audio engine (brief dropout).";
+    case kHelpLowLatency: return L"LOW LATENCY \x2014 run RNNoise at its native 20 ms engine delay instead of matching DeepFilterNet3\x2019s 30 ms (saves 10 ms). Switching to DFN3 later causes a one-time timing shift. Toggling restarts the audio engine (brief dropout).";
     default:              return L"Hover a slider or control to see what it does and how to use it.";
   }
 }
