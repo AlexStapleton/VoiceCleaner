@@ -5,7 +5,7 @@
 #include <pmmintrin.h>   // _MM_SET_DENORMALS_ZERO_MODE
 namespace vc {
 MmcssThread::MmcssThread() {
-  // Denormal guard (blueprint §9.5): flush-to-zero + denormals-are-zero for this thread's SSE math.
+  // Denormal guard: flush-to-zero + denormals-are-zero for this thread's SSE math.
   // In silence the IIR state (DC blocker, HPF, declicker/AGC envelopes, RNNoise GRU) decays into the
   // denormal range, where each op costs ~100x; measured ~25x on DC blocker + HPF alone. MXCSR is
   // per-thread, and every audio thread (capture, render, relay) constructs this first, so setting it

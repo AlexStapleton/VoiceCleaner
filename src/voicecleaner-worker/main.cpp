@@ -12,6 +12,7 @@
 #include <shellapi.h>   // CommandLineToArgvW
 #include "com_guard.h"
 #include "device_enumerator.h"
+#include "utf8.h"
 #include "config.h"
 #include "bridge.h"
 #include "wasapi_capture.h"
@@ -22,7 +23,6 @@
 static std::atomic<bool> g_stop{false};
 static BOOL WINAPI ctrlHandler(DWORD) { g_stop.store(true); return TRUE; }
 
-static std::wstring widen(const std::string& s) { return std::wstring(s.begin(), s.end()); } // ASCII device IDs
 
 // Record path: capture the configured capture device (K688) to a 48 kHz mono PCM16 WAV for N
 // seconds with NO processing/render/engine/relay. Mirrors the bridge's device resolution +
@@ -33,7 +33,7 @@ static int runRecord(const vc::Config& cfg, const std::string& recordPath, int s
     return 1;
   }
   vc::DeviceEnumerator e;
-  IMMDevice* capDev = e.resolve(widen(cfg.captureDeviceId));
+  IMMDevice* capDev = e.resolve(vc::utf8ToWide(cfg.captureDeviceId));
   if (!capDev) {
     std::fprintf(stderr, "error: could not resolve capture device '%s' (check ID via --list-devices)\n",
                  cfg.captureDeviceId.c_str());
@@ -100,9 +100,7 @@ static std::string configPathFromWideCommandLine() {
   std::string out;
   for (int i = 1; i + 1 < n; ++i) {
     if (std::wcscmp(wargv[i], L"--config") != 0) continue;
-    const wchar_t* w = wargv[i + 1];
-    const int len = WideCharToMultiByte(CP_UTF8, 0, w, -1, nullptr, 0, nullptr, nullptr);
-    if (len > 1) { out.resize((size_t)len - 1); WideCharToMultiByte(CP_UTF8, 0, w, -1, out.data(), len, nullptr, nullptr); }
+    out = vc::wideToUtf8(wargv[i + 1]);
     break;
   }
   LocalFree(wargv);
@@ -154,7 +152,7 @@ int main(int argc, char** argv) {
     SetConsoleCtrlHandler(ctrlHandler, TRUE);
     if (!bridge.start()) return 1;
 
-    // §8.5 command channel: a named-pipe server dispatching worker-control commands (params,
+    // Command channel: a named-pipe server dispatching worker-control commands (params,
     // engine selection via SetParams.engine, shutdown). Must outlive the main loop; stopped
     // explicitly below (its destructor also calls stop(), which is safe/idempotent).
     vc::ipc::PipeServer pipe;
@@ -164,8 +162,6 @@ int main(int argc, char** argv) {
           bridge.params().publish(c.params);
           bridge.request_engine((int)c.params.engine);   // lean: install-on-demand + crossfade; warm: instant crossfade; passthrough: no-op
           break;
-        case vc::ipc::CmdType::SetWarmStandby:
-          break;   // deferred: toggling warm-standby requires a pipeline rebuild; not yet wired
         case vc::ipc::CmdType::ResetCounters:
           bridge.reset_counters();   // zero dropout/frame-time/ring-high-water for a clean measurement window
           break;
@@ -182,7 +178,7 @@ int main(int argc, char** argv) {
       }
     });
 
-    // Interim warm-standby switch trigger (NOT the §8.5 command channel): a non-RT stdin
+    // Interim warm-standby switch trigger (NOT the command channel): a non-RT stdin
     // reader that maps 1->engine 0 (RNNoise), 2->engine 1 (DFN3). Only spawned when
     // --dev-keys is passed; normal runs never start this thread. Blocking on std::cin, so on
     // shutdown we set g_stop and detach (join would block until a keypress).

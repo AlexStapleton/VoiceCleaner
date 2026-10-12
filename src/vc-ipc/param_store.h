@@ -3,7 +3,7 @@
 #include <cstdint>
 #include "params.h"
 namespace vc::ipc {
-// Double-buffered parameter snapshot with an atomic index flip (blueprint §8.3).
+// Double-buffered parameter snapshot with an atomic index flip.
 // Writer (non-RT command thread) calls publish(); reader (RT thread) calls snapshot() wait-free.
 //
 // Invariant: single-writer. Only one thread may ever call publish(); concurrent publish()

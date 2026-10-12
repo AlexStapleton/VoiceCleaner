@@ -2,7 +2,7 @@
 #include <cstddef>
 #include <vector>
 namespace vc {
-// Voice-safe transient/click suppressor (design §3). Time-domain: HF-emphasis -> fast/slow envelopes ->
+// Voice-safe transient/click suppressor. Time-domain: HF-emphasis -> fast/slow envelopes ->
 // crest detection -> look-ahead gain duck whose depth scales with (1 - vad). RT-safe: no allocation in
 // process(); fixed internal buffers. out must NOT alias in (there is a lookahead delay).
 class Declicker {

@@ -9,9 +9,9 @@
 #include "dry_wet_mix.h"
 #include "frame.h"
 namespace vc {
-// Composes the DSP leaves per blueprint §7.1:
-//   DC blocker -> ENGINE -> high-pass -> VAD-gated AGC -> limiter.
-// Only the DC blocker precedes the engine.
+// Composes the DSP leaves around the engine, per 480-sample frame:
+//   DC blocker -> ENGINE -> wet/dry mix -> high-pass -> declicker -> VAD-gated AGC -> noise gate -> limiter.
+// Only the DC blocker precedes the engine. Slider params ramp (~20 ms) toward their targets.
 class DspChain {
 public:
   struct Config {
@@ -46,10 +46,6 @@ public:
   float currentHpfCutoffHz() const noexcept       { return hpfCur_; }
   float currentAgcTargetDb() const noexcept       { return agcCur_; }
   float currentLimiterCeilingDb() const noexcept  { return limCur_; }
-  float currentMixStrength() const noexcept       { return mixCur_; }
-  float currentDeclickStrength() const noexcept   { return dckCur_; }
-  float currentDeclickVoiceFloor() const noexcept { return declick_.currentVoiceFloor(); }
-  float currentGateStrength() const noexcept      { return gateCur_; }
 private:
   INoiseFilter* engine_;
   DcBlocker dc_;

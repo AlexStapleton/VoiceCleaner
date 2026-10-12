@@ -3,7 +3,6 @@
 namespace vc {
 
 void   Resampler::set_ratio(double ratio) noexcept { ratio_ = ratio; }
-double Resampler::ratio() const noexcept { return ratio_; }
 
 size_t Resampler::process(const float* in, size_t n_in, float* out, size_t out_cap) noexcept {
   if (n_in < 3) return 0;
@@ -42,13 +41,12 @@ size_t Resampler::process(const float* in, size_t n_in, float* out, size_t out_c
   h_[1] = in[n_in - 2];
   h_[2] = in[n_in - 1];
   pos_ -= static_cast<double>(n_in);
-  primed_ = true;
 
   return produced;
 }
 
 void   Resampler::reset() noexcept {
-  ratio_ = 1.0; pos_ = 0.0; h_[0] = h_[1] = h_[2] = 0.0f; primed_ = false;
+  ratio_ = 1.0; pos_ = 0.0; h_[0] = h_[1] = h_[2] = 0.0f;
 }
 
 }

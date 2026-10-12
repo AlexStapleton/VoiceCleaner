@@ -2,7 +2,7 @@
 #include <cstring>
 namespace vc::ipc {
 namespace {
-constexpr uint8_t kMagic[4] = {'V','C','C','1'};
+constexpr uint8_t kMagic[4] = {'V','C','C','2'};
 template <class T> void put(std::vector<uint8_t>& b, const T& v) {
   const auto* p = reinterpret_cast<const uint8_t*>(&v);
   b.insert(b.end(), p, p + sizeof(T));
@@ -30,7 +30,6 @@ std::vector<uint8_t> encode(const Command& c) {
       b.insert(b.end(), c.deviceId.begin(), c.deviceId.end());
       break;
     }
-    case CmdType::SetWarmStandby: put(b, c.flag); break;
     case CmdType::ResetCounters:
     case CmdType::Shutdown: break;
   }
@@ -59,7 +58,6 @@ bool decode(const uint8_t* data, size_t len, Command& out) {
       if (static_cast<size_t>(end - p) < n) return false;
       out.deviceId.assign(reinterpret_cast<const char*>(p), n); p += n; return true;
     }
-    case CmdType::SetWarmStandby: return get(p, end, out.flag);
     case CmdType::ResetCounters:
     case CmdType::Shutdown: return true;
     default: return false;

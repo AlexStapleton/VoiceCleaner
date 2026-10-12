@@ -5,7 +5,7 @@
 // to one set; it was also validated on a causal `_ll` set (hidden 512, lookahead 0/0),
 // removed in v1.5 -- comments below still use it as the lookahead-0 example.
 //
-// Per 480-sample hop, follows the "Host driving contract" in docs/dfn3-progress.md:
+// Per 480-sample hop, follows the "Host driving contract" in docs/dfn3/dfn3-progress.md:
 //   1. Stft::analyze(in480) -> noisy complex spectrum re[481]/im[481].
 //   2. Dfn3Features::process -> feat_erb[32], feat_spec[2*96] (stateful running norm).
 //   3. enc_conv_streaming: rolling window (stateless, negative-index slice) -> e0..e3,c0,emb.
@@ -411,7 +411,6 @@ struct Dfn3Streaming::Impl {
   int hopCount = 0;          // input frames processed since construction/reset
   float lastLsnr = 0.0f;
 
-  bool hopFailed = false;      // true if the most recent hop threw (output was silenced)
   uint64_t failedHops = 0;     // sticky count of silenced hops since construction
   bool needsResync = false;    // set on failure; triggers a reset() before the next hop
   bool warnedFail = false;     // one-time stderr warning has been emitted
@@ -535,7 +534,6 @@ struct Dfn3Streaming::Impl {
     for (auto& v : specHistIm) std::fill(v.begin(), v.end(), 0.0f);
     hopCount = 0;
     lastLsnr = 0.0f;
-    hopFailed = false;
   }
 
   // The per-hop inference. May throw (ORT Run can raise Ort::Exception); the caller
@@ -633,10 +631,8 @@ void Dfn3Streaming::process(const float* in480, float* out480) noexcept {
       p_->needsResync = false;
     }
     p_->process(in480, out480);
-    p_->hopFailed = false;
   } catch (...) {
     std::fill(out480, out480 + kHop, 0.0f);
-    p_->hopFailed = true;
     ++p_->failedHops;
     p_->needsResync = true;
     if (!p_->warnedFail) {
@@ -655,7 +651,6 @@ uint32_t Dfn3Streaming::latencySamples() const noexcept {
   return static_cast<uint32_t>(kHop) * static_cast<uint32_t>(1 + p_->latencyFrames);
 }
 float Dfn3Streaming::lastLsnr() const noexcept { return p_->lastLsnr; }
-bool Dfn3Streaming::lastHopFailed() const noexcept { return p_->hopFailed; }
 void Dfn3Streaming::reset() noexcept { p_->reset(); }
 
 void Dfn3Streaming::setAggression(float slider) noexcept {

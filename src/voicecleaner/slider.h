@@ -4,7 +4,7 @@ namespace vc::ui {
 
 enum class SliderFmt { Dbfs, Ratio2, Hz, Db };
 
-// Pure slider model (design §6): value in [min,max], fraction<->value, clamp, formatted label.
+// Pure slider model: value in [min,max], fraction<->value, clamp, formatted label.
 // No pixels — the window maps a click x to a fraction against the track rect and calls setFraction.
 class Slider {
  public:

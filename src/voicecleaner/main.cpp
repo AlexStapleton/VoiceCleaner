@@ -2,6 +2,7 @@
 #include <shlobj.h>          // SHGetKnownFolderPath
 #include <string>
 #include "settings.h"        // vc::Settings
+#include "utf8.h"            // vc::wideToUtf8
 #include "app_window.h"
 #include "tray.h"
 #include "worker_supervisor.h"
@@ -39,17 +40,9 @@ static std::wstring settingsPath(const std::wstring& exeDir) {
   return path;
 }
 
-static std::string toUtf8(const std::wstring& w) {
-  if (w.empty()) return {};
-  int n = WideCharToMultiByte(CP_UTF8, 0, w.data(), (int)w.size(), nullptr, 0, nullptr, nullptr);
-  std::string s(n, '\0');
-  WideCharToMultiByte(CP_UTF8, 0, w.data(), (int)w.size(), s.data(), n, nullptr, nullptr);
-  return s;
-}
-
 int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
   // Same value across processes for the same name — the single-instance broadcast below is caught
-  // by the already-running instance's AppWindow::handle (design note, Task 14).
+  // by the already-running instance's AppWindow::handle.
   g_restoreMsg = RegisterWindowMessageW(L"VoiceCleanerRestore");
 
   // Single instance: if one already runs, broadcast restore and exit.
@@ -64,7 +57,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
 
   const std::wstring dir = moduleDir();
   const std::wstring cfgPath = settingsPath(dir);
-  const std::string cfgUtf8 = toUtf8(cfgPath);   // Settings/toml++ take UTF-8 paths (user names can be non-ASCII)
+  const std::string cfgUtf8 = vc::wideToUtf8(cfgPath);   // Settings/toml++ take UTF-8 paths (user names can be non-ASCII)
 
   UiState state;   // the output name in the status line is set from the device picker (AppWindow)
   WorkerSupervisor sup(dir, cfgPath);

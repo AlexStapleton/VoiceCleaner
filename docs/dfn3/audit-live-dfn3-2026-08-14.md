@@ -43,7 +43,7 @@ self-consistent," not "the output is correct," and not "the output is good."
 ## P1 — Correctness & quality validation (HIGH)
 
 **1.1 The shipped `_ll` model has no external ground truth.** The only authoritative check
-(r=0.9946 vs the official `deep-filter` binary, `docs/dfn3-validation.md`) is for the **standard**
+(r=0.9946 vs the official `deep-filter` binary, `docs/dfn3/dfn3-validation.md`) is for the **standard**
 model `models/dfn3`, which is **not what ships live** (`bridge.cpp:45` loads `models/dfn3-ll`). The
 `deep-filter` 0.5.6 binary bundles the standard weights, so it cannot sample-match `_ll`.
 → Validate `_ll` against DeepFilterNet's Python with the `_ll` checkpoint, or exported golden `.npz`

@@ -69,7 +69,7 @@ PollResult WorkerSupervisor::poll(uint64_t nowMs) {
 }
 
 bool WorkerSupervisor::send(const vc::ipc::Command& c) {
-  return vc::ipc::PipeClient::send(pipeName_, c);   // failure only corroborates death (design §10)
+  return vc::ipc::PipeClient::send(pipeName_, c);   // failure only corroborates death; poll() decides
 }
 
 bool WorkerSupervisor::sendSelectCapture(const std::string& id, double driftSeedPpm) {

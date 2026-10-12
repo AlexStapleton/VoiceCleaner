@@ -22,7 +22,6 @@ public:
   void process(const float* in480, float* out480) noexcept;  // exactly 480 in/out
   uint32_t latencySamples() const noexcept;                  // 1440 for models/dfn3
   float lastLsnr() const noexcept;
-  bool lastHopFailed() const noexcept;    // true if the last process() hop threw (silenced)
   uint64_t failedHops() const noexcept;   // sticky count of silenced hops since construction
   // reset() reallocates (ring + ORT re-bind) -- NOT real-time-safe; call only off the audio
   // thread (e.g. before streaming starts). process() is the RT-safe hot path.

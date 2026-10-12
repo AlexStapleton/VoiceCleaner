@@ -18,7 +18,6 @@ public:
   bool start(IMMDevice* dev, SampleCb onSamples, ErrorCb onError);  // false on setup failure
   void stop();
   ~WasapiCapture();
-  int channels() const { return channels_; }
   uint32_t bufferFrames() const { return bufferFrames_; }   // shared capture buffer; latency input
 private:
   void run();

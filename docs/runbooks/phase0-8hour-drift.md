@@ -1,3 +1,8 @@
+> **Historical (Phase 0, 2026-08).** `phase0-app.exe` and the flat `drift.toml` format no longer exist.
+> The equivalent today is a console run of the worker:
+> `voicecleaner-worker.exe --capture <id> --render <id> --ring 512 --csv drift.csv`
+> (`--list-devices` prints the ids; the ring is now capped at 512 frames ≈ 2.5 s).
+
 # Phase 0 — 8-Hour Zero-Dropout & Clock-Drift Acceptance Run
 
 The Phase 0 acceptance test. Proves the pass-through bridge holds **zero dropouts over a full

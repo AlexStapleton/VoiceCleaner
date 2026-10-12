@@ -18,7 +18,7 @@ public:
 
   void     ProcessFrame(const float* in, float* out) noexcept override;  // 480 samples
   float    LastVadProbability() const noexcept override { return vad_; }
-  void     SetAggression(float) noexcept override {}   // RNNoise has no native aggression; no-op for now
+  void     SetAggression(float) noexcept override {}   // RNNoise has no aggression control (STRENGTH is the wet/dry mix in DspChain)
   uint32_t AlgorithmicDelaySamples() const noexcept override { return 0; }  // RNNoise adds no extra look-ahead beyond the frame
 
 private:

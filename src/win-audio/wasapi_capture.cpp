@@ -1,6 +1,5 @@
 #include "wasapi_capture.h"
 #include <windows.h>
-#include <avrt.h>
 #include <cstdint>
 #include "mmcss_thread.h"
 namespace vc {

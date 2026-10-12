@@ -2,7 +2,7 @@
 #include <cstdint>
 namespace vc::ui {
 
-// Pure auto-respawn policy (design: Workstream C3). Fed the supervisor's per-tick status, it decides
+// Pure auto-respawn policy. Fed the supervisor's per-tick status, it decides
 // whether to leave the worker down, respawn it now (bounded backoff), or give up. Windows-free +
 // deterministic (time is an argument), so it is fully unit-testable.
 //

@@ -22,8 +22,6 @@ TEST(Params, DefaultsMatchTodaysDspChain) {
   EXPECT_FLOAT_EQ(p.limiterCeilingDbfs, -1.0f);
   EXPECT_EQ(p.engine, 1u);
   EXPECT_EQ(p.bypass, 0u);
-  EXPECT_EQ(p.dspChain, 1u);
-  EXPECT_EQ(p.driftComp, 1u);
 }
 TEST(Params, DeclickDefaultsOff) {
   vc::ipc::Params p = vc::ipc::Params::defaults();

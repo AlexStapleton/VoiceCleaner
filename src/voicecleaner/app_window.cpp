@@ -5,6 +5,7 @@
 #include <windowsx.h>   // GET_X_LPARAM / GET_Y_LPARAM
 #include <dwmapi.h>     // DwmSetWindowAttribute (dark, color-matched title bar)
 #include <string>
+#include "utf8.h"
 #include <vector>
 
 #pragma comment(lib, "d2d1.lib")
@@ -29,16 +30,10 @@ static const int  kClientW = 460;   // fixed client width; height flexes with co
 static const UINT kTimerId = 1;
 static const float kRowH = 34.0f;   // dropdown row height
 // Cached once: the same value is returned for the same name across processes, so main.cpp's
-// single-instance broadcast lands here (design note, Task 14).
+// single-instance broadcast lands here.
 static const UINT kRestoreMsg = RegisterWindowMessageW(L"VoiceCleanerRestore");
 
-static std::wstring toW(const std::string& s) {
-  if (s.empty()) return L"";
-  int n = MultiByteToWideChar(CP_UTF8, 0, s.data(), (int)s.size(), nullptr, 0);
-  std::wstring w(n, L'\0');
-  MultiByteToWideChar(CP_UTF8, 0, s.data(), (int)s.size(), w.data(), n);
-  return w;
-}
+static std::wstring toW(const std::string& s) { return vc::utf8ToWide(s); }
 
 AppWindow::AppWindow(HINSTANCE hInst, WorkerSupervisor* sup, UiState* state)
     : hInst_(hInst), sup_(sup), state_(state) {}
@@ -642,7 +637,7 @@ void AppWindow::showRestore() {
 }
 
 void AppWindow::tick() {
-  if (state_->statusKind() == StatusKind::NoConfig && !spawned_) {   // no worker yet: show pickers, don't poll (design §8)
+  if (state_->statusKind() == StatusKind::NoConfig && !spawned_) {   // no worker yet: show pickers, don't poll
     if (tray_) tray_->update(*state_);
     return;
   }
@@ -658,13 +653,13 @@ void AppWindow::tick() {
       flushParams(/*force=*/false);      // retry any value whose earlier send failed or was throttled
     }
   }
-  // Auto-respawn on a post-ready death (e.g. device loss); launch failures do not loop (design C3).
+  // Auto-respawn on a post-ready death (e.g. device loss); launch failures do not loop.
   if (respawn_.onTick(r.alive, r.ready, !r.launchFailure, nowMs) == RespawnPolicy::Action::Respawn) {
     pushedTuning_ = false;             // re-push the seeded tuning once the fresh worker is ready
     sup_->startOrAttach();
   }
   if (tray_) tray_->update(*state_);
-  // F5: only repaint when a paint-relevant input actually changed. All tick-driven visuals derive
+  // Only repaint when a paint-relevant input actually changed. All tick-driven visuals derive
   // from the telemetry snapshot (keyed by seq, which bumps ~1 Hz on each aggregate publish), the
   // status kind, or the respawn attempt count. Interaction repaints happen on their own WM events.
   const uint32_t seq = r.alive ? r.telemetry.seq : 0u;

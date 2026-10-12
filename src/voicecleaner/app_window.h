@@ -46,7 +46,7 @@ class AppWindow {
   void refreshDevices();                 // enumerate WASAPI devices + seed picker active from settings
   D2D1_RECT_F overlayRect() const;       // the open dropdown's bounding rect
   int  overlayHit(int x, int y) const;   // row index under (x,y) in the open overlay, or -1
-  void applyPick(PickerKind k, size_t rowIndex);   // persist + spawn/switch (Task 9)
+  void applyPick(PickerKind k, size_t rowIndex);   // persist + spawn/switch
   Slider& sliderByIndex(int i);
   D2D1_RECT_F& trackByIndex(int i);
   int  trackHit(int x, int y) const;               // slider index whose track band contains (x,y), or -1
@@ -55,7 +55,7 @@ class AppWindow {
   void setSliderFromX(int i, int x);               // set slider i's value from click/drag x
   bool aggressionEnabled() const;                  // false when active engine is RNNoise
   vc::ipc::Params applySlider(int i);              // push slider i's value into UiState -> Params
-  void persistTuning();                            // write the active profile on drag-end (Task 6)
+  void persistTuning();                            // write the active profile on drag-end
   void seedFromActiveProfile();                    // load the active mic's tuning into sliders + UiState
   void respawnWorker();                            // full stop + fresh spawn so ring_frames is re-read
   void toggleLowLatency();                          // flip [global].low_latency, persist, respawn
@@ -79,7 +79,7 @@ class AppWindow {
   RespawnPolicy respawn_;  // auto-respawn-with-backoff on post-ready worker death (device loss)
   ParamOutbox outbox_;     // newest Params not yet delivered to the worker (throttle + retry, see param_outbox.h)
 
-  // F5: gate the WM_TIMER repaint. The worker publishes telemetry (meter + all aggregates) only
+  // Gate the WM_TIMER repaint. The worker publishes telemetry (meter + all aggregates) only
   // ~1 Hz, so a fixed 10 Hz repaint drew the same pixels 9 times out of 10. Repaint from a tick
   // only when a paint-relevant input changed: telemetry seq advanced, the status kind changed, or
   // the respawn attempt count changed. Interaction (hover/drag/clicks/pickers) still invalidates on

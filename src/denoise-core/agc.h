@@ -8,7 +8,7 @@ public:
                   float maxGainDb=18.0f; float minGainDb=-10.0f; float fs=48000.0f; };
   explicit Agc(const Config& c);
   // Process n samples. When vadActive is false, the gain is FROZEN (no adaptation) — prevents
-  // hunting up during pauses (blueprint §7.1). out may alias in.
+  // hunting up during pauses. out may alias in.
   void  process(const float* in, float* out, size_t n, bool vadActive) noexcept;
   float currentGainDb() const noexcept;
   void setTargetDb(float db) noexcept { targetLin_ = std::pow(10.0f, db / 20.0f); }

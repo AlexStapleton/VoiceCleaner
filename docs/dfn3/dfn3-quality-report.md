@@ -113,10 +113,10 @@ samples (−10.00 ms).
 - **`deep-filter` 0.5.6 binary: NOT present.** Searched the repo and
   Downloads/Desktop/tools/bin; not found. So the standard-pipeline re-confirmation
   (expected r ≈ 0.99) and any external `_ll` reference could not be produced this
-  run. The prior standard-DFN3 validation (r = 0.9946, `docs/dfn3-validation.md`)
+  run. The prior standard-DFN3 validation (r = 0.9946, `docs/dfn3/dfn3-validation.md`)
   stands as the external anchor for the shared DSP machinery `_ll` reuses.
 - **`_ll` model reference:** even if the binary were present, `deep-filter` ships
-  the STANDARD DFN3 weights; per `docs/dfn3-validation.md` it exposes no
+  the STANDARD DFN3 weights; per `docs/dfn3/dfn3-validation.md` it exposes no
   model/tar flag to load the `_ll` split. So a true external `_ll` reference is
   **not obtainable from that tool** regardless. The `_ll` path remains validated
   only internally (streaming ≡ whole-utterance, r = 1.0) against our own
