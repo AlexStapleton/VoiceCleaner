@@ -20,9 +20,9 @@ Recent releases:
   cleanup pass (dead code, retired `models/dfn3-ll`, repo layout, `app_window` refactor). Review:
   `docs/superpowers/notes/2026-10-12-cleanup-review.md`.
   Also ONNX Runtime 1.28.0 → 1.28.3 (patch release: memory-safety fixes; DFN3 only).
-- **v1.5.1** — settings back next to the exe (user preference: portable single folder; the zip still
-  ships no `settings.toml`, so updates can't reset them); a v1.5 `%LOCALAPPDATA%` file is moved back
-  once. Help strip sizes itself to the longest help text (the v1.4 MAX BOOST text spilled into the footer).
+- **v1.5.1** — help strip sizes itself to the longest help text (the v1.4 MAX BOOST text spilled into
+  the footer). Settings stay in `%LOCALAPPDATA%\VoiceCleaner` (briefly moved back next to the exe,
+  then kept in AppData at the user's choice).
 
 Worker developer flags (console run): `--list-devices`, `--config <settings.toml>`, `--capture/--render
 <id>`, `--ring <4..512>`, `--csv <path>` (drift CSV for `tools/analyze_drift.py`), `--record <wav>

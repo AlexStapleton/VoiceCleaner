@@ -57,7 +57,7 @@ TEST(Settings, RingFramesIsClampedOnLoad) {
 }
 
 TEST(Settings, SaveAndLoadUnderNonAsciiPath) {
-  // Paths are UTF-8: the install folder (or the user name in it) can be non-ASCII.
+  // Paths are UTF-8: %LOCALAPPDATA% contains the Windows user name, which can be non-ASCII.
   namespace fs = std::filesystem;
   const fs::path dir = fs::temp_directory_path() / fs::path(u8"vc_set\u00E9tings_\u00FC");
   fs::create_directories(dir);

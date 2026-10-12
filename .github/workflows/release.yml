@@ -56,8 +56,8 @@ jobs:
           $src = "build/src/voicecleaner/Release"
           $pkg = "VoiceCleaner-$ver-win-x64"
           New-Item -ItemType Directory -Path $pkg | Out-Null
-          # No settings.toml: the app creates it next to the exe on first run, so unzipping an update
-          # over an install never overwrites (resets) the user's settings.
+          # No settings.toml: the app keeps per-user settings in %LOCALAPPDATA%\VoiceCleaner and
+          # creates them on first run, so unzipping an update over an install never resets them.
           foreach ($f in 'voicecleaner.exe','voicecleaner-worker.exe','onnxruntime.dll') {
             if (-not (Test-Path "$src/$f")) { throw "missing build output: $src/$f" }
             Copy-Item "$src/$f" $pkg

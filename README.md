@@ -19,9 +19,10 @@ background noise and keyboard/mouse clicks, levels your voice, and plays the res
    [Releases](https://github.com/AlexStapleton/VoiceCleaner/releases) and unzip it anywhere.
 3. Run `voicecleaner.exe`, choose your **Microphone** and set **Output** to **CABLE Input**.
 
-To update, unzip the new version over the old folder. Your settings are in `settings.toml` next to
-`voicecleaner.exe`; the release zip doesn't include one, so updating never resets them. (v1.5 kept
-settings in `%LOCALAPPDATA%\VoiceCleaner`; v1.5.1 moves them back next to the exe automatically.)
+To update, unzip the new version over the old folder. Settings are kept separately in
+`%LOCALAPPDATA%\VoiceCleaner\settings.toml`, so updating never resets them. Versions before 1.5
+kept a `settings.toml` next to the exe. 1.5 copies it over once on first run; after that the old
+file can be deleted.
 
 The microphone must run at 48 kHz (set it in Windows Sound settings → the device → Advanced).
 Closing the window keeps VoiceCleaner running in the tray; use **Quit** to stop it.
