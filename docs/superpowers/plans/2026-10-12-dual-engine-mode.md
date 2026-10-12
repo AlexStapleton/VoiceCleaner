@@ -40,21 +40,22 @@ Spec Part 0.
 `tests/denoise-core/test_dsp_chain.cpp`, `tests/denoise-core/test_dynamic_engine.cpp` (pins only if
 they reference RNNoise's 0), `tests/transport-core/test_latency.cpp`.
 
-- [ ] **Step 1: Failing test — measured lag equals reported delay.** In `test_rnnoise.cpp`: feed 2 s of
-  deterministic white noise at -20 dBFS through `RnnoiseFilter` frame by frame (RNNoise passes
-  broadband noise partially; use a speech-like harmonic signal if the output is gated to zero —
-  a 200 Hz sawtooth with vibrato works), cross-correlate output vs input over lags 0..2400, assert
-  `argmax == filter.AlgorithmicDelaySamples()`. Fails today (960 vs 0).
-- [ ] **Step 2: Failing test — STRENGTH 0.5 on RNNoise has no comb notch.** In `test_dsp_chain.cpp`:
-  DspChain with `RnnoiseFilter`, `mixStrength = 0.5`, input = the same harmonic signal. A 20 ms
-  dry/wet misalignment comb-filters (notches every 50 Hz), cancelling part of the harmonics; assert
-  the steady-state output RMS at 0.5 is ≥ 0.9 × the RMS at `mixStrength = 1` and that the
-  cross-correlation of the output with the input peaks at a single lag (no second peak 960 away).
-- [ ] **Step 3: Implement.** `constexpr uint32_t kRnnoiseDelaySamples = 960;` (comment: one analysis
-  hop of look-back + one synthesis hop, `denoise.c` `delayed_X`) returned by
-  `AlgorithmicDelaySamples()`. `bridge.cpp`: `dc.delaySamples[0] = kRnnoiseDelaySamples` (ask the
-  loaded leaf instead of hard-coding where possible). Update `latency.h` comment and `test_latency`
-  expectations (RNNoise 960 = 20 ms).
+- [ ] **Step 1: Failing tests — measured lag equals reported delay.** In `test_rnnoise.cpp`:
+  (a) deterministic: calls 0 and 1 output exact zeros, and a noise burst confined to input frame k
+  first produces output energy at call k+2; (b) cross-correlate output vs input over lags 0..2400 for
+  an **aperiodic** pitch glide (100 -> 300 Hz harmonic sweep at -20 dBFS; a fixed-pitch probe has equal
+  peaks every period and 960 is a multiple of common periods) and assert `argmax == 960`.
+  Change the existing `EXPECT_EQ(f.AlgorithmicDelaySamples(), 0u)` (test_rnnoise.cpp:30) to 960.
+- [ ] **Step 2: Failing test — STRENGTH alignment.** Test `DryWetMix(f.AlgorithmicDelaySamples())` +
+  `RnnoiseFilter` directly (not the full DspChain — its HPF/AGC/gate would mask the effect): glide
+  input, strength 0.5; the output/input cross-correlation has a single peak (no second peak 960
+  samples from the first). Fails while the reported delay is 0.
+- [ ] **Step 3: Implement.** `constexpr uint32_t kRnnoiseDelaySamples = 960;` (comment: input frame k
+  leaves at call k+2 — `denoise.c` synthesizes `delayed_X`) returned by `AlgorithmicDelaySamples()`.
+  `bridge.cpp` pins: default `{960, 1440}`, LOW LATENCY **`{960, 960}`** (all pins equal => nothing
+  padded, reported 960; NOT `{960, 0}`, which would pad DFN3 by 960 and misalign STRENGTH by 1440).
+  Add a `test_dynamic_engine` case: equal pins pad nothing and report the pin. Update `latency.h`
+  comment and `test_latency` (RNNoise 960 = 20 ms).
 - [ ] **Step 4: Run all tests, MinGW syntax-check `bridge.cpp`.**
 - [ ] **Step 5: Commit** `fix(rnnoise): report the real 960-sample delay (STRENGTH alignment, -20 ms in default mode)`.
 
@@ -62,32 +63,36 @@ they reference RNNoise's 0), `tests/transport-core/test_latency.cpp`.
 
 Spec Part 1.
 
-**Files:** create `src/denoise-core/input_level_normalizer.{h,cpp}`, modify
-`src/denoise-core/dfn3_stream_adapter.{h,cpp}`, `src/denoise-core/CMakeLists.txt`; test
-`tests/denoise-core/test_input_level_normalizer.cpp` (+ `tests/denoise-core/CMakeLists.txt`).
+**Files:** create `src/denoise-core/input_level_normalizer.{h,cpp}`,
+`src/denoise-core/pre_gain_stage.{h,cpp}`, `src/denoise-core/delay_line.h` (pulled forward from Task 5),
+modify `src/denoise-core/dfn3_stream_adapter.{h,cpp}`, `src/denoise-core/CMakeLists.txt`; tests
+`tests/denoise-core/test_input_level_normalizer.cpp`, `test_pre_gain_stage.cpp`, `test_delay_line.cpp`
+(+ `tests/denoise-core/CMakeLists.txt`). The DFN3 adapter itself needs ONNX Runtime and can't be
+unit-tested on Linux, so all logic lives in the two pure units.
 
-- [ ] **Step 1: Failing tests for `InputLevelNormalizer`** (pure; `Config{targetDbfs=-25, maxGainDb=30,
-  releaseDbPerSec=6, slewDbPerSec=3, silenceDbfs=-80}`; `float process(const float* frame480)`
-  returns the linear gain to apply to this frame):
-  - steady -45 dBFS peaks -> gain converges to +20 dB (±0.5) and never exceeds the slew rate per frame;
-  - -15 dBFS input -> gain stays 0 dB (never attenuates);
-  - -60 dBFS -> capped at +30 dB;
-  - digital silence after speech -> gain holds (does not ramp to +30);
-  - a single loud click in quiet input -> level jumps (instant attack) and gain drops, then recovers
-    no faster than the release rate.
-- [ ] **Step 2: Implement** the normalizer (peak-hold envelope in dB, target/clamp, slew limit,
-  silence hold; no allocation, no `exp/log` per sample — per-frame `log10` of the frame peak is fine).
-- [ ] **Step 3: Wire into `Dfn3StreamAdapter::ProcessFrame`:** `g = norm_.process(in)`; scale a
-  scratch copy of the input by `g`; run the model; scale the output by `1/g` using the gain that was
-  applied to the *same* audio (the model output lags 1440 samples = 3 frames: keep a 3-entry gain
-  history and divide by the gain from 3 frames ago; if the gain is slewing, ramp `1/g` per sample
-  between consecutive history entries). Warm-up hops run at unity. Add a unit test with a fake
-  pass-through "model" path if the adapter allows injection; otherwise verify in Step 4.
-- [ ] **Step 4: Harness validation (Linux, `scratchpad/dfn3exp`):** rebuild against the modified
+- [ ] **Step 1: Failing tests for `DelayLine`** (fixed delay N incl. 0; reset zeroes; per-sample push).
+- [ ] **Step 2: Failing tests for `InputLevelNormalizer`** (pure; `Config{targetDbfs, maxGainDb=30,
+  windowFrames=300, percentile=0.75, silenceDbfs=-80, slewDbPerSec=3, fastSlewDbPerSec=30,
+  fastPhaseSec=2}`; `float process(const float* frame480)` returns this frame's target gain in dB):
+  - steady input at level L -> gain converges to `T - L` (±0.5 dB); never negative; capped at +30;
+  - sparse loud clicks (≤ 20% of frames) on quiet input don't move the gain by more than 1 dB
+    (75th-percentile robustness — the failure mode of a peak-hold level);
+  - digital silence after speech -> gain holds (silent frames are ignored);
+  - slew: ≤ 30 dB/s during the first 2 s, ≤ 3 dB/s after.
+- [ ] **Step 3: Failing tests for `PreGainStage`** (wraps a `model(const float* in, float* out)` with a
+  known delay D=1440): ramps the input gain per sample from the previous to the new frame gain;
+  multiplies the model output by `1/g` taken from a D-sample per-sample gain delay line. With an
+  identity model of delay D and a gain that changes every frame, output == input delayed by D to
+  float precision.
+- [ ] **Step 4: Implement** the three units (no allocation after construction, no per-sample
+  transcendental calls — dB<->linear once per frame, linear ramp per sample) and wire `PreGainStage`
+  + `InputLevelNormalizer` into `Dfn3StreamAdapter::ProcessFrame` (warm-up hops at unity). Calibrate
+  `targetDbfs` so the -45 dBFS-peak harness clip receives about +20 dB.
+- [ ] **Step 5: Harness validation (Linux, `scratchpad/dfn3exp`):** rebuild against the modified
   adapter; run the -55/-45/-35/-25/-15 clips; acceptance (spec Part 1): click RMS reduction within
   3 dB of the -25 result at every level, -15 no worse than before. Record the table in
   `docs/superpowers/notes/2026-10-12-dual-engine-eval.md` (create).
-- [ ] **Step 5: Commit** `feat(dfn3): automatic input level so DFN3 works on quiet microphones`.
+- [ ] **Step 6: Commit** `feat(dfn3): automatic input level so DFN3 works on quiet microphones`.
 
 ## Task 3: Release v1.5.1 — **coordinator (Opus)**
 
@@ -111,19 +116,17 @@ load: unknown -> `"rnnoise"`), `config.h` comment; test `tests/transport-core/te
   string table).
 - [ ] Commit `feat(settings): central engine ids; validate engine on load`.
 
-## Task 5: `INoiseFilter::FailedHops` + `DelayLine` extraction — **Sonnet 5.5**
+## Task 5: `INoiseFilter::failedHops` + `DelayLine` reuse — **Sonnet 5.5**
 
-**Files:** `src/denoise-core/inoise_filter.h`, `dfn3_stream_adapter.{h,cpp}`, new `delay_line.h`,
-`dynamic_engine.{h,cpp}`, `src/voicecleaner-worker/bridge.{h,cpp}`; tests
-`tests/denoise-core/test_delay_line.cpp`, `test_dynamic_engine.cpp`.
+**Files:** `src/denoise-core/inoise_filter.h`, `dfn3_stream_adapter.{h,cpp}`,
+`dynamic_engine.{h,cpp}`, `src/voicecleaner-worker/bridge.{h,cpp}`; test `test_dynamic_engine.cpp`.
 
-- [ ] Failing tests for `DelayLine` (fixed delay N incl. 0; reset zeroes; per-sample `push`).
-- [ ] Implement `DelayLine`; refactor `DynamicEngine::pushDelay` onto it (existing tests stay green).
-- [ ] Add `virtual uint64_t FailedHops() const noexcept { return 0; }`; override in the DFN3 adapter.
-  Bridge reclaim + stop summary use `FailedHops()` (remove the `static_cast` and the
-  `idx == 1` special case; keep the live counter via a `DynamicEngine::failedHops()` that sums
-  resident leaves).
-- [ ] Commit `refactor(engine): DelayLine helper and a uniform FailedHops counter`.
+- [ ] Refactor `DynamicEngine::pushDelay` onto `DelayLine` (from Task 2; existing tests stay green).
+- [ ] Add `virtual uint64_t failedHops() const noexcept { return 0; }` to `INoiseFilter` (the DFN3
+  adapter's existing `failedHops()` becomes the override — one name, no case-only twin).
+  Bridge reclaim + stop summary use `failedHops()` (remove the `static_cast` and the `idx == 1`
+  special case; keep the live counter via a `DynamicEngine::failedHops()` that sums resident leaves).
+- [ ] Commit `refactor(engine): DynamicEngine on DelayLine; uniform failedHops() counter`.
 
 ## Task 6: `DynamicEngine` with three slots — **Sonnet 5.5**
 
@@ -132,10 +135,12 @@ Spec Part 2.
 **Files:** `src/denoise-core/dynamic_engine.{h,cpp}`; `tests/denoise-core/test_dynamic_engine.cpp`.
 
 - [ ] Failing tests (extend the `ProbeEngine` fake to 3 probes): Lean `0 -> 2 -> 1` loads/crossfades/
-  retires correctly; Warm keeps 0 and 1 resident, loads 2 on demand, retires 2 when leaving it, never
-  retires 0/1; `AlgorithmicDelaySamples() == max` of three pins; `requestActive(3)` clamps to 2;
-  mid-fade reswitch with slot 2.
-- [ ] Implement (`kSlots = 3`, arrays, clamp, Warm/Lean residency rule for slot 2).
+  retires correctly; a fade involving slot 2 is **linear** (constant-1.0 input, equal-gain probes ->
+  output stays 1.0 through the fade) while 0<->1 keeps the existing equal-power law; Warm keeps 0 and 1
+  resident, loads 2 on demand, **does not run 0/1 while 2 is active and not fading** (process counts),
+  retires 2 when leaving it, never retires 0/1; `AlgorithmicDelaySamples() == max` of three pins; equal
+  pins pad nothing; `requestActive(3)` clamps to 2; mid-fade reswitch with slot 2.
+- [ ] Implement (`kSlots = 3`, arrays, clamp, fade law by slot pair, Warm residency/run rule for slot 2).
 - [ ] Commit `feat(engine): DynamicEngine supports a third slot`.
 
 ---
@@ -157,8 +162,9 @@ Spec Part 3 (controller).
     3-frame delay) and reaches 1 within `attack`, i.e. **before** the delayed onset frame is emitted;
   - a 100 ms dip below `close` inside speech does not release (hold);
   - after speech ends, release starts after `hold` and falls at the release slope;
-  - `dfn3Failed` forces 0 within the attack time and holds 0 for 1 s;
-  - `|wEnd - wStart|` per frame never exceeds the attack slope × 10 ms;
+  - `dfn3Failed` **snaps** the weight to 0 for that same frame (`wStart = wEnd = 0`: the failing hop's
+    DFN3 output is silence) and holds 0 for 1 s;
+  - otherwise `|wEnd - wStart|` per frame never exceeds the attack slope × 10 ms;
   - values between close and open keep the current state.
 - [ ] Implement (ring of the last 4 VADs, state machine, slew limiter). No allocation.
 - [ ] Commit `feat(dsp): look-ahead VAD blend controller for Dual mode`.
@@ -177,8 +183,8 @@ Spec Part 3 (engine).
   - VAD 0 -> output == 0.5 (RNNoise leg); sustained VAD 1 -> output == 0.25 (DFN3 leg); during the
     ramp the output is the linear mix of the two (per sample, no frame step);
   - `LastVadProbability()` == RNNoise fake's VAD; `SetAggression` reaches only the DFN3 fake;
-    `FailedHops()` == DFN3 fake's; a failed-hop increment drives the weight to 0;
-  - `currentWeight()` matches the ramp end.
+    `failedHops()` == DFN3 fake's; a failed-hop increment makes that frame's output == the RNNoise leg;
+  - `currentWeight()` (backed by `std::atomic<float>`, read from the telemetry thread) matches the ramp end.
 - [ ] Implement (loader `std::function<std::unique_ptr<INoiseFilter>(int which)>` for the two leaves;
   two `DelayLine`s; per-sample linear ramp; scratch buffers sized at construction).
 - [ ] Commit `feat(engine): DualEngine — RNNoise in gaps, DFN3 during speech`.
@@ -194,9 +200,11 @@ Spec Part 4.
 **Files:** `src/voicecleaner-worker/bridge.{h,cpp}`, `main.cpp`; `src/vc-ipc/telemetry.h`;
 `tests/win-ipc/test_telemetry_shm.cpp`; `src/offline-cli/main.cpp`.
 
-- [ ] Telemetry: append `float dualWeight;` (test round trip with `activeEngine = 2`, `dualWeight = 0.75`).
+- [ ] Telemetry: add `float dualWeight;` after `agcGainDb` (it occupies existing tail padding:
+  `static_assert(sizeof(Telemetry) == 104)`); test round trip with `activeEngine = 2`, `dualWeight = 0.75`.
 - [ ] Bridge: Dynamic branch for `engineIndex(cfg.engine)` (rnnoise/dfn3/dual); loader `idx 2` builds
-  `DualEngine` (RNNoise + `Dfn3StreamAdapter("models/dfn3")`); pins `{960, ll?0:1440, ll?0:1440}`;
+  `DualEngine` (RNNoise + `Dfn3StreamAdapter("models/dfn3")`); pins default `{960, 1440, 1440}`,
+  LOW LATENCY `{960, 960, 960}`;
   publish `dualWeight` (via `DynamicEngine` -> active leaf, 0 otherwise).
 - [ ] `--dev-keys`: `3` -> Dual. `offline-cli --engine dual`.
 - [ ] MinGW syntax-check worker + offline-cli; Windows CI green.
@@ -263,6 +271,10 @@ speech-band retention, LSD, HF transient reduction), `README.md`).
 - **RT-safety:** every new per-frame path is allocation- and lock-free; DFN3 loads off the RT thread
   through the existing Lean loader.
 - **Known limitation kept:** LOW LATENCY relaxes the cross-engine pin for DFN3 and Dual (one-time timing
-  shift on switch), as DFN3 does today; STRENGTH alignment in that combination stays approximate.
+  shift on switch), as DFN3 does today; STRENGTH in that combination is 480 samples off (was 1440).
+- **Review (Sonnet, 2026-10-12) folded in:** LOW LATENCY pins all equal (not `{960, 0}`), linear fade
+  for slot-2 transitions, Warm doesn't run 0/1 under Dual, exact per-sample pre-gain undo via a delay
+  line in a Linux-testable `PreGainStage`, percentile (not peak-hold) level with a fast start, failure
+  snap, `failedHops` naming, atomic weight, telemetry `sizeof` unchanged, aperiodic test probes.
 - **Model split:** Sonnet 5.5 for Tasks 1, 2, 5–9, 11 and reviews; Haiku 5.5 for Tasks 4, 10, docs;
   Opus coordinates, reviews each diff, and owns release and user-facing decisions.
