@@ -77,7 +77,8 @@ class AppWindow {
   Control hitControl(int x, int y) const;
   int  trackHit(int x, int y) const;       // slider whose track band contains (x,y), or -1
   int  helpTargetAt(int x, int y) const;   // HelpTarget / SliderId under (x,y)
-  std::wstring helpText() const;           // plain-English "what + how" for helpHot_
+  static std::wstring helpTextFor(int target);   // plain-English "what + how" for a HelpTarget / SliderId
+  float measureHelpHeight() const;         // help-strip height that fits the longest help text
   D2D1_RECT_F overlayRect() const;         // the open dropdown's bounding rect
   int  overlayHit(int x, int y) const;     // row index under (x,y) in the open overlay, or -1
 
@@ -146,6 +147,7 @@ class AppWindow {
   int grabbed_ = -1;              // SliderId being dragged, or -1
   std::array<bool, kSliderGroupCount> secOpen_{true, true, true};   // groups expanded? (seeded from settings)
   float contentH_ = 0.0f;         // laid-out client height (drives the window resize); set by layout()
+  float helpH_ = 84.0f;           // help-strip height; create() grows it to fit the longest text
   std::wstring ringEdit_;         // latency box edit buffer (digits); seeded from settings_->ringFrames
   bool ringFocused_ = false;      // latency box has keyboard focus (caret shown)
 

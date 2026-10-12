@@ -22,21 +22,23 @@ static std::wstring moduleDir() {
 
 static bool fileExists(const std::wstring& p) { return GetFileAttributesW(p.c_str()) != INVALID_FILE_ATTRIBUTES; }
 
-// Per-user settings file: %LOCALAPPDATA%\VoiceCleaner\settings.toml. Kept out of the install folder so
-// unzipping an update over it can never overwrite the user's devices and mic profiles (and the app
-// still works from a read-only folder). Local, not roaming: the device IDs are specific to this PC.
-// Versions before 1.5 kept the file next to the exe; it is copied over once, on first run. Falls back
-// to the exe folder if the per-user folder can't be resolved or created.
+// Settings live next to the exe (exeDir\settings.toml), so the app is portable: the whole install is
+// one folder. Updates don't touch the file because the release zip doesn't contain one.
+// v1.5 kept settings in %LOCALAPPDATA%\VoiceCleaner instead; if that file exists it is the newest
+// copy (v1.5 copied the exe-folder file there and saved only there), so move it back once and remove
+// the then-empty folder. If the move fails (e.g. a read-only install folder), keep using it there so
+// nothing is lost.
 static std::wstring settingsPath(const std::wstring& exeDir) {
-  const std::wstring legacy = exeDir + L"\\settings.toml";
+  const std::wstring path = exeDir + L"\\settings.toml";
   PWSTR base = nullptr;
-  std::wstring dir;
-  if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &base))) dir = std::wstring(base) + L"\\VoiceCleaner";
+  std::wstring v15Dir;
+  if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &base))) v15Dir = std::wstring(base) + L"\\VoiceCleaner";
   CoTaskMemFree(base);
-  if (dir.empty()) return legacy;
-  if (!CreateDirectoryW(dir.c_str(), nullptr) && GetLastError() != ERROR_ALREADY_EXISTS) return legacy;
-  const std::wstring path = dir + L"\\settings.toml";
-  if (!fileExists(path) && fileExists(legacy)) CopyFileW(legacy.c_str(), path.c_str(), /*failIfExists=*/TRUE);
+  if (v15Dir.empty()) return path;
+  const std::wstring v15File = v15Dir + L"\\settings.toml";
+  if (!fileExists(v15File)) return path;
+  if (!MoveFileExW(v15File.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED)) return v15File;
+  RemoveDirectoryW(v15Dir.c_str());   // only succeeds if empty; harmless otherwise
   return path;
 }
 

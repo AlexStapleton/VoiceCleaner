@@ -90,9 +90,9 @@ static int runRecord(const vc::Config& cfg, const std::string& recordPath, int s
   return 0;
 }
 
-// argv is in the ANSI code page, which can't represent every path: the UI passes
-// %LOCALAPPDATA%\VoiceCleaner\settings.toml, and the user name in it may be non-ASCII. Re-read the
-// --config value from the UTF-16 command line and return it as UTF-8 ("" if absent).
+// argv is in the ANSI code page, which can't represent every path (the install folder, or a user
+// name in it, may be non-ASCII). Re-read the --config value from the UTF-16 command line and return
+// it as UTF-8 ("" if absent).
 static std::string configPathFromWideCommandLine() {
   int n = 0;
   LPWSTR* wargv = CommandLineToArgvW(GetCommandLineW(), &n);

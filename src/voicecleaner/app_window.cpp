@@ -46,7 +46,8 @@ static const float kHeaderToTrack = 42.0f; // group header -> its first track
 static const float kTrackH = 12.0f;
 static const float kTrackPitch = 44.0f;    // track -> next track
 static const float kCollapsedH = 24.0f;    // a collapsed group's header block
-static const float kHelpH = 84.0f;         // hover help strip
+static const float kHelpMinH = 84.0f;      // hover help strip (grown to fit the longest text)
+static const float kHelpInsetX = 12.0f, kHelpInsetY = 8.0f;   // text inset inside the help strip
 static const float kFooterH = 40.0f;       // Low-latency checkbox + Quit
 static const float kRowH = 34.0f;          // dropdown row height
 static const D2D1_RECT_F kHidden = {-1000, -1000, -1000, -1000};   // collapsed slider tracks
@@ -114,6 +115,8 @@ bool AppWindow::create(const wchar_t* title) {
   wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
   wc.lpszClassName = kClass;
   RegisterClassW(&wc);
+
+  helpH_ = measureHelpHeight();
 
   // Seed slider-group collapse state, then lay out once to learn the initial client height.
   if (settings_)
@@ -241,9 +244,9 @@ void AppWindow::layout(D2D1_SIZE_F sz) {
   rcRingBox_   = D2D1::RectF(kPad, rbTop, kPad + 120, rbTop + kCtlH);        // editable latency box
   rcRingApply_ = D2D1::RectF(right - 100, rbTop, right, rbTop + kCtlH);
   const float yHelp = rbTop + kCtlH + 16.0f;
-  rcHelp_      = D2D1::RectF(kPad, yHelp, right, yHelp + kHelpH);            // hover help strip
+  rcHelp_      = D2D1::RectF(kPad, yHelp, right, yHelp + helpH_);            // hover help strip
   rcRelaunch_  = D2D1::RectF(kPad, yHelp, right, yHelp + kCtlH);             // only when Down (shares the help band)
-  contentH_    = yHelp + kHelpH + kFooterH;                                  // total client height
+  contentH_    = yHelp + helpH_ + kFooterH;                                  // total client height
   rcQuit_      = D2D1::RectF(right - 90, contentH_ - 36, right, contentH_ - 10);
   rcLowLat_    = D2D1::RectF(kPad, contentH_ - 34, kPad + 210, contentH_ - 10);   // footer-left checkbox
 }
@@ -321,7 +324,8 @@ void AppWindow::drawHelpOrRelaunch() {
     label(rlbl, rcRelaunch_, br_.text, centerFmt_);
   } else {
     box(rcHelp_, br_.panel);
-    label(helpText(), D2D1::RectF(rcHelp_.left + 12, rcHelp_.top + 8, rcHelp_.right - 12, rcHelp_.bottom - 8),
+    label(helpTextFor(helpHot_), D2D1::RectF(rcHelp_.left + kHelpInsetX, rcHelp_.top + kHelpInsetY,
+                                             rcHelp_.right - kHelpInsetX, rcHelp_.bottom - kHelpInsetY),
           helpHot_ == kHelpNone ? br_.dim : br_.text, textFmt_);
   }
 }
@@ -444,9 +448,9 @@ int AppWindow::helpTargetAt(int x, int y) const {
   return kHelpNone;
 }
 
-std::wstring AppWindow::helpText() const {
-  if (helpHot_ >= 0 && helpHot_ < kSliderCount) return kSliderSpecs[helpHot_].help;
-  switch (helpHot_) {
+std::wstring AppWindow::helpTextFor(int target) {
+  if (target >= 0 && target < kSliderCount) return kSliderSpecs[target].help;
+  switch (target) {
     case kHelpMic:        return L"MICROPHONE \x2014 the input device being cleaned. Click to choose a different mic.";
     case kHelpOutput:     return L"OUTPUT \x2014 where the cleaned audio is sent (e.g. CABLE Input, which apps pick as your mic). Click to choose.";
     case kHelpEngineRnn:  return L"ENGINE: RNNoise \x2014 lighter, low-latency denoiser. Best at keyboard/mouse clicks \x2014 use this in a clicky room.";
@@ -456,6 +460,27 @@ std::wstring AppWindow::helpText() const {
     case kHelpLowLatency: return L"LOW LATENCY \x2014 run RNNoise at its native \x223C 0 ms engine delay (drops the \x223C 30 ms DFN3 alignment pin). Switching to DFN3 later causes a one-time timing shift. Toggling restarts the audio engine (brief dropout).";
     default:              return L"Hover a slider or control to see what it does and how to use it.";
   }
+}
+
+// The help strip must fit its longest text: lay out every help string at the strip's text width
+// with the strip's font and take the tallest (a fixed height let 5-line texts spill into the footer).
+float AppWindow::measureHelpHeight() const {
+  const float textW = (float)kClientW - 2.0f * kPad - 2.0f * kHelpInsetX;
+  float tallest = 0.0f;
+  auto measure = [&](int target) {
+    const std::wstring s = helpTextFor(target);
+    IDWriteTextLayout* tl = nullptr;
+    if (SUCCEEDED(dwFactory_->CreateTextLayout(s.c_str(), (UINT32)s.size(), textFmt_, textW, 10000.0f, &tl))) {
+      DWRITE_TEXT_METRICS m{};
+      if (SUCCEEDED(tl->GetMetrics(&m)) && m.height > tallest) tallest = m.height;
+      tl->Release();
+    }
+  };
+  for (int i = 0; i < kSliderCount; ++i) measure(i);
+  for (int t = kHelpMic; t <= kHelpBypass; ++t) measure(t);
+  measure(kHelpNone);
+  const float h = tallest + 2.0f * kHelpInsetY + 4.0f;   // + a little air below the last line
+  return h > kHelpMinH ? h : kHelpMinH;
 }
 
 D2D1_RECT_F AppWindow::overlayRect() const {
