@@ -1,8 +1,8 @@
 # Cleanup review — 2026-10-12 (after v1.4)
 
-Read-only review of the whole tree at `914a3c8` (v1.4). Three parallel passes (UI app; worker/transport/IPC;
-DSP/engines/build/repo) plus spot-verification of the high-value claims. Nothing here is changed yet;
-this note records the findings and the proposed batching so decisions can be tracked.
+Review of the whole tree at `914a3c8` (v1.4). Three parallel passes (UI app; worker/transport/IPC;
+DSP/engines/build/repo) plus spot-verification of the high-value claims. All four batches below were
+implemented for v1.5; see "Outcome" at the end for what was done, decided, and deliberately left.
 
 Effort S/M/L, risk low/med/high. ✔ = verified by hand beyond the review pass.
 
@@ -92,3 +92,37 @@ Effort S/M/L, risk low/med/high. ✔ = verified by hand beyond the review pass.
 3. **Dead code & stale comments** — unused API, duplicated helpers, flat schema + drift tomls,
    `Dfn3Offline`, comment refresh, docs/README layout.
 4. **app_window refactor** — SliderId table, split paint/handle, brush caching (higher risk; separate PR).
+
+## Outcome (v1.5)
+
+Decisions (user, 2026-10-12): keep the LATENCY minimum at 4 (1–3 can't hold a reserve frame and
+click); do all four batches; settings move to a per-user folder.
+
+Implemented:
+- Batch 1 — settings in `%LOCALAPPDATA%\VoiceCleaner\settings.toml` (Local, not Roaming: device IDs
+  are per-PC), copied once from the exe folder; UTF-8 paths end to end (UI, `Settings::save` via a
+  `u8string` path, worker re-reads `--config` from the UTF-16 command line); NoConfig text; engine
+  persisted per mic; real output name in the status line; drift CSV only with `--csv`;
+  `clampRingFrames` (4..512) shared by settings load, worker CLI and the LATENCY box; render switch
+  resets drift tracking; old flat config format removed (`Config::load` rejects it).
+- Batch 2 — `models/dfn3-ll`, `Dfn3Offline`, `dfn3-probe`, shipped `settings.toml`,
+  `copy_if_absent.cmake` and unbuilt rnnoise files removed; only DFN3 runtime models copied/zipped;
+  `VC_BUILD_DEV_TOOLS` (default OFF) gates offline-cli; DFN3 scripts in `tools/dfn3/`.
+- Batch 3 — unused API removed; IPC `SetWarmStandby` + Params `dspChain/driftComp/dryTap` removed,
+  command magic VCC1 → VCC2; shared `win-audio/utf8.h`; stale comments fixed; drift tomls deleted;
+  README, docs reorganized (`docs/design`, `docs/research`, `docs/dfn3`), STATUS current-state section.
+- Batch 4 — `slider_table` + tests; AppWindow paint/input split, cached brushes, named layout
+  constants, Control/HelpTarget enums, `quit()`/`startWorker()`.
+
+Deliberately left:
+- `driftSeedPpm` stays in the SelectCaptureDevice payload (UI sends 0 = reset); per-device drift
+  persistence could use it later, and removing it would rewrite the pipe tests for no user gain.
+- Telemetry diagnostics the UI doesn't read; `WorkerState` values other than Running.
+- `UiState::onSet*` setters stay (the slider table points at them; the table test checks each).
+- Archiving old `docs/superpowers` plans/specs (churn without benefit); trimming the STATUS history.
+- Rewriting git history to drop `dfn3-ll` from the pack (would break every clone).
+
+Verification: Linux unit tests (transport-core, vc-ipc, voicecleaner-core, denoise-core) and
+MinGW `-fsyntax-only` on the Windows-only sources; full MSVC build + ctest on GitHub Actions.
+Needs a by-hand check on Windows: window layout/drag/hover unchanged after the refactor, and the
+first-run settings migration from an old install folder.
