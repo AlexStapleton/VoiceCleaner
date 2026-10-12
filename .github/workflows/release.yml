@@ -5,6 +5,8 @@
 #   * push of a version tag (v1.2.0, v1.2.0-rc1, ...)   -> also creates the GitHub Release and attaches
 #     the zip. A tag containing '-' (e.g. -rc1) is published as a PRE-release.
 #   * a release published from the GitHub UI             -> builds that tag and attaches the zip to it.
+#   * manual run with `release_tag` set (e.g. v1.3)      -> builds the selected branch and creates that
+#     tag + GitHub Release on the built commit (no local tag push needed). Pre-release if it contains '-'.
 name: release
 
 on:
@@ -14,6 +16,15 @@ on:
   release:
     types: [published]
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Create a GitHub Release with this tag on the built commit (e.g. v1.3). Leave empty for a build-only run."
+        required: false
+        default: ""
+
+# The tag a run publishes: the pushed/released tag, or the manual release_tag input ('' = build only).
+env:
+  RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || inputs.release_tag || '' }}
 
 permissions:
   contents: write   # create the release + upload the asset
@@ -41,7 +52,7 @@ jobs:
       - name: Package
         shell: pwsh
         run: |
-          $ver = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME } else { "dev-$($env:GITHUB_SHA.Substring(0,7))" }
+          $ver = if ($env:RELEASE_TAG) { $env:RELEASE_TAG } else { "dev-$($env:GITHUB_SHA.Substring(0,7))" }
           $src = "build/src/voicecleaner/Release"
           $pkg = "VoiceCleaner-$ver-win-x64"
           New-Item -ItemType Directory -Path $pkg | Out-Null
@@ -70,9 +81,12 @@ jobs:
           path: ${{ env.PKG_ZIP }}
 
       - name: Publish GitHub Release
-        if: github.ref_type == 'tag'
+        if: env.RELEASE_TAG != ''
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          target_commitish: ${{ github.sha }}   # a new tag is created on exactly the commit that was built
+          name: VoiceCleaner ${{ env.RELEASE_TAG }}
           files: ${{ env.PKG_ZIP }}
-          prerelease: ${{ contains(github.ref_name, '-') }}
+          prerelease: ${{ contains(env.RELEASE_TAG, '-') }}
           generate_release_notes: true
