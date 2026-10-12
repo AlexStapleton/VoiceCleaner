@@ -279,3 +279,18 @@ TEST(UiState, SeedTuningThenSelectEngineCarriesTuning) {
   EXPECT_FLOAT_EQ(p.declickVoiceFloor, 0.1f);
   EXPECT_FLOAT_EQ(p.gateStrength, 0.5f);
 }
+
+TEST(UiState, OnSetMaxBoostMutatesCurrent) {
+  UiState ui;
+  EXPECT_FLOAT_EQ(ui.current().agcMaxGainDb, 18.0f);            // defaults: +18 dB boost, -16 dBFS target
+  EXPECT_FLOAT_EQ(ui.current().agcTargetDbfs, -16.0f);
+  EXPECT_FLOAT_EQ(ui.onSetMaxBoost(24.0f).agcMaxGainDb, 24.0f);
+  EXPECT_FLOAT_EQ(ui.current().agcMaxGainDb, 24.0f);
+}
+TEST(UiState, SeedTuningCarriesMaxBoost) {
+  UiState ui;
+  ui.seedTuning(/*aggr*/0.0f, /*hpf*/80.0f, /*gain*/-12.0f, /*lim*/-1.0f,
+                /*declick*/0.0f, /*voiceFloor*/0.0f, /*gate*/0.0f, /*mix*/1.0f, /*maxBoost*/27.0f);
+  EXPECT_FLOAT_EQ(ui.current().agcMaxGainDb, 27.0f);
+  EXPECT_FLOAT_EQ(ui.onSelectEngine(0u).agcMaxGainDb, 27.0f);   // carried on the mic-switch push too
+}

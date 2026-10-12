@@ -53,10 +53,13 @@ TEST(DspChain, RemovesDcOffset){
 
 TEST(DspChain, CurrentsInitializeToConfigNotZero) {
   vc::PassthroughFilter eng;
-  vc::DspChain::Config cfg;              // hpf 80, agc -20, lim -1
+  vc::DspChain::Config cfg;              // hpf 80, agc -16 (max boost 18), lim -1
   vc::DspChain chain(&eng, cfg);
   EXPECT_FLOAT_EQ(chain.currentHpfCutoffHz(), 80.0f);
-  EXPECT_FLOAT_EQ(chain.currentAgcTargetDb(), -20.0f);
+  EXPECT_FLOAT_EQ(chain.currentAgcTargetDb(), -16.0f);
+  EXPECT_FLOAT_EQ(chain.currentAgcMaxGainDb(), 18.0f);
+  chain.setAgcMaxGainDb(24.0f);
+  EXPECT_FLOAT_EQ(chain.currentAgcMaxGainDb(), 24.0f);
   EXPECT_FLOAT_EQ(chain.currentLimiterCeilingDb(), -1.0f);
 }
 TEST(DspChain, HpfCutoffRampsMonotonicallyToTarget) {

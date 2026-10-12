@@ -52,7 +52,7 @@ vc::ipc::Params UiState::onToggleBypass() {
   return current_;
 }
 
-void UiState::seedTuning(float aggression, float hpfHz, float gainDbfs, float limiterDbfs, float declick, float declickVoiceFloor, float gate, float mix) {
+void UiState::seedTuning(float aggression, float hpfHz, float gainDbfs, float limiterDbfs, float declick, float declickVoiceFloor, float gate, float mix, float maxBoostDb) {
   current_.aggression         = aggression;
   current_.hpfCutoffHz        = hpfHz;
   current_.agcTargetDbfs      = gainDbfs;
@@ -61,6 +61,7 @@ void UiState::seedTuning(float aggression, float hpfHz, float gainDbfs, float li
   current_.declickVoiceFloor  = declickVoiceFloor;
   current_.gateStrength       = gate;
   current_.mixStrength        = mix;
+  current_.agcMaxGainDb       = maxBoostDb;
 }
 vc::ipc::Params UiState::onSetAggression(float v)  { current_.aggression = v;         return current_; }
 vc::ipc::Params UiState::onSetHpf(float v)         { current_.hpfCutoffHz = v;        return current_; }
@@ -70,6 +71,7 @@ vc::ipc::Params UiState::onSetDeclick(float v)     { current_.declickStrength = 
 vc::ipc::Params UiState::onSetDeclickVoiceFloor(float v) { current_.declickVoiceFloor = v; return current_; }
 vc::ipc::Params UiState::onSetGate(float v)        { current_.gateStrength = v;       return current_; }
 vc::ipc::Params UiState::onSetMix(float v)         { current_.mixStrength = v;        return current_; }
+vc::ipc::Params UiState::onSetMaxBoost(float v)    { current_.agcMaxGainDb = v;       return current_; }
 
 std::string UiState::bypassDisabledReason() const {
   return "no DSP chain \xE2\x80\x94 bypass unavailable";   // U+2014 em dash, UTF-8

@@ -148,8 +148,10 @@ void AppWindow::seedFromActiveProfile() {
   sldVfl_.setValue(p->declickVoiceFloor);
   sldGate_.setValue(p->gateStrength);
   sldMix_.setValue(p->mixStrength);
+  sldBoost_.setValue(p->maxBoostDb);
   state_->seedTuning(p->aggression, p->hpfHz, p->outputGainDbfs, p->limiterDbfs,
-                     p->declickStrength, p->declickVoiceFloor, p->gateStrength, p->mixStrength);
+                     p->declickStrength, p->declickVoiceFloor, p->gateStrength, p->mixStrength,
+                     p->maxBoostDb);
 }
 
 LRESULT CALLBACK AppWindow::WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
@@ -187,10 +189,10 @@ void AppWindow::layout(D2D1_SIZE_F sz) {
   // everything below it and shrinks the window (contentH_). The index->parameter mapping is unchanged
   // (see sliderByIndex/helpText); only the Y positions, draw order, and visibility change per group.
   static const int denoise[2] = {7, 1};        // STRENGTH, AGGRESSION
-  static const int voice[2]   = {0, 3};        // TARGET LOUDNESS, LIMITER
+  static const int voice[3]   = {0, 8, 3};     // TARGET LOUDNESS, MAX BOOST, LIMITER
   static const int cleanup[4] = {2, 6, 4, 5};  // HPF, NOISE GATE, DE-CLICK, SPEECH DECLICK
   const int* groups[3] = {denoise, voice, cleanup};
-  const int  counts[3] = {2, 2, 4};
+  const int  counts[3] = {2, 3, 4};
   const D2D1_RECT_F hidden = D2D1::RectF(-1000, -1000, -1000, -1000);
 
   float y = 350.0f;
@@ -322,7 +324,8 @@ void AppWindow::paint() {
   sectionHdr(L"DENOISE", 0, 100);
   if (secOpen_[0]) { drawSlider(L"STRENGTH", 7, true); drawSlider(L"AGGRESSION", 1, aggressionEnabled()); }
   sectionHdr(L"VOICE LEVEL", 1, 120);
-  if (secOpen_[1]) { drawSlider(L"TARGET LOUDNESS", 0, true); drawSlider(L"LIMITER", 3, true); }
+  if (secOpen_[1]) { drawSlider(L"TARGET LOUDNESS", 0, true); drawSlider(L"MAX BOOST", 8, true);
+                     drawSlider(L"LIMITER", 3, true); }
   sectionHdr(L"CLEANUP", 2, 100);
   if (secOpen_[2]) { drawSlider(L"HPF", 2, true); drawSlider(L"NOISE GATE", 6, true);
                      drawSlider(L"DE-CLICK", 4, true); drawSlider(L"SPEECH DECLICK", 5, true); }
@@ -398,16 +401,16 @@ int AppWindow::hitControl(int x, int y) const {
 }
 
 Slider& AppWindow::sliderByIndex(int i) {
-  switch (i) { case 0: return sldGain_; case 1: return sldAggr_; case 2: return sldHpf_; case 3: return sldLim_; case 4: return sldDck_; case 5: return sldVfl_; case 6: return sldGate_; default: return sldMix_; }
+  switch (i) { case 0: return sldGain_; case 1: return sldAggr_; case 2: return sldHpf_; case 3: return sldLim_; case 4: return sldDck_; case 5: return sldVfl_; case 6: return sldGate_; case 7: return sldMix_; default: return sldBoost_; }
 }
 D2D1_RECT_F& AppWindow::trackByIndex(int i) {
-  switch (i) { case 0: return rcGain_; case 1: return rcAggr_; case 2: return rcHpf_; case 3: return rcLim_; case 4: return rcDck_; case 5: return rcVfl_; case 6: return rcGate_; default: return rcMix_; }
+  switch (i) { case 0: return rcGain_; case 1: return rcAggr_; case 2: return rcHpf_; case 3: return rcLim_; case 4: return rcDck_; case 5: return rcVfl_; case 6: return rcGate_; case 7: return rcMix_; default: return rcBoost_; }
 }
 bool AppWindow::aggressionEnabled() const { return state_->activeEngine() == 1; }  // DFN3 only
 
 int AppWindow::trackHit(int x, int y) const {
-  const D2D1_RECT_F rc[8] = { rcGain_, rcAggr_, rcHpf_, rcLim_, rcDck_, rcVfl_, rcGate_, rcMix_ };
-  for (int i = 0; i < 8; ++i) {
+  const D2D1_RECT_F rc[9] = { rcGain_, rcAggr_, rcHpf_, rcLim_, rcDck_, rcVfl_, rcGate_, rcMix_, rcBoost_ };
+  for (int i = 0; i < 9; ++i) {
     if (i == 1 && !aggressionEnabled()) continue;   // aggression not draggable on RNNoise
     if (x >= rc[i].left && x <= rc[i].right && y >= rc[i].top - 12 && y <= rc[i].bottom + 12) return i;
   }
@@ -415,8 +418,8 @@ int AppWindow::trackHit(int x, int y) const {
 }
 int AppWindow::helpTargetAt(int x, int y) const {
   // Sliders first (same horizontal band as the track, extended up to cover the caption row).
-  const D2D1_RECT_F rc[8] = { rcGain_, rcAggr_, rcHpf_, rcLim_, rcDck_, rcVfl_, rcGate_, rcMix_ };
-  for (int i = 0; i < 8; ++i)
+  const D2D1_RECT_F rc[9] = { rcGain_, rcAggr_, rcHpf_, rcLim_, rcDck_, rcVfl_, rcGate_, rcMix_, rcBoost_ };
+  for (int i = 0; i < 9; ++i)
     if (x >= rc[i].left && x <= rc[i].right && y >= rc[i].top - 20 && y <= rc[i].bottom + 8) return i;
   if (hit(rcMicField_, x, y))  return 100;
   if (hit(rcOutField_, x, y))  return 101;
@@ -431,6 +434,7 @@ int AppWindow::helpTargetAt(int x, int y) const {
 std::wstring AppWindow::helpText() const {
   switch (helpHot_) {
     case 0:   return L"TARGET LOUDNESS — auto-levels your voice to this level while you speak (an AGC, not a raw volume). It only acts when the VAD dot in the status line is lit. Watch the AGC readout move as you drag.";
+    case 8:   return L"MAX BOOST \x2014 the most the auto-leveler may raise your voice. If the AGC readout sits at this value while you talk, your mic is quieter than it can make up for: raise MAX BOOST (or your mic level in Windows). Lower it if background noise gets pumped up between words.";
     case 1:   return L"AGGRESSION — how hard DeepFilterNet3 scrubs noise (DFN3 only). Higher is cleaner but can sound processed.";
     case 2:   return L"HPF — high-pass filter. Cuts low rumble, handling thumps and AC hum below the set frequency. Raise to remove more low end.";
     case 3:   return L"LIMITER — a ceiling that stops loud peaks from clipping. Lower the ceiling for safer, quieter peaks.";
@@ -464,7 +468,8 @@ vc::ipc::Params AppWindow::applySlider(int i) {
     case 4: return state_->onSetDeclick(s.value());
     case 5: return state_->onSetDeclickVoiceFloor(s.value());
     case 6: return state_->onSetGate(s.value());
-    default: return state_->onSetMix(s.value());
+    case 7: return state_->onSetMix(s.value());
+    default: return state_->onSetMaxBoost(s.value());
   }
 }
 void AppWindow::persistTuning() {
@@ -479,6 +484,7 @@ void AppWindow::persistTuning() {
   p->declickVoiceFloor = sldVfl_.value();
   p->gateStrength = sldGate_.value();
   p->mixStrength = sldMix_.value();
+  p->maxBoostDb = sldBoost_.value();
   settings_->save(configPath_);
 }
 

@@ -28,7 +28,7 @@ class UiState {
   // ---- user actions: mutate current_, return the Params the caller sends via SetParams ----
   vc::ipc::Params onSelectEngine(uint32_t engine);   // 0 = RNNoise, 1 = DFN3
   vc::ipc::Params onToggleBypass();                   // flips current_.bypass; engine stays synced
-  void seedTuning(float aggression, float hpfHz, float gainDbfs, float limiterDbfs, float declick, float declickVoiceFloor, float gate, float mix);  // attach seed
+  void seedTuning(float aggression, float hpfHz, float gainDbfs, float limiterDbfs, float declick, float declickVoiceFloor, float gate, float mix, float maxBoostDb = 18.0f);  // attach seed
   vc::ipc::Params onSetAggression(float v);
   vc::ipc::Params onSetHpf(float v);
   vc::ipc::Params onSetOutputGain(float v);
@@ -37,6 +37,7 @@ class UiState {
   vc::ipc::Params onSetDeclickVoiceFloor(float v);
   vc::ipc::Params onSetGate(float v);
   vc::ipc::Params onSetMix(float v);
+  vc::ipc::Params onSetMaxBoost(float v);   // AGC max boost (dB)
 
   // ---- queries (paint) ----
   StatusKind statusKind() const { return kind_; }

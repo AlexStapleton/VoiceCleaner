@@ -14,7 +14,8 @@ struct MicProfile {
   bool dspChain = true;
   float aggression     = 0.0f;    // .aggression
   float hpfHz          = 80.0f;   // .hpf_hz
-  float outputGainDbfs = -20.0f;  // .output_gain_dbfs  (== agcTargetDbfs)
+  float outputGainDbfs = -16.0f;  // .output_gain_dbfs  (== agcTargetDbfs)
+  float maxBoostDb = 18.0f;       // .max_boost_db      (== agcMaxGainDb)
   float limiterDbfs    = -1.0f;   // .limiter_dbfs
   float declickStrength = 0.0f;   // .declick_strength
   float declickVoiceFloor = 0.0f; // .declick_voice_floor

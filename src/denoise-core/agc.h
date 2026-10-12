@@ -12,6 +12,10 @@ public:
   void  process(const float* in, float* out, size_t n, bool vadActive) noexcept;
   float currentGainDb() const noexcept;
   void setTargetDb(float db) noexcept { targetLin_ = std::pow(10.0f, db / 20.0f); }
+  // Max boost (dB). Lowering it below the current gain pulls the gain down at once, so a frozen
+  // (VAD-inactive) gain can never sit above the new cap.
+  void setMaxGainDb(float db) noexcept { maxG_ = db; if (gainDb_ > maxG_) gainDb_ = maxG_; }
+  float maxGainDb() const noexcept { return maxG_; }
   void  reset() noexcept;
 private:
   Config cfg_; float gainDb_ = 0.0f; float envRms_ = 0.0f;
