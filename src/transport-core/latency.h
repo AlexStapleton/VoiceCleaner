@@ -10,7 +10,7 @@ struct LatencyInputs {
   uint32_t captureBufferFrames = 0;   // WASAPI shared capture buffer (IAudioClient::GetBufferSize)
   uint32_t renderBufferFrames  = 0;   // WASAPI shared render buffer (pre-rolled full of silence at start)
   uint32_t ringPrimedFrames    = 0;   // Ring B frames primed at start (capacity/2), each FRAME_SAMPLES long
-  uint32_t engineDelaySamples  = 0;   // engine algorithmic delay (960 = RNNoise native / low-latency, 1440 = default-mode pin shared by RNNoise and DFN3)
+  uint32_t engineDelaySamples  = 0;   // engine algorithmic delay (RNNoise = 960 = 20 ms)
   double   sampleRate          = 48000.0;
 };
 

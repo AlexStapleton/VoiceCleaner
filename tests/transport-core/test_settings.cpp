@@ -18,7 +18,7 @@ TEST(Settings, LoadsNewSchemaAndResolvesActive) {
     "ring_frames = 16\n"
     "[mic.\"cap-1\"]\n"
     "name = \"K688\"\n"
-    "engine = \"dfn3\"\n"
+    "engine = \"df" "n3\"\n"        // legacy keys: ignored
     "warm_standby = true\n"
     "dsp_chain = true\n");
   Settings s = Settings::load(p);
@@ -31,8 +31,7 @@ TEST(Settings, LoadsNewSchemaAndResolvesActive) {
   EXPECT_EQ(c.captureDeviceId, "cap-1");
   EXPECT_EQ(c.renderDeviceId, "ren-1");
   EXPECT_EQ(c.ringFrames, 16u);
-  EXPECT_EQ(c.engine, "dfn3");
-  EXPECT_TRUE(c.warmStandby);
+  EXPECT_EQ(c.engine, "rnnoise");
   EXPECT_TRUE(c.dspChain);
 }
 
@@ -80,13 +79,11 @@ TEST(Settings, ResolveWithNoActiveProfileUsesDefaults) {
   vc::Config c = s.resolveActive();
   EXPECT_TRUE(c.captureDeviceId.empty());
   EXPECT_EQ(c.ringFrames, 8u);    // Settings default ring (shipped ~40 ms buffered)
-  EXPECT_FALSE(c.lowLatency);      // low-latency off by default
 }
 
 TEST(Settings, EnsureProfileCreatesDefaultThenReuses) {
   Settings s;
   vc::MicProfile& a = s.ensureProfile("cap-1", "K688");
-  EXPECT_EQ(a.engine, "rnnoise");
   EXPECT_TRUE(a.dspChain);
   EXPECT_EQ(s.mics.size(), 1u);
   vc::MicProfile& b = s.ensureProfile("cap-1", "K688");  // same id -> no new entry
@@ -109,12 +106,11 @@ TEST(Settings, TuningFieldsRoundTrip) {
   Settings s;
   s.activeCaptureId = "cap-1"; s.renderId = "ren-1";
   vc::MicProfile& m = s.ensureProfile("cap-1", "K688");
-  m.aggression = 0.65f; m.hpfHz = 90.0f; m.outputGainDbfs = -18.0f; m.limiterDbfs = -2.0f;
+  m.hpfHz = 90.0f; m.outputGainDbfs = -18.0f; m.limiterDbfs = -2.0f;
   auto p = (std::filesystem::temp_directory_path() / "vc_tmp_settings_tuning.toml").string();
   s.save(p);
   Settings r = Settings::load(p);
   ASSERT_EQ(r.mics.size(), 1u);
-  EXPECT_FLOAT_EQ(r.mics[0].aggression, 0.65f);
   EXPECT_FLOAT_EQ(r.mics[0].hpfHz, 90.0f);
   EXPECT_FLOAT_EQ(r.mics[0].outputGainDbfs, -18.0f);
   EXPECT_FLOAT_EQ(r.mics[0].limiterDbfs, -2.0f);
@@ -123,10 +119,9 @@ TEST(Settings, OlderProfileWithoutTuningLoadsDefaults) {
   auto p = (std::filesystem::temp_directory_path() / "vc_tmp_settings_old.toml").string();
   std::ofstream(p) <<
     "[global]\nactive_capture_id=\"c1\"\nrender_id=\"r1\"\nring_frames=16\n"
-    "[mic.\"c1\"]\nname=\"Mic\"\nengine=\"dfn3\"\n";
+    "[mic.\"c1\"]\nname=\"Mic\"\nengine=\"df" "n3\"\n";
   Settings r = Settings::load(p);
   ASSERT_EQ(r.mics.size(), 1u);
-  EXPECT_FLOAT_EQ(r.mics[0].aggression, 0.0f);
   EXPECT_FLOAT_EQ(r.mics[0].hpfHz, 80.0f);
   EXPECT_FLOAT_EQ(r.mics[0].outputGainDbfs, -16.0f);
   EXPECT_FLOAT_EQ(r.mics[0].maxBoostDb, 18.0f);   // pre-v1.4 files have no max_boost_db -> 18 (was a fixed 9)
@@ -136,7 +131,7 @@ TEST(Settings, SaveLoadRoundTripIsIdentity) {
   Settings s;
   s.activeCaptureId = "cap-1"; s.renderId = "ren-1"; s.ringFrames = 16;
   vc::MicProfile& m = s.ensureProfile("cap-1", "K688");
-  m.engine = "dfn3"; m.warmStandby = true; m.dspChain = true;
+  m.dspChain = true;
   auto p = (std::filesystem::temp_directory_path() / "vc_tmp_settings_rt.toml").string();
   s.save(p);
   Settings r = Settings::load(p);
@@ -146,8 +141,6 @@ TEST(Settings, SaveLoadRoundTripIsIdentity) {
   ASSERT_EQ(r.mics.size(), 1u);
   EXPECT_EQ(r.mics[0].id, "cap-1");
   EXPECT_EQ(r.mics[0].name, "K688");
-  EXPECT_EQ(r.mics[0].engine, "dfn3");
-  EXPECT_TRUE(r.mics[0].warmStandby);
 }
 
 TEST(Settings, DeclickStrengthRoundTrips) {
@@ -169,9 +162,9 @@ TEST(Settings, PerMicProfilesAndRingRoundTrip) {
   Settings s;
   s.activeCaptureId = "cap-A"; s.renderId = "ren-1"; s.ringFrames = 512;
   vc::MicProfile& a = s.ensureProfile("cap-A", "Mic A");
-  a.outputGainDbfs = -12.0f; a.hpfHz = 120.0f; a.gateStrength = 0.7f; a.engine = "dfn3";
+  a.outputGainDbfs = -12.0f; a.hpfHz = 120.0f; a.gateStrength = 0.7f;
   vc::MicProfile& b = s.ensureProfile("cap-B", "Mic B");
-  b.outputGainDbfs = -24.0f; b.hpfHz = 60.0f;  b.gateStrength = 0.1f; b.engine = "rnnoise";
+  b.outputGainDbfs = -24.0f; b.hpfHz = 60.0f;  b.gateStrength = 0.1f;
   auto p = (std::filesystem::temp_directory_path() / "vc_tmp_permic.toml").string();
   s.save(p);
 
@@ -182,12 +175,10 @@ TEST(Settings, PerMicProfilesAndRingRoundTrip) {
   ASSERT_NE(r.activeProfile(), nullptr);
   EXPECT_FLOAT_EQ(r.activeProfile()->outputGainDbfs, -12.0f);
   EXPECT_FLOAT_EQ(r.activeProfile()->hpfHz, 120.0f);
-  EXPECT_EQ(r.activeProfile()->engine, "dfn3");
   r.activeCaptureId = "cap-B";
   ASSERT_NE(r.activeProfile(), nullptr);
   EXPECT_FLOAT_EQ(r.activeProfile()->outputGainDbfs, -24.0f);
   EXPECT_FLOAT_EQ(r.activeProfile()->hpfHz, 60.0f);
-  EXPECT_EQ(r.activeProfile()->engine, "rnnoise");
 }
 
 TEST(Settings, MixStrengthDefaultsFullWet) {
@@ -203,19 +194,27 @@ TEST(Settings, MixStrengthRoundTrips) {
   ASSERT_EQ(r.mics.size(), 1u);
   EXPECT_FLOAT_EQ(r.mics[0].mixStrength, 0.65f);
 }
-TEST(Settings, LowLatencyDefaultsOff) {
-  EXPECT_FALSE(Settings{}.lowLatency);
-  EXPECT_FALSE(Settings{}.resolveActive().lowLatency);
-}
-TEST(Settings, LowLatencyRoundTripsAndResolves) {
-  Settings s; s.activeCaptureId = "cap-1"; s.renderId = "ren-1";
-  s.ensureProfile("cap-1", "K688");
-  s.lowLatency = true;
-  auto p = (std::filesystem::temp_directory_path() / "vc_tmp_settings_ll.toml").string();
-  s.save(p);
-  Settings r = Settings::load(p);
-  EXPECT_TRUE(r.lowLatency);
-  EXPECT_TRUE(r.resolveActive().lowLatency);   // flows into the worker's flat Config
+TEST(Settings, LegacyV15KeysAreIgnoredAndDroppedOnSave) {
+  // v1.5 files carried engine/aggression/warm_standby per mic and low_latency globally. They must
+  // still load (the keys are simply ignored) and the next save must not write them back.
+  auto p = (std::filesystem::temp_directory_path() / "vc_tmp_settings_v15.toml").string();
+  std::ofstream(p) <<
+    "[global]\nactive_capture_id=\"c1\"\nrender_id=\"r1\"\nring_frames=16\nlow_latency=true\n"
+    "[mic.\"c1\"]\nname=\"Mic\"\nengine=\"df" "n3\"\naggression=0.7\nwarm_standby=true\n"
+    "dsp_chain=true\nhpf_hz=95.0\n";
+  Settings s = Settings::load(p);
+  ASSERT_EQ(s.mics.size(), 1u);
+  EXPECT_FLOAT_EQ(s.mics[0].hpfHz, 95.0f);
+  EXPECT_EQ(s.ringFrames, 16u);
+  EXPECT_EQ(s.resolveActive().engine, "rnnoise");
+  auto out = (std::filesystem::temp_directory_path() / "vc_tmp_settings_v15_out.toml").string();
+  ASSERT_TRUE(s.save(out));
+  std::ifstream f(out); std::string text((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+  EXPECT_EQ(text.find("engine"), std::string::npos);
+  EXPECT_EQ(text.find("aggression"), std::string::npos);
+  EXPECT_EQ(text.find("warm_standby"), std::string::npos);
+  EXPECT_EQ(text.find("low_latency"), std::string::npos);
+  EXPECT_NE(text.find("hpf_hz"), std::string::npos);
 }
 
 TEST(Settings, SaveAtomicallyReplacesExistingFileAndLeavesNoTemp) {

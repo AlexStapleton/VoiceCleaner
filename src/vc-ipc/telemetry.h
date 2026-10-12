@@ -2,7 +2,7 @@
 #include <cstdint>
 namespace vc::ipc {
 // POD telemetry block, worker -> UI, published ~1 Hz into shared memory (a plain memcpy). The UI
-// tolerates a torn read; `seq` bumps on each publish. The UI reads seq/activeEngine/bypass/dspChain/
+// tolerates a torn read; `seq` bumps on each publish. The UI reads seq/bypass/dspChain/
 // vadActive/agcGainDb; the rest are diagnostics for external readers and future views.
 enum class WorkerState : uint32_t { Starting = 0, Running = 1, DeviceLost = 2, Stopping = 3 };
 struct Telemetry {
@@ -22,7 +22,6 @@ struct Telemetry {
   uint32_t ringBOcc;
   uint32_t ringBHigh;      // high-water since start / last ResetCounters
   uint32_t dropouts;
-  uint32_t activeEngine;   // 0 = RNNoise, 1 = DFN3
   double   driftRatioPpm;
   uint64_t uptimeMs;       // since the bridge (re)started
   uint32_t workerState;    // WorkerState

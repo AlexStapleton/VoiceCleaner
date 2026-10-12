@@ -11,12 +11,11 @@ static std::vector<uint8_t> roundtrip_ok(const Command& in, Command& out) {
 TEST(Codec, SetParamsRoundTripsExactly) {
   Command in; in.type = CmdType::SetParams;
   in.params.hpfCutoffHz = 123.5f; in.params.agcTargetDbfs = -9.25f;
-  in.params.engine = 0; in.params.bypass = 1;
+  in.params.bypass = 1;
   Command out; roundtrip_ok(in, out);
   EXPECT_EQ(out.type, CmdType::SetParams);
   EXPECT_FLOAT_EQ(out.params.hpfCutoffHz, 123.5f);
   EXPECT_FLOAT_EQ(out.params.agcTargetDbfs, -9.25f);
-  EXPECT_EQ(out.params.engine, 0u);
   EXPECT_EQ(out.params.bypass, 1u);
 }
 TEST(Codec, SelectCaptureDeviceRoundTripsIdAndSeed) {
@@ -48,10 +47,12 @@ TEST(Codec, RejectsTruncatedPayload) {
   EXPECT_FALSE(decode(bytes.data(), bytes.size(), out));
 }
 TEST(Codec, RejectsOldMagicAndRetiredType) {
-  // A pre-v1.5 (VCC1) peer must be refused rather than misread: Params changed layout.
+  // A pre-v1.5 (VCC1/VCC2) peer must be refused rather than misread: Params changed layout.
   Command out;
   uint8_t v1[8] = {'V','C','C','1', 6,0,0,0};
   EXPECT_FALSE(decode(v1, sizeof(v1), out));
-  uint8_t retired[12] = {'V','C','C','2', 4,0,0,0, 1,0,0,0};   // 4 was SetWarmStandby
+  uint8_t v2[8] = {'V','C','C','2', 6,0,0,0};
+  EXPECT_FALSE(decode(v2, sizeof(v2), out));
+  uint8_t retired[12] = {'V','C','C','3', 4,0,0,0, 1,0,0,0};   // 4 is a retired type
   EXPECT_FALSE(decode(retired, sizeof(retired), out));
 }
