@@ -26,7 +26,7 @@ SNR improvement against the clean reference, not just similarity to another tool
    DFN3's "better for keyboard clicks" justification; if anything it shows the
    opposite. See caveats — the synthetic clicks may be unrepresentative.
 
-## Clip design (`tools/dfn3_make_quality_clip.py`)
+## Clip design (`tools/dfn3/dfn3_make_quality_clip.py`)
 
 Deterministic (seed 20260815), 48 kHz mono, 4.0 s. Written as three aligned
 files so metrics have ground truth: `qual_mix.wav` (input to denoise),
@@ -54,7 +54,7 @@ files so metrics have ground truth: `qual_mix.wav` (input to denoise),
   speech-frame aggregate reads ~3.4 dB because its frame mask includes
   lower-energy syllable edges.
 
-## Metrics (`tools/dfn3_quality.py`)
+## Metrics (`tools/dfn3/dfn3_quality.py`)
 
 All aligned to the clean reference by xcorr lag (handles processing latency).
 Metrics over speech-active frames (VAD from the clean reference):
@@ -149,13 +149,13 @@ samples (−10.00 ms).
 ## Reproduce
 
 ```
-python tools/dfn3_make_quality_clip.py qual
+python tools/dfn3/dfn3_make_quality_clip.py qual
 build/src/offline-cli/Release/offline-cli.exe --engine dfn3-stream     qual_mix.wav out_dfn3stream.wav
 build/src/offline-cli/Release/offline-cli.exe --engine dfn3-ll         qual_mix.wav out_dfn3ll.wav
 build/src/offline-cli/Release/offline-cli.exe --chain --engine rnnoise qual_mix.wav out_rnnoise.wav
 build/src/offline-cli/Release/offline-cli.exe --engine rnnoise         qual_mix.wav out_rnnoise_nochain.wav
 build/src/offline-cli/Release/offline-cli.exe --engine passthrough     qual_mix.wav out_passthrough.wav
 for e in dfn3stream dfn3ll rnnoise rnnoise_nochain passthrough; do \
-  python tools/dfn3_quality.py --clean qual_clean.wav --mix qual_mix.wav --proc out_$e.wav; done
-python tools/dfn3_compare.py out_dfn3ll.wav out_dfn3stream.wav
+  python tools/dfn3/dfn3_quality.py --clean qual_clean.wav --mix qual_mix.wav --proc out_$e.wav; done
+python tools/dfn3/dfn3_compare.py out_dfn3ll.wav out_dfn3stream.wav
 ```

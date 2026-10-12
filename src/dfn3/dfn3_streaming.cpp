@@ -1,9 +1,9 @@
-// Real-time DeepFilterNet3 streaming orchestrator. ONE class drives BOTH split
-// model sets: the causal `_ll` set (models/dfn3-ll: hidden 512, lookahead 0/0)
-// and the STANDARD set (models/dfn3: hidden 256, conv/df lookahead 2/2). All the
-// model-specific numbers (hidden size, GRU layer counts, lookaheads) are read at
-// construction from the streaming models' state-tensor shapes and config.ini, so
-// the code is not specialized to either.
+// Real-time DeepFilterNet3 streaming orchestrator for the split models in models/dfn3
+// (standard set: hidden 256, conv/df lookahead 2/2). All the model-specific numbers
+// (hidden size, GRU layer counts, lookaheads) are read at construction from the
+// streaming models' state-tensor shapes and config.ini, so the code is not specialized
+// to one set; it was also validated on a causal `_ll` set (hidden 512, lookahead 0/0),
+// removed in v1.5 -- comments below still use it as the lookahead-0 example.
 //
 // Per 480-sample hop, follows the "Host driving contract" in docs/dfn3-progress.md:
 //   1. Stft::analyze(in480) -> noisy complex spectrum re[481]/im[481].

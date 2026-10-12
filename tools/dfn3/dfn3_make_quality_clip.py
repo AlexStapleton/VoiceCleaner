@@ -24,7 +24,7 @@ from the identically-scaled float components).
 
 Deterministic: fixed RNG seed. Re-running reproduces the exact same files.
 
-Usage: python tools/dfn3_make_quality_clip.py [out_prefix]   (default: qual)
+Usage: python tools/dfn3/dfn3_make_quality_clip.py [out_prefix]   (default: qual)
 """
 import sys
 import wave

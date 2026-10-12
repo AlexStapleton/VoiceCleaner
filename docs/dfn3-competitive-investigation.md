@@ -4,7 +4,7 @@
 **Inputs:** +20 dB-normalized real K688 recordings in repo root
 (`typing_only_n.wav` 12 s clicks, `speech_only_n.wav` 12 s speech,
 `speech_typing_n.wav` 20 s mixed). 48 kHz mono PCM16.
-**Metrics tool:** `python tools/dfn3_realtest.py _n` (each engine output aligned to
+**Metrics tool:** `python tools/dfn3/dfn3_realtest.py _n` (each engine output aligned to
 its raw input by xcorr lag, then scored).
 **Engines:** `build/src/offline-cli/Release/offline-cli.exe --engine <...> [--aggression <0..1>]`.
 
@@ -175,5 +175,5 @@ for a in 025 050 075 100; do af="0.${a}"; [ "$a" = 100 ] && af=1.0
   "$EXE" --engine dfn3 --aggression $af typing_only_n.wav typing_dfn3a${a}_n.wav
   "$EXE" --engine dfn3 --aggression $af speech_only_n.wav speech_dfn3a${a}_n.wav
 done
-python tools/dfn3_realtest.py _n
+python tools/dfn3/dfn3_realtest.py _n
 ```

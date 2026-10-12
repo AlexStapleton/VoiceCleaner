@@ -1,4 +1,5 @@
-// offline-cli: WAV in -> 480-sample frames -> INoiseFilter (or DspChain) -> WAV out.
+// offline-cli (developer tool, VC_BUILD_DEV_TOOLS): WAV in -> 480-sample frames -> engine (optionally
+// wrapped in the DspChain) -> WAV out. For A/B listening and the tools/*.py scoring harnesses.
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -6,7 +7,6 @@
 #include <vector>
 
 #include "channel.h"
-#include "dfn3_offline.h"
 #include "dfn3_streaming.h"
 #include "dsp_chain.h"
 #include "frame.h"
@@ -18,14 +18,10 @@ int main(int argc, char** argv) {
   bool useChain = false;
   bool useRnnoise = false;
   bool useDfn3 = false;
-  bool useDfn3Ll = false;
-  bool useDfn3Stream = false;
-  bool useDfn3StdStream = false;
-  float aggression = 0.0f;  // 0 = disabled; ERB-mask shaping for dfn3/dfn3-ll AND the streaming engines
+  float aggression = 0.0f;  // 0 = disabled; DFN3 ERB-mask shaping
   int argi = 1;
   // Optional flags in any order: --chain, --engine <name> (default passthrough),
-  // --aggression <0..1> (ERB-mask shaping for dfn3 / dfn3-ll, and for dfn3-stream /
-  // dfn3-std-stream).
+  // --aggression <0..1> (DFN3 only).
   while (argi < argc) {
     if (std::strcmp(argv[argi], "--chain") == 0) {
       useChain = true;
@@ -41,7 +37,7 @@ int main(int argc, char** argv) {
       if (argi + 1 >= argc) {
         std::fprintf(stderr,
                      "error: --engine requires a value "
-                     "(passthrough|rnnoise|dfn3|dfn3-ll|dfn3-stream|dfn3-std-stream)\n");
+                     "(passthrough|rnnoise|dfn3)\n");
         return 2;
       }
       const char* eng = argv[argi + 1];
@@ -49,12 +45,6 @@ int main(int argc, char** argv) {
         useRnnoise = true;
       } else if (std::strcmp(eng, "dfn3") == 0) {
         useDfn3 = true;
-      } else if (std::strcmp(eng, "dfn3-ll") == 0) {
-        useDfn3Ll = true;
-      } else if (std::strcmp(eng, "dfn3-stream") == 0) {
-        useDfn3Stream = true;
-      } else if (std::strcmp(eng, "dfn3-std-stream") == 0) {
-        useDfn3StdStream = true;
       } else if (std::strcmp(eng, "passthrough") == 0) {
         useRnnoise = false;
       } else {
@@ -73,7 +63,7 @@ int main(int argc, char** argv) {
   if (argc - argi != 2) {
     std::fprintf(stderr,
                  "usage: offline-cli [--chain] "
-                 "[--engine passthrough|rnnoise|dfn3|dfn3-ll|dfn3-stream|dfn3-std-stream] "
+                 "[--engine passthrough|rnnoise|dfn3] [--aggression 0..1] "
                  "<in.wav> <out.wav>\n");
     return 2;
   }
@@ -91,60 +81,11 @@ int main(int argc, char** argv) {
   std::vector<float> mono(frames);
   vc::extract_channel(in.samples.data(), frames, in.channels, 0, mono.data());
 
-  // DeepFilterNet3 is a complete whole-utterance engine: process the entire mono
-  // signal at once and write it out (ignores --chain).
+  // DeepFilterNet3: drive the same real-time Dfn3Streaming engine the app uses, hop-by-hop over
+  // 480-sample blocks, padding the tail with latencySamples() zeros to flush. Ignores --chain.
   if (useDfn3) {
-    std::vector<float> enhanced;
-    try {
-      vc::Dfn3Offline dfn3("models/dfn3", /*dfLeftPad=*/2, aggression);
-      enhanced = dfn3.process(mono);
-    } catch (const std::exception& e) {
-      std::fprintf(stderr, "error: dfn3 failed: %s\n", e.what());
-      return 1;
-    }
-    vc::WavData outDfn3;
-    outDfn3.sampleRate = in.sampleRate;
-    outDfn3.channels = 1;
-    outDfn3.samples = enhanced;
-    if (!vc::wav_write(outPath, outDfn3, /*asFloat=*/false)) {
-      std::fprintf(stderr, "error: failed to write %s\n", outPath);
-      return 1;
-    }
-    std::printf("engine=dfn3 chain=n/a: processed %zu samples at %u Hz -> %s\n",
-                enhanced.size(), outDfn3.sampleRate, outPath);
-    return 0;
-  }
-
-  // DeepFilterNet3 `_ll` whole-utterance golden (deep-filter offset 4 for the
-  // causal _ll model). Reference for Gate B.
-  if (useDfn3Ll) {
-    std::vector<float> enhanced;
-    try {
-      vc::Dfn3Offline dfn3("models/dfn3-ll", /*dfLeftPad=*/4, aggression);
-      enhanced = dfn3.process(mono);
-    } catch (const std::exception& e) {
-      std::fprintf(stderr, "error: dfn3-ll failed: %s\n", e.what());
-      return 1;
-    }
-    vc::WavData outLl;
-    outLl.sampleRate = in.sampleRate;
-    outLl.channels = 1;
-    outLl.samples = enhanced;
-    if (!vc::wav_write(outPath, outLl, /*asFloat=*/false)) {
-      std::fprintf(stderr, "error: failed to write %s\n", outPath);
-      return 1;
-    }
-    std::printf("engine=dfn3-ll chain=n/a: processed %zu samples at %u Hz -> %s\n",
-                enhanced.size(), outLl.sampleRate, outPath);
-    return 0;
-  }
-
-  // DeepFilterNet3 real-time streaming: drive Dfn3Streaming hop-by-hop over
-  // 480-sample blocks, padding the tail with latencySamples() zeros to flush.
-  // dfn3-stream = the causal _ll set; dfn3-std-stream = the standard set.
-  if (useDfn3Stream || useDfn3StdStream) {
-    const char* modelDir = useDfn3StdStream ? "models/dfn3" : "models/dfn3-ll";
-    const char* engName = useDfn3StdStream ? "dfn3-std-stream" : "dfn3-stream";
+    const char* modelDir = "models/dfn3";
+    const char* engName = "dfn3";
     std::vector<float> enhanced;
     try {
       vc::Dfn3Streaming stream(modelDir);

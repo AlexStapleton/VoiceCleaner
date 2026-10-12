@@ -9,7 +9,7 @@ cross-correlation, aligns and trims to common length, then reports:
     region and the speech region
   - coarse magnitude-spectrum MSE
 
-Usage: python tools/dfn3_compare.py <ref.wav> <ours.wav> [--leadin-s 0.5]
+Usage: python tools/dfn3/dfn3_compare.py <ref.wav> <ours.wav> [--leadin-s 0.5]
 """
 import sys
 import wave

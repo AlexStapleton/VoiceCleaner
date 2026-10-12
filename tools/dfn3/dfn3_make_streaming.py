@@ -33,7 +33,7 @@ frames per hop). Two model-specific resolutions:
 
 Pure onnx graph surgery + onnxsim cleanup -- no PyTorch, no retraining.
 Deps: onnx, onnxsim (best-effort), onnxruntime (optional, for the shape print).
-Usage: python tools/dfn3_make_streaming.py [models/dfn3-ll]
+Usage: python tools/dfn3/dfn3_make_streaming.py [models/dfn3]
 """
 import configparser
 import sys
@@ -484,7 +484,7 @@ def patch_decoder(model_dir, filename, prefix, slice_specs, data_slice_offset=0)
 
 
 def main():
-    model_dir = Path(sys.argv[1] if len(sys.argv) > 1 else "models/dfn3-ll")
+    model_dir = Path(sys.argv[1] if len(sys.argv) > 1 else "models/dfn3")
     cfg = read_config(model_dir)
     print(f"=== enc split ===")
     split_encoder(model_dir, conv_lookahead=cfg["conv_lookahead"])

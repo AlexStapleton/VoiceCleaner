@@ -55,7 +55,7 @@ sides, an off-by-one here passes every gate in the repo. This is the highest-lev
 in the pipeline. → Ground-truth it against a `_ll` reference (even a directional check).
 
 **1.3 Denoising quality has never been measured, and the test signal is wrong for the use case.**
-The one validation clip (`tools/dfn3_make_val_wav.py`) is synthetic sines + **white** noise; DFN3's
+The one validation clip (`tools/dfn3/dfn3_make_val_wav.py`) is synthetic sines + **white** noise; DFN3's
 justification is **impulsive/keyboard** noise (non-stationary), which white noise doesn't represent.
 `r` is *similarity to a reference*, not an SNR/noise-removal metric. → Build a small real corpus
 (real speech + real keyboard/fan/babble), measure segmental-SNR improvement, and listen.

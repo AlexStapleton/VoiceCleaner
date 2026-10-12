@@ -40,9 +40,9 @@ jobs:
       - name: Configure (MSVC x64)
         run: cmake -S . -B build -A x64
 
-      # Builds every target (UI, worker, offline tools, all test executables). The voicecleaner
-      # target's post-build step co-locates the worker exe, onnxruntime.dll, models/dfn3 and the
-      # default settings.toml next to voicecleaner.exe.
+      # Builds the app (UI + worker) and all test executables (developer tools are off by default).
+      # The voicecleaner target's post-build step co-locates the worker exe, onnxruntime.dll and the
+      # DFN3 runtime models next to voicecleaner.exe.
       - name: Build (Release)
         run: cmake --build build --config Release --parallel
 
@@ -56,7 +56,9 @@ jobs:
           $src = "build/src/voicecleaner/Release"
           $pkg = "VoiceCleaner-$ver-win-x64"
           New-Item -ItemType Directory -Path $pkg | Out-Null
-          foreach ($f in 'voicecleaner.exe','voicecleaner-worker.exe','onnxruntime.dll','settings.toml') {
+          # No settings.toml: the app keeps per-user settings in %LOCALAPPDATA%\VoiceCleaner and
+          # creates them on first run, so unzipping an update over an install never resets them.
+          foreach ($f in 'voicecleaner.exe','voicecleaner-worker.exe','onnxruntime.dll') {
             if (-not (Test-Path "$src/$f")) { throw "missing build output: $src/$f" }
             Copy-Item "$src/$f" $pkg
           }

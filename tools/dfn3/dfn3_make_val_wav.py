@@ -8,7 +8,7 @@ lead-in so the noise floor can be measured on its own.
 
 Deterministic: fixed RNG seed. Re-running reproduces the exact same file.
 
-Usage: python tools/dfn3_make_val_wav.py <out.wav>
+Usage: python tools/dfn3/dfn3_make_val_wav.py <out.wav>
 """
 import sys
 import wave
