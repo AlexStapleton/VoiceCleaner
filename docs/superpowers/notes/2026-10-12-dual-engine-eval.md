@@ -39,3 +39,13 @@ Coordinator's fixed-gain data (DFN3 alone): typing click RMS reduction -42.5 dB 
 benefit needs about +17..20), while typing-only (floor/click dominated) gets +15.6, which the data says hurts. A single
 percentile level cannot separate the two cases; options: higher T plus a headroom limit on boosted peaks, or leave
 `autoInputLevel` off where clicks matter (the adapter option exists; the bridge decision is pending).
+
+## Listening test (user, 2026-10-12) — Dual fails
+
+On `both_4_dual.wav` (talking while typing) the user clearly hears the typing in the background;
+on `both_2_rnnoise.wav` they hear none. Cause: during speech Dual outputs DFN3, and DFN3 passes clicks
+that overlap speech, whereas RNNoise suppresses them strongly. The objective "HF transient reduction on
+speech-active frames" metric (-0.38 vs -0.52 dB) did not capture this audible difference — for this
+user's priority (no typing audible, ever) it is the wrong metric. Spec Part 6.3 requires the user to
+prefer Dual by ear, so Dual does not ship as designed; the structural cause (DFN3 owns the speech
+segments) means controller tuning can't fix it.
