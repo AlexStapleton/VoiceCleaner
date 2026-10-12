@@ -6,31 +6,14 @@
 #include <stdexcept>
 namespace vc {
 Config Config::load(const std::string& path) {
+  // Parse once here so a missing/corrupt file is an error for the worker (the UI's Settings::load is
+  // deliberately tolerant and would silently yield empty settings).
   toml::table t;
   try { t = toml::parse_file(path); }
   catch (const toml::parse_error& e) { throw std::runtime_error(std::string("config parse: ") + e.description().data()); }
-  Config c;
-  if (t.contains("global")) {
-    // New schema (Phase 4a): resolve the active mic's profile (Settings owns the layout).
-    c = Settings::load(path).resolveActive();
-  } else {
-    // Flat schema (Phase-3 + drift*.toml) — unchanged parsing.
-    c.captureDeviceId = t["capture_device_id"].value_or(std::string(""));
-    c.renderDeviceId  = t["render_device_id"].value_or(std::string(""));
-    int64_t rawRing = t["ring_frames"].value_or((int64_t)1024);
-    c.ringFrames = rawRing < 0 ? 0 : (size_t)rawRing;   // 0 -> validate() floors to 3
-    c.csvPath         = t["csv_path"].value_or(std::string("drift.csv"));
-    c.logLevel        = t["log_level"].value_or(1);
-    c.driftCompensation = t["drift_compensation"].value_or(true);
-    c.kp                = t["drift_kp"].value_or(2e-7);
-    c.ki                = t["drift_ki"].value_or(2e-9);
-    c.driftMaxPpm       = t["drift_max_ppm"].value_or(150.0);
-    c.filterAlpha       = t["drift_filter_alpha"].value_or(0.02);
-    c.engine            = t["engine"].value_or(std::string("none"));
-    c.dspChain          = t["dsp_chain"].value_or(false);
-    c.warmStandby       = t["warm_standby"].value_or(false);
-    c.lowLatency        = t["low_latency"].value_or(false);
-  }
+  if (!t.contains("global"))
+    throw std::runtime_error("config: no [global] table (the old flat config format is no longer supported)");
+  Config c = Settings::load(path).resolveActive();
   c.validate();
   return c;
 }
@@ -39,17 +22,14 @@ void Config::apply_cli(int argc, char** argv) {
     if (!std::strcmp(argv[i], "--capture") && i + 1 < argc) captureDeviceId = argv[++i];
     else if (!std::strcmp(argv[i], "--render") && i + 1 < argc) renderDeviceId = argv[++i];
     else if (!std::strcmp(argv[i], "--csv") && i + 1 < argc) csvPath = argv[++i];
-    else if (!std::strcmp(argv[i], "--ring") && i + 1 < argc) {
-      long long v = std::atoll(argv[++i]);
-      ringFrames = v < 0 ? 0 : (size_t)v;   // 0/low -> validate() floors; huge -> validate() caps
-    }
+    else if (!std::strcmp(argv[i], "--ring") && i + 1 < argc) ringFrames = clampRingFrames(std::atoll(argv[++i]));
     // Any other token (valueless flags like --dev-keys/--list-devices, or flags handled in main
     // such as --config/--seconds/--record and their values) is skipped without desyncing.
   }
   validate();
 }
 void Config::validate() {
-  if (ringFrames < 3) ringFrames = 3;
-  if (ringFrames > 1048576) ringFrames = 1048576;   // ~218 s ceiling; guards size_t wrap from negative input
+  if (ringFrames < kRingFramesMin) ringFrames = kRingFramesMin;
+  if (ringFrames > kRingFramesMax) ringFrames = kRingFramesMax;
 }
 }

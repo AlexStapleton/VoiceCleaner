@@ -10,15 +10,15 @@ namespace vc::ui {
 // the kind to a colored dot glyph and statusLine() builds the full display string.
 enum class StatusKind : uint32_t { Active, Bypassed, Down, NoConfig };
 
-// Pure UI state model (blueprint §5). Fed telemetry + user events; computes the display and the
+// Pure UI state model. Fed telemetry + user events; computes the display and the
 // control-enablement state. Owns one Params `current_` seeded from Params::defaults() (which equals
 // the worker's runtime values), and keeps current_.engine / current_.bypass synced to telemetry so
-// a bypass-only toggle never carries a stale engine (design §5, gap-#1 guard).
+// a bypass-only toggle never carries a stale engine.
 class UiState {
  public:
   UiState();
 
-  void setRenderLabel(std::string label);   // e.g. "CABLE Input"; used in the status line
+  void setRenderLabel(std::string label);   // chosen output device name, e.g. "CABLE Input (VB-Audio Virtual Cable)"
 
   // ---- events ----
   void onNoConfig();                                        // pre-flight failed: no config / no devices
@@ -53,7 +53,7 @@ class UiState {
 
   vc::ipc::Params current_ = vc::ipc::Params::defaults();
   StatusKind kind_ = StatusKind::Down;   // pre-ready shows Down until the first ready telemetry
-  std::string renderLabel_ = "CABLE Input";
+  std::string renderLabel_;
   uint32_t activeEngine_ = 0;
   uint32_t pendingEngine_ = 0;   // engine the user last selected
   bool     enginePending_ = false;  // true until telemetry confirms pendingEngine_ is active
@@ -63,7 +63,7 @@ class UiState {
   float telAgcGainDb_ = 0.0f;    // last telemetry AGC gain in dB (readout)
 };
 
-// Pure liveness/readiness policy over (shmOpen, seq, nowMs) samples (design §10). Terminal at Down.
+// Pure liveness/readiness policy over (shmOpen, seq, nowMs) samples. Terminal at Down.
 class LivenessTracker {
  public:
   enum class Status : uint32_t { Connecting, Ready, Down };
@@ -84,7 +84,7 @@ class LivenessTracker {
   uint32_t lastSeq_ = 0;
 };
 
-// Exact worker command line (design §10): "<dir>\voicecleaner-worker.exe" --config "<configPath>".
+// Exact worker command line: "<dir>\voicecleaner-worker.exe" --config "<configPath>".
 // No forced flags — the worker honors settings.toml (warm_standby / dsp_chain / engine / ring_frames).
 std::wstring buildWorkerCommandLine(const std::wstring& moduleDir, const std::wstring& configPath);
 

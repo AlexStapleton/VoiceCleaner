@@ -7,7 +7,7 @@ namespace vc::ui {
 struct DeviceRow { std::string id; std::string name; uint32_t sampleRate = 0; bool is48k = false; };
 enum class PickerKind { Capture, Render };
 
-// Pure picker state (design §6). Fed enumerated device rows + the active ids; computes the field
+// Pure picker state. Fed enumerated device rows + the active ids; computes the field
 // label, which rows are selectable, device-gone, and the open/close/pick transitions. No Windows.
 class DevicePicker {
  public:

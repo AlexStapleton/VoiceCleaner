@@ -70,7 +70,7 @@ TEST(UiState, NoConfigStatus) {
   ui.onNoConfig();
   EXPECT_EQ(ui.statusKind(), StatusKind::NoConfig);
   EXPECT_EQ(ui.statusLine(),
-            "No microphone configured \xE2\x80\x94 the mic picker arrives in Phase 4");
+            "Choose a microphone and an output below to start");
 }
 
 TEST(UiState, BypassToggleCarriesLiveEngineNotStaleDefault) {

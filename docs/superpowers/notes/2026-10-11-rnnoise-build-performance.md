@@ -1,6 +1,6 @@
 # RNNoise build performance (2026-10-11)
 
-_Follow-up to `reports/VoiceCleaner approach comparison.md`, item QW1, and the earlier review's P3.
+_Follow-up to `docs/research/VoiceCleaner approach comparison.md`, item QW1, and the earlier review's P3.
 RNNoise is the only engine used day to day (DFN3 lets keyboard clicks through), so this pass targets
 only the RNNoise engine's own cost._
 

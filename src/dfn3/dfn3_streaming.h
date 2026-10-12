@@ -3,12 +3,12 @@
 #include <string>
 namespace vc {
 // Real-time DFN3. Loads the *_streaming ONNX models from modelDir and processes one
-// 480-sample hop per call, carrying GRU + normalization + window state. ONE class drives
-// BOTH the causal `_ll` set (models/dfn3-ll) and the standard set (models/dfn3); all
-// model-specific numbers (hidden size, GRU layer counts, conv/df lookahead) are read at
-// construction from the model state shapes + config.ini. Algorithmic latency is
-// latencySamples(): STFT one hop for the causal _ll model (480), or one hop plus the
-// encoder lookahead for the standard model (1440 == 30 ms).
+// 480-sample hop per call, carrying GRU + normalization + window state. All model-specific
+// numbers (hidden size, GRU layer counts, conv/df lookahead) are read at construction from
+// the model state shapes + config.ini, so any DFN3 split works (it was validated on both the
+// standard set the app ships, models/dfn3, and a since-removed causal `_ll` set). Algorithmic
+// latency is latencySamples(): one STFT hop plus the encoder lookahead -- 1440 (30 ms) for
+// models/dfn3; 480 for a lookahead-0 model.
 class Dfn3Streaming {
 public:
   explicit Dfn3Streaming(const std::string& modelDir);  // throws std::runtime_error on load failure
@@ -20,9 +20,8 @@ public:
   // one-off resync (a reset() before the next hop) -- that resync reallocates, so a single
   // post-failure hop is not RT-safe, but steady-state processing is.
   void process(const float* in480, float* out480) noexcept;  // exactly 480 in/out
-  uint32_t latencySamples() const noexcept;                  // 480 (_ll) / 1440 (standard)
+  uint32_t latencySamples() const noexcept;                  // 1440 for models/dfn3
   float lastLsnr() const noexcept;
-  bool lastHopFailed() const noexcept;    // true if the last process() hop threw (silenced)
   uint64_t failedHops() const noexcept;   // sticky count of silenced hops since construction
   // reset() reallocates (ring + ORT re-bind) -- NOT real-time-safe; call only off the audio
   // thread (e.g. before streaming starts). process() is the RT-safe hot path.

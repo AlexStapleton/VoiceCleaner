@@ -31,7 +31,6 @@ class WorkerSupervisor {
   bool sendSelectCapture(const std::string& id, double driftSeedPpm);  // pipe: SelectCaptureDevice
   bool sendSelectRender(const std::string& id);                        // pipe: SelectRenderDevice
   void shutdown(uint64_t waitMs);             // send Shutdown, bounded-wait for exit
-  bool workerDown() const { return down_; }
 
  private:
   bool openReader();                          // (re)open the telemetry mapping

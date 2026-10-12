@@ -1,6 +1,5 @@
 #include "wasapi_render.h"
 #include <windows.h>
-#include <avrt.h>
 #include <cstdint>
 #include <algorithm>
 #include "mmcss_thread.h"

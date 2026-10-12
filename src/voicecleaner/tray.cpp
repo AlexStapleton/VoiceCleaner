@@ -1,19 +1,14 @@
 #include "tray.h"
 #include "resource.h"   // IDI_ACTIVE / IDI_BYPASSED / IDI_DOWN
 #include <string>
+#include "utf8.h"
 
 #pragma comment(lib, "shell32.lib")
 #pragma comment(lib, "user32.lib")
 
 namespace vc::ui {
 
-static std::wstring toW(const std::string& s) {
-  if (s.empty()) return L"";
-  int n = MultiByteToWideChar(CP_UTF8, 0, s.data(), (int)s.size(), nullptr, 0);
-  std::wstring w(n, L'\0');
-  MultiByteToWideChar(CP_UTF8, 0, s.data(), (int)s.size(), w.data(), n);
-  return w;
-}
+static std::wstring toW(const std::string& s) { return vc::utf8ToWide(s); }
 
 // Load a resource icon at the system small-icon size (the tray renders at ~16 px).
 static HICON loadSmallIcon(HINSTANCE h, int id) {

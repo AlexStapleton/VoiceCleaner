@@ -3,6 +3,9 @@ project(VoiceCleaner LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+# Developer tools (offline-cli: WAV in -> engine/chain -> WAV out, for A/B listening and the
+# tools/*.py harnesses). Not part of the app or the release; off by default.
+option(VC_BUILD_DEV_TOOLS "Build developer tools (offline-cli)" OFF)
 if (MSVC)
   add_compile_options(/W4 /permissive-)
 endif()
@@ -20,8 +23,8 @@ FetchContent_Declare(tomlplusplus
 FetchContent_MakeAvailable(tomlplusplus)
 
 FetchContent_Declare(onnxruntime
-  URL https://github.com/microsoft/onnxruntime/releases/download/v1.28.0/onnxruntime-win-x64-1.28.0.zip
-  URL_HASH SHA256=abef733dacbe2f571547a7150b479b5cb9cc0df22f96c24983a42cadb1b4f8bc)
+  URL https://github.com/microsoft/onnxruntime/releases/download/v1.28.3/onnxruntime-win-x64-1.28.3.zip
+  URL_HASH SHA256=1d6fab48e85f948436af7c8c971d2c145cf224e2c444755dec894f8b0de11a83)
 FetchContent_MakeAvailable(onnxruntime)
 add_library(onnxruntime SHARED IMPORTED GLOBAL)
 set_target_properties(onnxruntime PROPERTIES
@@ -39,8 +42,9 @@ add_subdirectory(src/denoise-core)
 add_subdirectory(src/dfn3)
 add_subdirectory(src/win-audio)
 add_subdirectory(src/voicecleaner-worker)
-add_subdirectory(src/offline-cli)
-add_subdirectory(src/dfn3-probe)
+if (VC_BUILD_DEV_TOOLS)
+  add_subdirectory(src/offline-cli)
+endif()
 add_subdirectory(src/voicecleaner)
 add_subdirectory(tests/transport-core)
 add_subdirectory(tests/denoise-core)

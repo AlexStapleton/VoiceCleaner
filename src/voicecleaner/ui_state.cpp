@@ -19,7 +19,7 @@ void UiState::onTelemetry(const vc::ipc::Telemetry& t, bool ready) {
   activeEngine_ = t.activeEngine;
   bypass_       = (t.bypass != 0);
   dspChain_     = (t.dspChain != 0);
-  // Keep the outgoing snapshot synced to live state (design §5): a later bypass-only toggle then
+  // Keep the outgoing snapshot synced to live state: a later bypass-only toggle then
   // carries the live engine, and the embedded request_engine on the worker becomes a no-op.
   // Sticky engine latch: after a user selects an engine, hold current_.engine at that choice and
   // stop syncing from telemetry until telemetry confirms the switch — otherwise a stale (lagging)
@@ -92,7 +92,7 @@ std::string UiState::statusLine() const {
       return "\xE2\x97\x8B Bypassed \xC2\xB7 " + std::string(engineName(activeEngine_)) +
              " \xC2\xB7 \xE2\x86\x92 " + renderLabel_;
     case StatusKind::NoConfig:
-      return "No microphone configured \xE2\x80\x94 the mic picker arrives in Phase 4";
+      return "Choose a microphone and an output below to start";
     case StatusKind::Down:
     default:
       return "\xE2\x9C\x95 Worker not running";

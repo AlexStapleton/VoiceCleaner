@@ -10,17 +10,14 @@ static std::string write_tmp(const char* body) {
   std::ofstream(p) << body;
   return p;
 }
-TEST(Config, LoadsToml) {
+TEST(Config, RejectsOldFlatFormat) {
   auto p = write_tmp(
     "capture_device_id = \"cap-1\"\n"
-    "render_device_id  = \"ren-1\"\n"
-    "ring_frames = 1024\n"
-    "csv_path = \"drift.csv\"\n");
-  Config c = Config::load(p);
-  EXPECT_EQ(c.captureDeviceId, "cap-1");
-  EXPECT_EQ(c.renderDeviceId, "ren-1");
-  EXPECT_EQ(c.ringFrames, 1024u);
-  EXPECT_EQ(c.csvPath, "drift.csv");
+    "render_device_id  = \"ren-1\"\n");
+  EXPECT_THROW(Config::load(p), std::runtime_error);
+}
+TEST(Config, CsvLogIsOffByDefault) {
+  EXPECT_TRUE(Config{}.csvPath.empty());
 }
 TEST(Config, CliOverridesTakePrecedence) {
   Config c;
@@ -30,10 +27,13 @@ TEST(Config, CliOverridesTakePrecedence) {
   EXPECT_EQ(c.captureDeviceId, "from-cli");
   EXPECT_EQ(c.csvPath, "x.csv");
 }
-TEST(Config, EnforcesRingFloor) {
+TEST(Config, ClampsRingToLatencyBounds) {
   Config c; c.ringFrames = 2;
   c.validate();
-  EXPECT_GE(c.ringFrames, 3u);
+  EXPECT_EQ(c.ringFrames, vc::kRingFramesMin);
+  c.ringFrames = 100000;
+  c.validate();
+  EXPECT_EQ(c.ringFrames, vc::kRingFramesMax);
 }
 TEST(Config, ThrowsOnMalformedToml) {
   auto p = write_tmp("this is = = not valid ][ toml\n");
@@ -43,8 +43,7 @@ TEST(Config, ClampsNegativeRingFromCli) {
   Config c;
   const char* argv[] = {"app", "--ring", "-5"};
   c.apply_cli(3, const_cast<char**>(argv));
-  EXPECT_GE(c.ringFrames, 3u);
-  EXPECT_LE(c.ringFrames, 1048576u);
+  EXPECT_EQ(c.ringFrames, vc::kRingFramesMin);
 }
 TEST(Config, ApplyCliHandlesValuelessFlagBeforeDevicePairs) {
   const char* argv[] = {"exe", "--dev-keys", "--capture", "CAP", "--render", "REN"};

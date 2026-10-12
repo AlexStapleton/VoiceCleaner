@@ -1,6 +1,32 @@
 # VoiceCleaner — Project Status & Resume Guide
 
-_Last updated: 2026-08-21_
+_Last updated: 2026-10-12_
+
+## Current state (v1.5)
+
+Shipping app: `voicecleaner.exe` (UI + tray) supervising `voicecleaner-worker.exe` (audio). RNNoise is
+the engine in daily use; DeepFilterNet3 stays selectable but frozen. Releases are built, tested and
+published by GitHub Actions (`.github/workflows/release.yml`); see the root `README.md` for install,
+build and layout.
+
+Recent releases:
+- **v1.2** — performance/robustness review fixes (denormal flushing, clean restarts, crash-safe settings
+  save, throttled slider sends, pipe message-loss fix). Review: `docs/superpowers/notes/2026-10-10-performance-review.md`.
+- **v1.3** — RNNoise built like upstream (int8 weights + SSE4.1/AVX2 dispatch), ~6x faster per frame.
+  Notes: `docs/superpowers/notes/2026-10-11-rnnoise-build-performance.md`.
+- **v1.4** — MAX BOOST slider (AGC max gain, default +18 dB) and a -16 dBFS target default.
+- **v1.5** — settings moved to `%LOCALAPPDATA%\VoiceCleaner` (updates no longer reset them), engine
+  choice persisted, status line names the real output, LATENCY clamped to 4..512 everywhere, plus a
+  cleanup pass (dead code, retired `models/dfn3-ll`, repo layout, `app_window` refactor). Review:
+  `docs/superpowers/notes/2026-10-12-cleanup-review.md`.
+  Also ONNX Runtime 1.28.0 → 1.28.3 (patch release: memory-safety fixes; DFN3 only).
+
+Worker developer flags (console run): `--list-devices`, `--config <settings.toml>`, `--capture/--render
+<id>`, `--ring <4..512>`, `--csv <path>` (drift CSV for `tools/analyze_drift.py`), `--record <wav>
+--seconds N`, `--dev-keys`. The old flat `drift.toml` config format and `phase0-app.exe` referenced in
+the history below no longer exist.
+
+## History
 
 **Active work:** COMPLETE — **RNNoise quality + performance pass (DFN3 frozen).** Project pivoted to
 RNNoise-path + performance only; DFN3 stays shipped/selectable but untouched. Three workstreams merged to
@@ -149,17 +175,17 @@ Plan: `docs/superpowers/plans/2026-08-13-phase2-denoise-core-offline-cli.md`.
 
 ### DeepFilterNet3 — OFFLINE ENGINE COMPLETE & VALIDATED
 Full offline pipeline works and **sample-matches the official `deep-filter` reference (Pearson r =
-0.9946)** on a synthetic noisy clip — see `docs/dfn3-validation.md`. Run it:
+0.9946)** on a synthetic noisy clip — see `docs/dfn3/dfn3-validation.md`. Run it:
 `offline-cli --engine dfn3 <in.wav> <out.wav>`.
 - **STFT/ISTFT** (`stft.h`): Vorbis window + libDF `wnorm` analysis normalization, perfect
   reconstruction; `third_party/kissfft/` (real FFT).
 - **ERB filterbank** (`erb.h`): 32 bands, exact libDF construction.
 - **Feature extraction** (`dfn3_features.h`): `feat_erb`/`feat_spec` with libDF exp-mean normalization.
 - **Post-inference DSP** (`dfn3_postdsp.h`): ERB mask broadcast + order-5 deep filter.
-- **ONNX Runtime 1.28.0** vendored (FetchContent, pinned SHA256); models in `models/dfn3/`.
+- **ONNX Runtime 1.28.3** (1.28.0 before v1.5) vendored (FetchContent, pinned SHA256); models in `models/dfn3/`.
 - **Orchestrator** `src/dfn3/dfn3_offline.{h,cpp}`: STFT → features → enc/erb_dec/df_dec over full T →
   mask (high bins) + deep filter (noisy low bins) → ISTFT. `src/dfn3-probe/` loads/checks the models.
-Reference details (params, model I/O shapes): `docs/dfn3-progress.md`.
+Reference details (params, model I/O shapes): `docs/dfn3/dfn3-progress.md`.
 
 ## What remains (DFN3)
 

@@ -1,5 +1,5 @@
 add_library(transport-core
-  framer.cpp channel.cpp occupancy.cpp dropout.cpp config.cpp settings.cpp
+  framer.cpp channel.cpp config.cpp settings.cpp
   resampler.cpp drift_control.cpp wav.cpp frame_time_stats.cpp)
 target_include_directories(transport-core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(transport-core PUBLIC tomlplusplus::tomlplusplus)

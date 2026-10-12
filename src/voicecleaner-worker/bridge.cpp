@@ -6,12 +6,12 @@
 #include <string>
 #include "channel.h"
 #include "device_enumerator.h"
+#include "utf8.h"
 #include "mmcss_thread.h"
 #include "rt_memory.h"
 #include "latency.h"
 namespace vc {
 
-static std::wstring widen(const std::string& s) { return std::wstring(s.begin(), s.end()); } // ASCII device IDs
 
 Bridge::Bridge(const Config& cfg)
   : cfg_(cfg),
@@ -25,8 +25,8 @@ Bridge::Bridge(const Config& cfg)
 
 bool Bridge::start() {
   DeviceEnumerator e;
-  IMMDevice* capDev = e.resolve(widen(cfg_.captureDeviceId));
-  IMMDevice* renDev = e.resolve(widen(cfg_.renderDeviceId));
+  IMMDevice* capDev = e.resolve(vc::utf8ToWide(cfg_.captureDeviceId));
+  IMMDevice* renDev = e.resolve(vc::utf8ToWide(cfg_.renderDeviceId));
   if (!capDev || !renDev) {
     std::fprintf(stderr, "error: could not resolve capture/render device (check IDs via --list-devices)\n");
     if (capDev) capDev->Release();
@@ -102,7 +102,7 @@ bool Bridge::start() {
   start_ = std::chrono::steady_clock::now();   // telemetry uptimeMs baseline
   running_.store(true, std::memory_order_release);
   deviceLost_.store(false, std::memory_order_release);   // reset any prior fatal state
-  logger_.start();
+  if (!cfg_.csvPath.empty()) logger_.start();   // developer drift CSV (--csv); off in normal use
   telemetryOn_ = telemetry_.create(L"Local\\voicecleaner-telemetry");
 
   auto errCb = [this](const char* w){
@@ -122,7 +122,7 @@ bool Bridge::start() {
 
   capDev->Release(); renDev->Release();   // WASAPI classes Activated their own client; device no longer needed
 
-  // Latency budget (F3): computed from the ACTUAL queried WASAPI buffer sizes + this session's config,
+  // Latency budget: computed from the ACTUAL queried WASAPI buffer sizes + this session's config,
   // so it's a real per-device figure, not the doc estimate. App-controlled stages only (analog/driver
   // latency is outside the process). Republished each telemetry hop via estLatencyMs_.
   {
@@ -140,7 +140,8 @@ bool Bridge::start() {
 
   std::printf("bridge running: ring=%zu frames (primed %zu), engine=%s, warm_standby=%s, dsp_chain=%s, csv=%s\n",
               ringB_.capacity(), ringB_.capacity()/2, cfg_.engine.c_str(),
-              cfg_.warmStandby ? "on" : "off", cfg_.dspChain ? "on" : "off", cfg_.csvPath.c_str());
+              cfg_.warmStandby ? "on" : "off", cfg_.dspChain ? "on" : "off",
+              cfg_.csvPath.empty() ? "off" : cfg_.csvPath.c_str());
   return true;
 }
 
@@ -191,7 +192,7 @@ void Bridge::relayLoop() {
       frameStats_.reset(); hopStats_.reset(); ringBHigh_ = 0;   // relay owns these -> reset here (race-free)
     }
     while (ringA_.try_pop(f)) {
-      const auto hop0 = std::chrono::steady_clock::now();   // whole-hop timing start (F2): pop..push, everything below
+      const auto hop0 = std::chrono::steady_clock::now();   // whole-hop timing start: pop..push, everything below
       const vc::ipc::Params sp = params_.snapshot();
       if (chain_) {
         chain_->setHpfCutoffHz(sp.hpfCutoffHz);
@@ -206,7 +207,7 @@ void Bridge::relayLoop() {
       }
       if (engine_) engine_->SetAggression(sp.aggression);   // DFN3-only; RNNoise/passthrough no-op
       const float* src = f.data();
-      const auto t0 = std::chrono::steady_clock::now();   // time ONLY engine+chain compute (Gate C)
+      const auto t0 = std::chrono::steady_clock::now();   // time ONLY engine+chain compute
       if (chain_)       { chain_->process_frame(f.data(), proc_.data()); src = proc_.data(); }
       else if (engine_) { engine_->ProcessFrame(f.data(), proc_.data()); src = proc_.data(); }
       const auto t1 = std::chrono::steady_clock::now();
@@ -265,7 +266,7 @@ void Bridge::relayLoop() {
         Frame pf; for (size_t i = 0; i < FRAME_SAMPLES; ++i) pf[i] = src[i];
         if (!ringB_.try_push(pf)) dropouts_.record_overrun();
       }
-      // Whole-hop time (F2): everything from ringA pop through ringB push — the engine+chain
+      // Whole-hop time: everything from ringA pop through ringB push — the engine+chain
       // slice (frameStats_) plus params snapshot, telemetry aggregation, drift + resample +
       // reframe. Reveals the per-hop cost that the narrower frameStats_ window excludes.
       hopStats_.record(std::chrono::duration<double, std::milli>(
@@ -334,6 +335,9 @@ bool Bridge::reselectCapture(const std::string& deviceId, double driftSeedPpm) {
 bool Bridge::reselectRender(const std::string& deviceId) {
   stop();
   cfg_.renderDeviceId = deviceId;
+  // A new output device has its own clock: restart drift tracking from zero instead of carrying the
+  // old device's correction into the new pairing.
+  if (cfg_.driftCompensation) controller_.seedPpm(0.0);   // no relay running here -> race-free
   return start();
 }
 

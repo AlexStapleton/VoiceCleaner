@@ -1,4 +1,5 @@
 #include <cstring>
+#include <cwchar>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -8,8 +9,10 @@
 #include <iostream>
 #include <vector>
 #include <windows.h>
+#include <shellapi.h>   // CommandLineToArgvW
 #include "com_guard.h"
 #include "device_enumerator.h"
+#include "utf8.h"
 #include "config.h"
 #include "bridge.h"
 #include "wasapi_capture.h"
@@ -20,7 +23,6 @@
 static std::atomic<bool> g_stop{false};
 static BOOL WINAPI ctrlHandler(DWORD) { g_stop.store(true); return TRUE; }
 
-static std::wstring widen(const std::string& s) { return std::wstring(s.begin(), s.end()); } // ASCII device IDs
 
 // Record path: capture the configured capture device (K688) to a 48 kHz mono PCM16 WAV for N
 // seconds with NO processing/render/engine/relay. Mirrors the bridge's device resolution +
@@ -31,7 +33,7 @@ static int runRecord(const vc::Config& cfg, const std::string& recordPath, int s
     return 1;
   }
   vc::DeviceEnumerator e;
-  IMMDevice* capDev = e.resolve(widen(cfg.captureDeviceId));
+  IMMDevice* capDev = e.resolve(vc::utf8ToWide(cfg.captureDeviceId));
   if (!capDev) {
     std::fprintf(stderr, "error: could not resolve capture device '%s' (check ID via --list-devices)\n",
                  cfg.captureDeviceId.c_str());
@@ -88,6 +90,23 @@ static int runRecord(const vc::Config& cfg, const std::string& recordPath, int s
   return 0;
 }
 
+// argv is in the ANSI code page, which can't represent every path: the UI passes
+// %LOCALAPPDATA%\VoiceCleaner\settings.toml, and the user name in it may be non-ASCII. Re-read the
+// --config value from the UTF-16 command line and return it as UTF-8 ("" if absent).
+static std::string configPathFromWideCommandLine() {
+  int n = 0;
+  LPWSTR* wargv = CommandLineToArgvW(GetCommandLineW(), &n);
+  if (!wargv) return {};
+  std::string out;
+  for (int i = 1; i + 1 < n; ++i) {
+    if (std::wcscmp(wargv[i], L"--config") != 0) continue;
+    out = vc::wideToUtf8(wargv[i + 1]);
+    break;
+  }
+  LocalFree(wargv);
+  return out;
+}
+
 static const char* kindStr(vc::SampleKind k) {
   switch (k) { case vc::SampleKind::Float32: return "float32";
                case vc::SampleKind::Pcm16: return "pcm16"; default: return "unsupported"; }
@@ -102,7 +121,7 @@ int main(int argc, char** argv) {
   bool listDevices = false; std::string configPath; int seconds = 0; std::string recordPath; bool devKeys = false;
   for (int i = 1; i < argc; ++i) {
     if (!std::strcmp(argv[i], "--list-devices")) listDevices = true;
-    else if (!std::strcmp(argv[i], "--config") && i + 1 < argc) configPath = argv[++i];
+    else if (!std::strcmp(argv[i], "--config") && i + 1 < argc) { ++i; configPath = configPathFromWideCommandLine(); }
     else if (!std::strcmp(argv[i], "--seconds") && i + 1 < argc) seconds = std::atoi(argv[++i]);
     else if (!std::strcmp(argv[i], "--record") && i + 1 < argc) recordPath = argv[++i];
     else if (!std::strcmp(argv[i], "--dev-keys")) devKeys = true;
@@ -133,7 +152,7 @@ int main(int argc, char** argv) {
     SetConsoleCtrlHandler(ctrlHandler, TRUE);
     if (!bridge.start()) return 1;
 
-    // §8.5 command channel: a named-pipe server dispatching worker-control commands (params,
+    // Command channel: a named-pipe server dispatching worker-control commands (params,
     // engine selection via SetParams.engine, shutdown). Must outlive the main loop; stopped
     // explicitly below (its destructor also calls stop(), which is safe/idempotent).
     vc::ipc::PipeServer pipe;
@@ -143,8 +162,6 @@ int main(int argc, char** argv) {
           bridge.params().publish(c.params);
           bridge.request_engine((int)c.params.engine);   // lean: install-on-demand + crossfade; warm: instant crossfade; passthrough: no-op
           break;
-        case vc::ipc::CmdType::SetWarmStandby:
-          break;   // deferred: toggling warm-standby requires a pipeline rebuild; not yet wired
         case vc::ipc::CmdType::ResetCounters:
           bridge.reset_counters();   // zero dropout/frame-time/ring-high-water for a clean measurement window
           break;
@@ -161,7 +178,7 @@ int main(int argc, char** argv) {
       }
     });
 
-    // Interim warm-standby switch trigger (NOT the §8.5 command channel): a non-RT stdin
+    // Interim warm-standby switch trigger (NOT the command channel): a non-RT stdin
     // reader that maps 1->engine 0 (RNNoise), 2->engine 1 (DFN3). Only spawned when
     // --dev-keys is passed; normal runs never start this thread. Blocking on std::cin, so on
     // shutdown we set g_stop and detach (join would block until a keypress).
@@ -182,8 +199,8 @@ int main(int argc, char** argv) {
       std::this_thread::sleep_for(std::chrono::milliseconds(100));
       bridge.reclaimRetiredEngines();   // free engines the RT relay retired after a lean switch
       if (bridge.device_lost()) {
-        std::fprintf(stderr, "fatal: audio device lost/invalidated — stopping the run visibly. "
-                             "(Automatic reconnect is Phase 1; re-run once the device is back.)\n");
+        std::fprintf(stderr, "fatal: audio device lost/invalidated — exiting "
+                             "(the VoiceCleaner app restarts the worker).\n");
         rc = 2;
         break;
       }

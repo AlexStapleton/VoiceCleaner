@@ -20,7 +20,6 @@ public:
   bool start(IMMDevice* dev, FillCb onFill, ErrorCb onError);  // false on setup failure
   void stop();
   ~WasapiRender();
-  int channels() const { return channels_; }
   uint32_t bufferFrames() const { return bufferFrames_; }   // shared render buffer (pre-rolled at start); latency input
 private:
   void run();

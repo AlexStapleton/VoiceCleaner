@@ -4,6 +4,8 @@
 # network to SSE4.1 or AVX2 kernels, with an SSE2 baseline. No autotools config.h.
 # Model weights are compiled in via src/rnnoise_data.c (downloaded via
 # download_model.sh at vendoring time; committed here).
+# Only the library sources are vendored: upstream's autotools build, examples, docs and the
+# training/dataset scripts (dump_features.c, write_weights.c, rnn_train.py, scripts/) are not.
 #
 # Measured on the same clip (Linux gcc -O2, AVX2 CPU): ~1207 us/frame for the old
 # configuration (float32 "debug" weights, no SIMD — what MSVC compiled, since MSVC

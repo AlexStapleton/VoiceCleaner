@@ -33,7 +33,7 @@ Settings Settings::load(const std::string& path) {
   if (auto g = t["global"].as_table()) {
     s.activeCaptureId = (*g)["active_capture_id"].value_or(std::string(""));
     s.renderId        = (*g)["render_id"].value_or(std::string(""));
-    s.ringFrames      = (size_t)(*g)["ring_frames"].value_or((int64_t)8);
+    s.ringFrames      = clampRingFrames((*g)["ring_frames"].value_or((int64_t)8));   // hand-edited -1 must not wrap
     s.lowLatency      = (*g)["low_latency"].value_or(false);
     s.collapsedSections = (unsigned)(*g)["collapsed_sections"].value_or((int64_t)0);
     if (auto mics = t["mic"].as_table()) {
@@ -57,20 +57,6 @@ Settings Settings::load(const std::string& path) {
           s.mics.push_back(std::move(m));
         }
       }
-    }
-  } else {
-    // Flat back-compat: synthesize [global] + one profile from Phase-3 top-level keys.
-    s.activeCaptureId = t["capture_device_id"].value_or(std::string(""));
-    s.renderId        = t["render_device_id"].value_or(std::string(""));
-    s.ringFrames      = (size_t)t["ring_frames"].value_or((int64_t)8);
-    s.lowLatency      = t["low_latency"].value_or(false);
-    if (!s.activeCaptureId.empty()) {
-      MicProfile m;
-      m.id          = s.activeCaptureId;
-      m.engine      = t["engine"].value_or(std::string("rnnoise"));
-      m.warmStandby = t["warm_standby"].value_or(false);
-      m.dspChain    = t["dsp_chain"].value_or(true);
-      s.mics.push_back(std::move(m));
     }
   }
   return s;
@@ -127,7 +113,8 @@ bool Settings::save(const std::string& path) const {
   // and a worker (re)starting mid-write failed Config::load. A rename leaves either the old or the
   // new file, never a torn one.
   namespace fs = std::filesystem;
-  const fs::path target(path);
+  // `path` is UTF-8; a plain fs::path(std::string) would decode it with the ANSI code page on Windows.
+  const fs::path target(std::u8string(path.begin(), path.end()));
   fs::path tmp = target;
   tmp += ".tmp";
   std::error_code ec;
