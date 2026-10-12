@@ -3,55 +3,53 @@
 using namespace vc::ui;
 using vc::ipc::Telemetry;
 
-static Telemetry tel(uint32_t engine, uint32_t bypass, uint32_t dspChain, uint32_t seq) {
-  Telemetry t{}; t.activeEngine = engine; t.bypass = bypass; t.dspChain = dspChain; t.seq = seq;
+static Telemetry tel(uint32_t bypass, uint32_t dspChain, uint32_t seq) {
+  Telemetry t{}; t.bypass = bypass; t.dspChain = dspChain; t.seq = seq;
   t.workerState = (uint32_t)vc::ipc::WorkerState::Running;
   return t;
 }
 
 TEST(UiState, ActiveStatusLineFromReadyTelemetry) {
   UiState ui; ui.setRenderLabel("CABLE Input");
-  ui.onTelemetry(tel(/*engine*/1, /*bypass*/0, /*dspChain*/1, /*seq*/1), /*ready*/true);
+  ui.onTelemetry(tel(/*bypass*/0, /*dspChain*/1, /*seq*/1), /*ready*/true);
   EXPECT_EQ(ui.statusKind(), StatusKind::Active);
   EXPECT_EQ(ui.statusLine(),
-            "\xE2\x97\x8F Active \xC2\xB7 DeepFilterNet3 \xC2\xB7 \xE2\x86\x92 CABLE Input"
+            "\xE2\x97\x8F Active \xC2\xB7 \xE2\x86\x92 CABLE Input"
             " \xC2\xB7 VAD \xE2\x97\x8B \xC2\xB7 AGC +0.0 dB");
-  EXPECT_EQ(ui.activeEngine(), 1u);
 }
 
 TEST(UiState, BypassedStatusLineAndDisplay) {
   UiState ui; ui.setRenderLabel("CABLE Input");
-  ui.onTelemetry(tel(/*engine*/0, /*bypass*/1, /*dspChain*/1, /*seq*/1), /*ready*/true);
+  ui.onTelemetry(tel(/*bypass*/1, /*dspChain*/1, /*seq*/1), /*ready*/true);
   EXPECT_EQ(ui.statusKind(), StatusKind::Bypassed);
   EXPECT_TRUE(ui.bypassed());
   EXPECT_EQ(ui.statusLine(),
-            "\xE2\x97\x8B Bypassed \xC2\xB7 RNNoise \xC2\xB7 \xE2\x86\x92 CABLE Input");
+            "\xE2\x97\x8B Bypassed \xC2\xB7 \xE2\x86\x92 CABLE Input");
 }
 
 TEST(UiState, PreReadyTelemetryDoesNotFlipToActive) {
   UiState ui;
-  ui.onTelemetry(tel(1, 0, 1, 1), /*ready*/false);   // present but not yet ready
+  ui.onTelemetry(tel(0, 1, 1), /*ready*/false);   // present but not yet ready
   EXPECT_EQ(ui.statusKind(), StatusKind::Down);       // stays Down until ready
-  EXPECT_EQ(ui.activeEngine(), 1u);                   // display fields still track telemetry
 }
 
 TEST(UiState, BypassControlDisabledWhenNoChain) {
   UiState ui;
-  ui.onTelemetry(tel(/*engine*/0, /*bypass*/0, /*dspChain*/0, /*seq*/1), /*ready*/true);
+  ui.onTelemetry(tel(/*bypass*/0, /*dspChain*/0, /*seq*/1), /*ready*/true);
   EXPECT_FALSE(ui.bypassEnabled());
   EXPECT_EQ(ui.bypassDisabledReason(), "no DSP chain \xE2\x80\x94 bypass unavailable");
 }
 
 TEST(UiState, BypassControlEnabledWithChain) {
   UiState ui;
-  ui.onTelemetry(tel(0, 0, /*dspChain*/1, 1), /*ready*/true);
+  ui.onTelemetry(tel(0, /*dspChain*/1, 1), /*ready*/true);
   EXPECT_TRUE(ui.bypassEnabled());
 }
 
 TEST(UiState, AttachReflectsTrueBypassAndCapability) {
   // Attach to a worker already bypassed, with a chain: the very first telemetry must show it.
   UiState ui;
-  ui.onTelemetry(tel(/*engine*/1, /*bypass*/1, /*dspChain*/1, /*seq*/42), /*ready*/true);
+  ui.onTelemetry(tel(/*bypass*/1, /*dspChain*/1, /*seq*/42), /*ready*/true);
   EXPECT_TRUE(ui.bypassed());
   EXPECT_TRUE(ui.bypassEnabled());
   EXPECT_EQ(ui.statusKind(), StatusKind::Bypassed);
@@ -59,7 +57,7 @@ TEST(UiState, AttachReflectsTrueBypassAndCapability) {
 
 TEST(UiState, WorkerDownStatus) {
   UiState ui;
-  ui.onTelemetry(tel(1, 0, 1, 1), true);   // was Active
+  ui.onTelemetry(tel(0, 1, 1), true);   // was Active
   ui.onWorkerDown();
   EXPECT_EQ(ui.statusKind(), StatusKind::Down);
   EXPECT_EQ(ui.statusLine(), "\xE2\x9C\x95 Worker not running");
@@ -73,62 +71,21 @@ TEST(UiState, NoConfigStatus) {
             "Choose a microphone and an output below to start");
 }
 
-TEST(UiState, BypassToggleCarriesLiveEngineNotStaleDefault) {
-  // Params::defaults().engine == 1 (DFN3). Worker is live on engine 0 (RNNoise).
-  UiState ui;
-  ui.onTelemetry(tel(/*engine*/0, /*bypass*/0, /*dspChain*/1, /*seq*/1), /*ready*/true);
-  vc::ipc::Params sent = ui.onToggleBypass();
-  EXPECT_EQ(sent.engine, 0u);   // synced to live engine, NOT the stale default 1
-  EXPECT_EQ(sent.bypass, 1u);
-}
-
-TEST(UiState, SelectEngineSetsOutgoingEngine) {
-  UiState ui;
-  ui.onTelemetry(tel(/*engine*/1, 0, 1, 1), true);
-  vc::ipc::Params sent = ui.onSelectEngine(0u);
-  EXPECT_EQ(sent.engine, 0u);
-}
-
 TEST(UiState, BypassToggleFlipsBackAndForth) {
   UiState ui;
-  ui.onTelemetry(tel(1, /*bypass*/0, 1, 1), true);
+  ui.onTelemetry(tel(/*bypass*/0, 1, 1), true);
   EXPECT_EQ(ui.onToggleBypass().bypass, 1u);   // off -> on
-  ui.onTelemetry(tel(1, /*bypass*/1, 1, 2), true);   // worker confirms bypassed
+  ui.onTelemetry(tel(/*bypass*/1, 1, 2), true);   // worker confirms bypassed
   EXPECT_EQ(ui.onToggleBypass().bypass, 0u);   // on -> off
 }
 
 TEST(UiState, ToggleFromAttachedBypassedTurnsItOff) {
   // Attach to a worker already bypassed (fresh UiState, no prior toggle). The first toggle must
-  // turn bypass OFF, which only works if current_.bypass is synced from telemetry — the mirror of
-  // the engine-sync invariant, on the bypass field.
+  // turn bypass OFF, which only works if current_.bypass is synced from telemetry .
   UiState ui;
-  ui.onTelemetry(tel(/*engine*/1, /*bypass*/1, /*dspChain*/1, /*seq*/1), /*ready*/true);
+  ui.onTelemetry(tel(/*bypass*/1, /*dspChain*/1, /*seq*/1), /*ready*/true);
   vc::ipc::Params sent = ui.onToggleBypass();
   EXPECT_EQ(sent.bypass, 0u);
-}
-
-TEST(UiState, SwitchThenBypassKeepsSelectedEngineDuringTelemetryLag) {
-  // User is live on RNNoise (0), selects DFN3 (1), but telemetry hasn't caught up yet (still 0).
-  // A bypass toggle in that window must carry engine 1 (the user's choice), not the stale 0.
-  UiState ui;
-  ui.onTelemetry(tel(/*engine*/0, /*bypass*/0, /*dspChain*/1, /*seq*/1), /*ready*/true);
-  ui.onSelectEngine(1u);                                   // click DFN3 (SetParams engine=1 sent)
-  ui.onTelemetry(tel(/*engine*/0, 0, 1, /*seq*/2), true);  // stale tick: worker not yet reporting 1
-  vc::ipc::Params sent = ui.onToggleBypass();
-  EXPECT_EQ(sent.engine, 1u);   // selected engine held, NOT reverted to stale 0
-  EXPECT_EQ(sent.bypass, 1u);
-}
-
-TEST(UiState, EngineSyncResumesAfterTelemetryConfirmsSelection) {
-  // Once telemetry confirms the selected engine, normal telemetry-authoritative sync resumes.
-  UiState ui;
-  ui.onTelemetry(tel(0, 0, 1, 1), true);
-  ui.onSelectEngine(1u);
-  ui.onTelemetry(tel(/*engine*/1, 0, 1, 2), true);   // confirmed -> latch clears
-  // A later genuine change to engine 0 (e.g. reported by the worker) must now sync through again.
-  ui.onTelemetry(tel(/*engine*/0, 0, 1, 3), true);
-  vc::ipc::Params sent = ui.onToggleBypass();
-  EXPECT_EQ(sent.engine, 0u);   // sync resumed after confirmation
 }
 
 using S = LivenessTracker::Status;
@@ -202,22 +159,18 @@ TEST(SpawnArgs, ExactWorkerCommandLine) {
 
 TEST(UiState, TuningSettersMutateCurrentAndReturnIt) {
   UiState ui;
-  EXPECT_FLOAT_EQ(ui.onSetAggression(0.7f).aggression, 0.7f);
   EXPECT_FLOAT_EQ(ui.onSetHpf(120.0f).hpfCutoffHz, 120.0f);
   EXPECT_FLOAT_EQ(ui.onSetOutputGain(-18.0f).agcTargetDbfs, -18.0f);
   EXPECT_FLOAT_EQ(ui.onSetLimiter(-2.0f).limiterCeilingDbfs, -2.0f);
-  EXPECT_FLOAT_EQ(ui.current().aggression, 0.7f);
   EXPECT_FLOAT_EQ(ui.current().agcTargetDbfs, -18.0f);
 }
 TEST(UiState, SeedTuningSetsAllFourAndSurvivesBypassToggle) {
   UiState ui;
-  ui.seedTuning(/*aggr*/0.4f, /*hpf*/90.0f, /*gain*/-16.0f, /*lim*/-3.0f, /*declick*/0.0f, /*voiceFloor*/0.0f, /*gate*/0.0f, /*mix*/1.0f);
-  EXPECT_FLOAT_EQ(ui.current().aggression, 0.4f);
+  ui.seedTuning(/*hpf*/90.0f, /*gain*/-16.0f, /*lim*/-3.0f, /*declick*/0.0f, /*voiceFloor*/0.0f, /*gate*/0.0f, /*mix*/1.0f);
   EXPECT_FLOAT_EQ(ui.current().hpfCutoffHz, 90.0f);
   EXPECT_FLOAT_EQ(ui.current().agcTargetDbfs, -16.0f);
   EXPECT_FLOAT_EQ(ui.current().limiterCeilingDbfs, -3.0f);
   vc::ipc::Params sent = ui.onToggleBypass();
-  EXPECT_FLOAT_EQ(sent.aggression, 0.4f);
   EXPECT_FLOAT_EQ(sent.agcTargetDbfs, -16.0f);
 }
 TEST(UiState, OnSetDeclickMutatesCurrent) {
@@ -228,7 +181,7 @@ TEST(UiState, OnSetDeclickMutatesCurrent) {
 TEST(UiState, StatusLineShowsAgcReadoutWhenActive) {
   UiState ui;
   vc::ipc::Telemetry t{};
-  t.activeEngine = 0; t.bypass = 0; t.dspChain = 1;
+  t.bypass = 0; t.dspChain = 1;
   t.vadActive = 1; t.agcGainDb = 6.0f;
   ui.onTelemetry(t, /*ready*/true);
   std::string s = ui.statusLine();
@@ -253,25 +206,22 @@ TEST(UiState, OnSetMixMutatesCurrent) {
 }
 TEST(UiState, SeedTuningCarriesMix) {
   UiState ui;
-  ui.seedTuning(/*aggr*/0.0f, /*hpf*/80.0f, /*gain*/-20.0f, /*lim*/-1.0f,
+  ui.seedTuning(/*hpf*/80.0f, /*gain*/-20.0f, /*lim*/-1.0f,
                 /*declick*/0.0f, /*voiceFloor*/0.0f, /*gate*/0.0f, /*mix*/0.7f);
   EXPECT_FLOAT_EQ(ui.current().mixStrength, 0.7f);
 }
 TEST(UiState, SeedTuningCarriesDeclick) {
   UiState ui;
-  ui.seedTuning(/*aggr*/0.4f, /*hpf*/90.0f, /*gain*/-16.0f, /*lim*/-3.0f, /*declick*/0.7f, /*voiceFloor*/0.5f, /*gate*/0.3f, /*mix*/1.0f);
+  ui.seedTuning(/*hpf*/90.0f, /*gain*/-16.0f, /*lim*/-3.0f, /*declick*/0.7f, /*voiceFloor*/0.5f, /*gate*/0.3f, /*mix*/1.0f);
   EXPECT_FLOAT_EQ(ui.current().declickStrength, 0.7f);
   EXPECT_FLOAT_EQ(ui.current().declickVoiceFloor, 0.5f);
   EXPECT_FLOAT_EQ(ui.current().gateStrength, 0.3f);
-  EXPECT_FLOAT_EQ(ui.current().aggression, 0.4f);   // still carries the others
 }
-TEST(UiState, SeedTuningThenSelectEngineCarriesTuning) {
+TEST(UiState, SeedTuningCarriesAllTuningIntoCurrent) {
   UiState ui;
-  ui.seedTuning(/*aggression*/0.4f, /*hpfHz*/95.0f, /*gainDbfs*/-18.0f, /*limiterDbfs*/-2.0f,
+  ui.seedTuning(/*hpfHz*/95.0f, /*gainDbfs*/-18.0f, /*limiterDbfs*/-2.0f,
                 /*declick*/0.3f, /*declickVoiceFloor*/0.1f, /*gate*/0.5f, /*mix*/0.8f);
-  vc::ipc::Params p = ui.onSelectEngine(1u);   // the exact call the mic-switch path uses
-  EXPECT_EQ(p.engine, 1u);
-  EXPECT_FLOAT_EQ(p.aggression, 0.4f);
+  const vc::ipc::Params& p = ui.current();   // what the mic-switch path pushes
   EXPECT_FLOAT_EQ(p.hpfCutoffHz, 95.0f);
   EXPECT_FLOAT_EQ(p.agcTargetDbfs, -18.0f);
   EXPECT_FLOAT_EQ(p.limiterCeilingDbfs, -2.0f);
@@ -289,8 +239,8 @@ TEST(UiState, OnSetMaxBoostMutatesCurrent) {
 }
 TEST(UiState, SeedTuningCarriesMaxBoost) {
   UiState ui;
-  ui.seedTuning(/*aggr*/0.0f, /*hpf*/80.0f, /*gain*/-12.0f, /*lim*/-1.0f,
+  ui.seedTuning(/*hpf*/80.0f, /*gain*/-12.0f, /*lim*/-1.0f,
                 /*declick*/0.0f, /*voiceFloor*/0.0f, /*gate*/0.0f, /*mix*/1.0f, /*maxBoost*/27.0f);
   EXPECT_FLOAT_EQ(ui.current().agcMaxGainDb, 27.0f);
-  EXPECT_FLOAT_EQ(ui.onSelectEngine(0u).agcMaxGainDb, 27.0f);   // carried on the mic-switch push too
+  EXPECT_FLOAT_EQ(ui.current().agcMaxGainDb, 27.0f);   // carried on the mic-switch push too
 }

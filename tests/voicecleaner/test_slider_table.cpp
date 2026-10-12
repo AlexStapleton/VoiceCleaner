@@ -39,7 +39,3 @@ TEST(SliderTable, ApplySetsTheMatchingParam) {
     EXPECT_FLOAT_EQ(out.*s.paramField, v);
   }
 }
-
-TEST(SliderTable, OnlyAggressionIsDfn3Only) {
-  for (const auto& s : kSliderSpecs) EXPECT_EQ(s.dfn3Only, s.id == SliderId::Aggression);
-}
