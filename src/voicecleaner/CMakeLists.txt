@@ -1,7 +1,7 @@
 # Pure, Windows-free decision core — the unit-tested heart of the UI.
-add_library(voicecleaner-core STATIC ui_state.cpp device_picker.cpp slider.cpp respawn_policy.cpp)
+add_library(voicecleaner-core STATIC ui_state.cpp device_picker.cpp slider.cpp slider_table.cpp respawn_policy.cpp)
 target_include_directories(voicecleaner-core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(voicecleaner-core PUBLIC vc-ipc)
+target_link_libraries(voicecleaner-core PUBLIC vc-ipc transport-core)   # transport-core: MicProfile
 if (MSVC)
   target_compile_options(voicecleaner-core PUBLIC /utf-8)
 endif()

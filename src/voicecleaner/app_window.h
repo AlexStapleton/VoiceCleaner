@@ -2,18 +2,23 @@
 #include <windows.h>
 #include <d2d1.h>
 #include <dwrite.h>
+#include <array>
 #include <string>
 #include "ui_state.h"
 #include "worker_supervisor.h"
 #include "device_picker.h"
 #include "settings.h"
 #include "slider.h"
+#include "slider_table.h"
 #include "respawn_policy.h"
 #include "param_outbox.h"
 
 namespace vc::ui {
 
 class Tray;   // fwd
+
+// Registered window message a second instance broadcasts so the running one restores its window.
+inline constexpr const wchar_t* kRestoreMsgName = L"VoiceCleanerRestore";
 
 // The single Direct2D window. Owns the UiState; drives the supervisor from a 100 ms timer.
 class AppWindow {
@@ -33,38 +38,76 @@ class AppWindow {
   void requestRelaunch();
 
  private:
+  // Clickable buttons (hover highlight + click action).
+  enum class Control { None = -1, EngineRnn, EngineDfn, Bypass, Relaunch, Quit, RingApply, LowLatency };
+  // What the help strip explains. Sliders are 0..kSliderCount-1 (their SliderId).
+  enum HelpTarget : int { kHelpNone = -1, kHelpMic = 100, kHelpOutput, kHelpLatency, kHelpLowLatency,
+                          kHelpEngineRnn, kHelpEngineDfn, kHelpBypass };
+
+  // Solid-colour brushes, created with the render target and released with it.
+  struct Brushes {
+    ID2D1SolidColorBrush *text = nullptr, *dim = nullptr, *section = nullptr, *accent = nullptr,
+                         *accentHot = nullptr, *panel = nullptr, *panelHot = nullptr,
+                         *disabled = nullptr, *amber = nullptr;
+  };
+
   static LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
   LRESULT handle(UINT msg, WPARAM w, LPARAM l);
+  void onMouseDown(int x, int y);
+  void onMouseMove(int x, int y);
+
+  // ---- drawing ----
   void ensureRenderTarget();
   void discardRenderTarget();
   void paint();
-  void tick();                 // WM_TIMER: poll supervisor -> UiState -> InvalidateRect
-  void layout(D2D1_SIZE_F sz); // recompute control rects
+  void layout(D2D1_SIZE_F sz);             // recompute control rects + contentH_
+  void box(D2D1_RECT_F r, ID2D1Brush* b);
+  void label(const std::wstring& s, D2D1_RECT_F r, ID2D1Brush* b, IDWriteTextFormat* f);
+  void drawStatus(float width);
+  void drawPickerField(const wchar_t* caption, D2D1_RECT_F r, PickerKind k);
+  void drawEngineAndBypass(float width);
+  void drawHelpOrRelaunch();
+  void drawSliderGroups(float width);
+  void drawSlider(SliderId id);
+  void drawLatency(float width);
+  void drawFooter();
+  void drawPickerOverlay();
+
+  // ---- hit testing ----
+  Control hitControl(int x, int y) const;
+  int  trackHit(int x, int y) const;       // slider whose track band contains (x,y), or -1
+  int  helpTargetAt(int x, int y) const;   // HelpTarget / SliderId under (x,y)
+  std::wstring helpText() const;           // plain-English "what + how" for helpHot_
+  D2D1_RECT_F overlayRect() const;         // the open dropdown's bounding rect
+  int  overlayHit(int x, int y) const;     // row index under (x,y) in the open overlay, or -1
+
+  // ---- actions ----
+  void tick();                             // WM_TIMER: poll supervisor -> UiState -> InvalidateRect
+  void invalidate() { InvalidateRect(hwnd_, nullptr, FALSE); }
   void sendCurrent(const vc::ipc::Params& p, bool throttled = false);   // stage p + try to deliver
-  void flushParams(bool force);          // deliver outbox_.pending() if due; keeps it pending on failure
-  int  hitControl(int x, int y) const;   // 0=RNNoise 1=DFN3 2=Bypass 3=Relaunch, -1=none
-  void refreshDevices();                 // enumerate WASAPI devices + seed picker active from settings
-  D2D1_RECT_F overlayRect() const;       // the open dropdown's bounding rect
-  int  overlayHit(int x, int y) const;   // row index under (x,y) in the open overlay, or -1
+  void flushParams(bool force);            // deliver outbox_.pending() if due; keeps it pending on failure
+  void refreshDevices();                   // enumerate WASAPI devices + seed picker active from settings
   void applyPick(PickerKind k, size_t rowIndex);   // persist + spawn/switch
-  Slider& sliderByIndex(int i);
-  D2D1_RECT_F& trackByIndex(int i);
-  int  trackHit(int x, int y) const;               // slider index whose track band contains (x,y), or -1
-  int  helpTargetAt(int x, int y) const;           // control under (x,y) for the help strip (see helpText)
-  std::wstring helpText() const;                   // plain-English "what + how" for helpHot_
-  void setSliderFromX(int i, int x);               // set slider i's value from click/drag x
-  bool aggressionEnabled() const;                  // false when active engine is RNNoise
-  vc::ipc::Params applySlider(int i);              // push slider i's value into UiState -> Params
-  void persistTuning();                            // write the active profile on drag-end
-  void seedFromActiveProfile();                    // load the active mic's tuning into sliders + UiState
-  void respawnWorker();                            // full stop + fresh spawn so ring_frames is re-read
-  void toggleLowLatency();                          // flip [global].low_latency, persist, respawn
-  void toggleSection(int i);                        // collapse/expand slider group i (persist + resize)
-  void resizeToContent();                           // resize the window to the current laid-out height
-  void applyRing();                                // commit+clamp the latency box, persist, respawn
-  void commitRingEdit();                           // normalize ringEdit_ to the clamped pending value
-  int  ringParse() const;                          // ringEdit_ digits -> int (0 if empty/non-digit)
-  int  ringPendingClamped() const;                 // ringParse() clamped to [vc::kRingFramesMin, vc::kRingFramesMax]
+  bool sliderEnabled(SliderId id) const;   // false for DFN3-only sliders while RNNoise is active
+  void setSliderFromX(SliderId id, int x); // set a slider's value from click/drag x
+  vc::ipc::Params applySlider(SliderId id);  // push the slider's value into UiState -> Params
+  void persistTuning();                    // write the active profile on drag-end
+  void seedFromActiveProfile();            // load the active mic's tuning into sliders + UiState
+  void startWorker();                      // spawn/attach; the active tuning is re-pushed once ready
+  void respawnWorker();                    // full stop + fresh spawn so ring_frames is re-read
+  void quit();                             // stop the worker and close the app
+  void toggleLowLatency();                 // flip [global].low_latency, persist, respawn
+  void toggleSection(int i);               // collapse/expand slider group i (persist + resize)
+  void resizeToContent();                  // resize the window to the current laid-out height
+  void applyRing();                        // commit+clamp the latency box, persist, respawn
+  void commitRingEdit();                   // normalize ringEdit_ to the clamped pending value
+  int  ringParse() const;                  // ringEdit_ digits -> int (0 if empty/non-digit)
+  int  ringPendingClamped() const;         // ringParse() clamped to [vc::kRingFramesMin, vc::kRingFramesMax]
+
+  Slider& slider(SliderId id) { return sliders_[(size_t)id]; }
+  const Slider& slider(SliderId id) const { return sliders_[(size_t)id]; }
+  D2D1_RECT_F& track(SliderId id) { return tracks_[(size_t)id]; }
+  const D2D1_RECT_F& track(SliderId id) const { return tracks_[(size_t)id]; }
 
   HINSTANCE hInst_;
   HWND hwnd_ = nullptr;
@@ -95,34 +138,27 @@ class AppWindow {
   IDWriteTextFormat* capFmt_ = nullptr;     // section captions: small, centered
   IDWriteTextFormat* capFmtRight_ = nullptr;// slider value: small, right-aligned
   ID2D1HwndRenderTarget* rt_ = nullptr;
+  Brushes br_;
 
-  int hot_ = -1;   // control under the cursor (see hitControl); drives hover highlight
-  int helpHot_ = -1;   // control under the cursor for the help strip (see helpTargetAt/helpText)
-  int hotSec_ = -1;    // slider-group header under the cursor (hover highlight)
-  bool secOpen_[3] = {true, true, true};   // DENOISE / VOICE LEVEL / CLEANUP expanded? (seeded from settings)
-  float contentH_ = 956.0f;                // laid-out client height (drives the window resize)
-  std::wstring ringEdit_;      // latency box edit buffer (digits); seeded from settings_->ringFrames
-  bool ringFocused_ = false;   // latency box has keyboard focus (caret shown)
+  Control hot_ = Control::None;   // button under the cursor; drives hover highlight
+  int helpHot_ = kHelpNone;       // HelpTarget / SliderId under the cursor for the help strip
+  int hotSec_ = -1;               // slider-group header under the cursor (hover highlight)
+  int grabbed_ = -1;              // SliderId being dragged, or -1
+  std::array<bool, kSliderGroupCount> secOpen_{true, true, true};   // groups expanded? (seeded from settings)
+  float contentH_ = 0.0f;         // laid-out client height (drives the window resize); set by layout()
+  std::wstring ringEdit_;         // latency box edit buffer (digits); seeded from settings_->ringFrames
+  bool ringFocused_ = false;      // latency box has keyboard focus (caret shown)
 
   // control rects (client coords), recomputed in layout()
   D2D1_RECT_F rcMicField_{}, rcOutField_{};
   D2D1_RECT_F rcEngineRnn_{}, rcEngineDfn_{}, rcBypass_{}, rcRelaunch_{}, rcQuit_{}, rcHelp_{};
   D2D1_RECT_F rcRingBox_{}, rcRingApply_{};   // editable latency box + Apply button
   D2D1_RECT_F rcLowLat_{};                    // low-latency checkbox (footer-left)
-  D2D1_RECT_F rcSecHdr_[3]{};                 // clickable slider-group header rows
+  std::array<D2D1_RECT_F, kSliderGroupCount> rcSecHdr_{};   // clickable slider-group header rows
+  std::array<float, kSliderGroupCount> secY_{};             // slider-group header baselines
 
-  Slider sldGain_{-30.0f, -6.0f, -16.0f, SliderFmt::Dbfs};
-  Slider sldAggr_{0.0f, 1.0f, 0.0f, SliderFmt::Ratio2};
-  Slider sldHpf_{40.0f, 200.0f, 80.0f, SliderFmt::Hz};
-  Slider sldLim_{-6.0f, 0.0f, -1.0f, SliderFmt::Db};
-  Slider sldDck_{0.0f, 1.0f, 0.0f, SliderFmt::Ratio2};
-  Slider sldVfl_{0.0f, 1.0f, 0.0f, SliderFmt::Ratio2};
-  Slider sldGate_{0.0f, 1.0f, 0.0f, SliderFmt::Ratio2};
-  Slider sldMix_{0.0f, 1.0f, 1.0f, SliderFmt::Ratio2};
-  Slider sldBoost_{0.0f, 30.0f, 18.0f, SliderFmt::Db};   // AGC max boost (MAX BOOST)
-  D2D1_RECT_F rcGain_{}, rcAggr_{}, rcHpf_{}, rcLim_{}, rcDck_{}, rcVfl_{}, rcGate_{}, rcMix_{}, rcBoost_{};   // track rects
-  float secY_[3] = {356.0f, 464.0f, 572.0f};   // section-header baselines: DENOISE / VOICE LEVEL / CLEANUP
-  int grabbed_ = -1;        // slider being dragged: 0=gain 1=aggr 2=hpf 3=lim, -1=none
+  std::array<Slider, kSliderCount> sliders_;       // value models, built from kSliderSpecs
+  std::array<D2D1_RECT_F, kSliderCount> tracks_{}; // track rects (off-screen while collapsed)
 };
 
 }  // namespace vc::ui

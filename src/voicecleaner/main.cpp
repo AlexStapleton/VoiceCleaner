@@ -43,7 +43,7 @@ static std::wstring settingsPath(const std::wstring& exeDir) {
 int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
   // Same value across processes for the same name — the single-instance broadcast below is caught
   // by the already-running instance's AppWindow::handle.
-  g_restoreMsg = RegisterWindowMessageW(L"VoiceCleanerRestore");
+  g_restoreMsg = RegisterWindowMessageW(kRestoreMsgName);
 
   // Single instance: if one already runs, broadcast restore and exit.
   HANDLE mutex = CreateMutexW(nullptr, TRUE, kMutex);

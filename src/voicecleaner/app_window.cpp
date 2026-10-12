@@ -2,10 +2,10 @@
 #include "tray.h"
 #include "device_enum.h"
 #include "resource.h"   // IDI_ACTIVE (window + taskbar icon)
+#include "utf8.h"
 #include <windowsx.h>   // GET_X_LPARAM / GET_Y_LPARAM
 #include <dwmapi.h>     // DwmSetWindowAttribute (dark, color-matched title bar)
 #include <string>
-#include "utf8.h"
 #include <vector>
 
 #pragma comment(lib, "d2d1.lib")
@@ -26,17 +26,44 @@
 namespace vc::ui {
 
 static const wchar_t* kClass = L"VoiceCleanerWindow";
-static const int  kClientW = 460;   // fixed client width; height flexes with collapsed sections
 static const UINT kTimerId = 1;
-static const float kRowH = 34.0f;   // dropdown row height
+static const UINT kTimerMs = 100;          // ~10 Hz telemetry poll
+static const DWORD kShutdownWaitMs = 3000; // how long Quit / a respawn waits for the worker to exit
 // Cached once: the same value is returned for the same name across processes, so main.cpp's
 // single-instance broadcast lands here.
-static const UINT kRestoreMsg = RegisterWindowMessageW(L"VoiceCleanerRestore");
+static const UINT kRestoreMsg = RegisterWindowMessageW(kRestoreMsgName);
+
+// ---- layout (client px). Fixed width; the height flexes with the collapsed slider groups. ----
+static const int   kClientW = 460;
+static const float kPad = 18.0f;           // left/right margin
+static const float kCtlH = 40.0f;          // field / button height
+static const float kSegGap = 8.0f;         // gap between the two engine buttons
+static const float kCaptionH = 16.0f;      // caption row above a field
+static const float kMicY = 92.0f, kOutY = 160.0f, kEngineY = 232.0f, kBypassY = 300.0f;
+static const float kStatusTop = 14.0f, kStatusBottom = 78.0f;
+static const float kGroupsTop = 350.0f;    // first slider-group header
+static const float kHeaderToTrack = 42.0f; // group header -> its first track
+static const float kTrackH = 12.0f;
+static const float kTrackPitch = 44.0f;    // track -> next track
+static const float kCollapsedH = 24.0f;    // a collapsed group's header block
+static const float kHelpH = 84.0f;         // hover help strip
+static const float kFooterH = 40.0f;       // Low-latency checkbox + Quit
+static const float kRowH = 34.0f;          // dropdown row height
+static const D2D1_RECT_F kHidden = {-1000, -1000, -1000, -1000};   // collapsed slider tracks
+
+// Background #1B1C21: painted client area and the DWM caption share it so the title bar blends in.
+static const BYTE kBgR = 27, kBgG = 28, kBgB = 33;
 
 static std::wstring toW(const std::string& s) { return vc::utf8ToWide(s); }
 
+static bool hit(D2D1_RECT_F r, int x, int y) {
+  return x>=r.left && x<=r.right && y>=r.top && y<=r.bottom;
+}
+
 AppWindow::AppWindow(HINSTANCE hInst, WorkerSupervisor* sup, UiState* state)
-    : hInst_(hInst), sup_(sup), state_(state) {}
+    : hInst_(hInst), sup_(sup), state_(state) {
+  for (const SliderSpec& s : kSliderSpecs) slider(s.id) = Slider(s.lo, s.hi, s.def, s.fmt);
+}
 
 AppWindow::~AppWindow() {
   discardRenderTarget();
@@ -52,7 +79,7 @@ bool AppWindow::create(const wchar_t* title) {
   if (FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &d2dFactory_))) return false;
   if (FAILED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory),
                                  reinterpret_cast<IUnknown**>(&dwFactory_)))) return false;
-  // Status line: normal weight, left-aligned, word-wrapped (the NoConfig message is long).
+  // Status line: normal weight, left-aligned, word-wrapped (the output device name can be long).
   dwFactory_->CreateTextFormat(L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL,
                                DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
                                15.0f, L"en-us", &textFmt_);
@@ -89,7 +116,8 @@ bool AppWindow::create(const wchar_t* title) {
   RegisterClassW(&wc);
 
   // Seed slider-group collapse state, then lay out once to learn the initial client height.
-  if (settings_) for (int i = 0; i < 3; ++i) secOpen_[i] = !((settings_->collapsedSections >> i) & 1u);
+  if (settings_)
+    for (int i = 0; i < kSliderGroupCount; ++i) secOpen_[i] = !((settings_->collapsedSections >> i) & 1u);
   layout(D2D1::SizeF((float)kClientW, 0.0f));   // computes contentH_ (Y math is height-independent)
 
   // Fixed-width, non-resizable window; height flexes with the collapsed sections (contentH_).
@@ -99,10 +127,10 @@ bool AppWindow::create(const wchar_t* title) {
   hwnd_ = CreateWindowExW(0, kClass, title, style, CW_USEDEFAULT, CW_USEDEFAULT,
                           wr.right - wr.left, wr.bottom - wr.top, nullptr, nullptr, hInst_, this);
   if (!hwnd_) return false;
-  // Dark, color-matched title bar so the caption blends with the client background (#1B1C21).
+  // Dark, color-matched title bar so the caption blends with the client background.
   { BOOL dark = TRUE;
     DwmSetWindowAttribute(hwnd_, DWMWA_USE_IMMERSIVE_DARK_MODE, &dark, sizeof(dark));
-    COLORREF caption = RGB(27, 28, 33);      // #1B1C21 — same as the painted background
+    COLORREF caption = RGB(kBgR, kBgG, kBgB);
     DwmSetWindowAttribute(hwnd_, DWMWA_CAPTION_COLOR, &caption, sizeof(caption));
     COLORREF capText = RGB(237, 237, 242);   // #EDEDF2 — light caption text
     DwmSetWindowAttribute(hwnd_, DWMWA_TEXT_COLOR, &capText, sizeof(capText)); }
@@ -113,7 +141,7 @@ bool AppWindow::create(const wchar_t* title) {
   HICON hsmall = (HICON)LoadImageW(hInst_, MAKEINTRESOURCEW(IDI_ACTIVE), IMAGE_ICON,
       GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_SHARED);
   if (hsmall) SendMessageW(hwnd_, WM_SETICON, ICON_SMALL, (LPARAM)hsmall);
-  SetTimer(hwnd_, kTimerId, 100, nullptr);   // ~10 Hz telemetry poll
+  SetTimer(hwnd_, kTimerId, kTimerMs, nullptr);
   refreshDevices();                           // initial enumeration + active seed
   if (settings_) ringEdit_ = std::to_wstring((int)settings_->ringFrames);   // seed the latency box
   ShowWindow(hwnd_, SW_SHOW);
@@ -134,15 +162,7 @@ void AppWindow::seedFromActiveProfile() {
   if (!settings_) return;
   vc::MicProfile* p = settings_->activeProfile();
   if (!p) return;
-  sldGain_.setValue(p->outputGainDbfs);
-  sldAggr_.setValue(p->aggression);
-  sldHpf_.setValue(p->hpfHz);
-  sldLim_.setValue(p->limiterDbfs);
-  sldDck_.setValue(p->declickStrength);
-  sldVfl_.setValue(p->declickVoiceFloor);
-  sldGate_.setValue(p->gateStrength);
-  sldMix_.setValue(p->mixStrength);
-  sldBoost_.setValue(p->maxBoostDb);
+  for (const SliderSpec& s : kSliderSpecs) slider(s.id).setValue(p->*s.profileField);
   state_->seedTuning(p->aggression, p->hpfHz, p->outputGainDbfs, p->limiterDbfs,
                      p->declickStrength, p->declickVoiceFloor, p->gateStrength, p->mixStrength,
                      p->maxBoostDb);
@@ -159,326 +179,320 @@ LRESULT CALLBACK AppWindow::WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
   return DefWindowProc(h, m, w, l);
 }
 
+// ---------------------------------------------------------------------------------------------
+// Drawing
+// ---------------------------------------------------------------------------------------------
+
 void AppWindow::ensureRenderTarget() {
   if (rt_) return;
   RECT rc; GetClientRect(hwnd_, &rc);
   D2D1_SIZE_U size = D2D1::SizeU(rc.right - rc.left, rc.bottom - rc.top);
-  d2dFactory_->CreateHwndRenderTarget(D2D1::RenderTargetProperties(),
-      D2D1::HwndRenderTargetProperties(hwnd_, size), &rt_);
+  if (FAILED(d2dFactory_->CreateHwndRenderTarget(D2D1::RenderTargetProperties(),
+                 D2D1::HwndRenderTargetProperties(hwnd_, size), &rt_))) { rt_ = nullptr; return; }
+  // Brushes belong to the render target: create them once here instead of on every paint.
+  rt_->CreateSolidColorBrush(D2D1::ColorF(0.93f,0.93f,0.95f), &br_.text);
+  rt_->CreateSolidColorBrush(D2D1::ColorF(0.53f,0.55f,0.62f), &br_.dim);
+  rt_->CreateSolidColorBrush(D2D1::ColorF(0.60f,0.64f,0.78f), &br_.section);   // group headers (brighter than dim)
+  rt_->CreateSolidColorBrush(D2D1::ColorF(0.16f,0.51f,0.94f), &br_.accent);
+  rt_->CreateSolidColorBrush(D2D1::ColorF(0.30f,0.61f,0.98f), &br_.accentHot);
+  rt_->CreateSolidColorBrush(D2D1::ColorF(0.20f,0.21f,0.25f), &br_.panel);
+  rt_->CreateSolidColorBrush(D2D1::ColorF(0.27f,0.28f,0.33f), &br_.panelHot);
+  rt_->CreateSolidColorBrush(D2D1::ColorF(0.15f,0.15f,0.18f), &br_.disabled);
+  rt_->CreateSolidColorBrush(D2D1::ColorF(0.82f,0.54f,0.16f), &br_.amber);
 }
 
-void AppWindow::discardRenderTarget() { if (rt_) { rt_->Release(); rt_ = nullptr; } }
+void AppWindow::discardRenderTarget() {
+  for (ID2D1SolidColorBrush** b : {&br_.text, &br_.dim, &br_.section, &br_.accent, &br_.accentHot,
+                                   &br_.panel, &br_.panelHot, &br_.disabled, &br_.amber})
+    if (*b) { (*b)->Release(); *b = nullptr; }
+  if (rt_) { rt_->Release(); rt_ = nullptr; }
+}
 
 void AppWindow::layout(D2D1_SIZE_F sz) {
-  const float pad = 18.0f, gap = 8.0f, h = 40.0f;
-  rcMicField_ = D2D1::RectF(pad, 92,  sz.width - pad, 92 + h);
-  rcOutField_ = D2D1::RectF(pad, 160, sz.width - pad, 160 + h);
+  const float right = sz.width - kPad;
+  rcMicField_ = D2D1::RectF(kPad, kMicY, right, kMicY + kCtlH);
+  rcOutField_ = D2D1::RectF(kPad, kOutY, right, kOutY + kCtlH);
   const float mid = sz.width * 0.5f;
-  rcEngineRnn_ = D2D1::RectF(pad,           232, mid - gap * 0.5f, 232 + h);
-  rcEngineDfn_ = D2D1::RectF(mid + gap*0.5f, 232, sz.width - pad,  232 + h);
-  rcBypass_    = D2D1::RectF(pad, 300, sz.width - pad, 300 + h);
-  const float tw = sz.width - pad;
+  rcEngineRnn_ = D2D1::RectF(kPad, kEngineY, mid - kSegGap * 0.5f, kEngineY + kCtlH);
+  rcEngineDfn_ = D2D1::RectF(mid + kSegGap * 0.5f, kEngineY, right, kEngineY + kCtlH);
+  rcBypass_    = D2D1::RectF(kPad, kBypassY, right, kBypassY + kCtlH);
 
   // Collapsible slider groups. Positions flow from a running cursor so collapsing a group reflows
-  // everything below it and shrinks the window (contentH_). The index->parameter mapping is unchanged
-  // (see sliderByIndex/helpText); only the Y positions, draw order, and visibility change per group.
-  static const int denoise[2] = {7, 1};        // STRENGTH, AGGRESSION
-  static const int voice[3]   = {0, 8, 3};     // TARGET LOUDNESS, MAX BOOST, LIMITER
-  static const int cleanup[4] = {2, 6, 4, 5};  // HPF, NOISE GATE, DE-CLICK, SPEECH DECLICK
-  const int* groups[3] = {denoise, voice, cleanup};
-  const int  counts[3] = {2, 3, 4};
-  const D2D1_RECT_F hidden = D2D1::RectF(-1000, -1000, -1000, -1000);
-
-  float y = 350.0f;
-  for (int s = 0; s < 3; ++s) {
-    secY_[s]     = y;
-    rcSecHdr_[s] = D2D1::RectF(pad, y - 4, sz.width - pad, y + 16);   // clickable header row
-    if (secOpen_[s]) {
-      float t = y + 42.0f;                                            // header -> first track
-      for (int k = 0; k < counts[s]; ++k) {
-        trackByIndex(groups[s][k]) = D2D1::RectF(pad, t, tw, t + 12);
-        t += 44.0f;
+  // everything below it and shrinks the window (contentH_).
+  float y = kGroupsTop;
+  for (int g = 0; g < kSliderGroupCount; ++g) {
+    const SliderGroup& grp = kSliderGroups[g];
+    secY_[g]     = y;
+    rcSecHdr_[g] = D2D1::RectF(kPad, y - 4, right, y + 16);   // clickable header row
+    if (secOpen_[g]) {
+      float t = y + kHeaderToTrack;
+      for (int k = 0; k < grp.count; ++k) {
+        track(grp.ids[k]) = D2D1::RectF(kPad, t, right, t + kTrackH);
+        t += kTrackPitch;
       }
-      y = t - 22.0f;                                                  // last track bottom + a section gap
+      y = t - kTrackPitch * 0.5f;                              // last track + half a pitch of gap
     } else {
-      for (int k = 0; k < counts[s]; ++k) trackByIndex(groups[s][k]) = hidden;
-      y += 24.0f;                                                     // collapsed: header block only
+      for (int k = 0; k < grp.count; ++k) track(grp.ids[k]) = kHidden;
+      y += kCollapsedH;
     }
   }
 
   const float rbTop = y + 14.0f;
-  rcRingBox_   = D2D1::RectF(pad, rbTop, pad + 120, rbTop + h);        // editable latency box
-  rcRingApply_ = D2D1::RectF(sz.width - pad - 100, rbTop, sz.width - pad, rbTop + h);
-  const float yHelp = rbTop + h + 16.0f;
-  rcHelp_      = D2D1::RectF(pad, yHelp, sz.width - pad, yHelp + 84);  // hover help strip
-  rcRelaunch_  = D2D1::RectF(pad, yHelp, sz.width - pad, yHelp + h);   // only when Down (shares the help band)
-  contentH_    = yHelp + 84.0f + 40.0f;                               // + footer band -> total client height
-  rcQuit_      = D2D1::RectF(sz.width - pad - 90, contentH_ - 36, sz.width - pad, contentH_ - 10);
-  rcLowLat_    = D2D1::RectF(pad, contentH_ - 34, pad + 210, contentH_ - 10);   // footer-left checkbox
+  rcRingBox_   = D2D1::RectF(kPad, rbTop, kPad + 120, rbTop + kCtlH);        // editable latency box
+  rcRingApply_ = D2D1::RectF(right - 100, rbTop, right, rbTop + kCtlH);
+  const float yHelp = rbTop + kCtlH + 16.0f;
+  rcHelp_      = D2D1::RectF(kPad, yHelp, right, yHelp + kHelpH);            // hover help strip
+  rcRelaunch_  = D2D1::RectF(kPad, yHelp, right, yHelp + kCtlH);             // only when Down (shares the help band)
+  contentH_    = yHelp + kHelpH + kFooterH;                                  // total client height
+  rcQuit_      = D2D1::RectF(right - 90, contentH_ - 36, right, contentH_ - 10);
+  rcLowLat_    = D2D1::RectF(kPad, contentH_ - 34, kPad + 210, contentH_ - 10);   // footer-left checkbox
+}
+
+void AppWindow::box(D2D1_RECT_F r, ID2D1Brush* b) {
+  rt_->FillRoundedRectangle(D2D1::RoundedRect(r, 8, 8), b);
+}
+
+void AppWindow::label(const std::wstring& s, D2D1_RECT_F r, ID2D1Brush* b, IDWriteTextFormat* f) {
+  rt_->DrawText(s.c_str(), (UINT32)s.size(), f, r, b);
 }
 
 void AppWindow::paint() {
   ensureRenderTarget();
   if (!rt_) return;
   rt_->BeginDraw();
-  rt_->Clear(D2D1::ColorF(0.106f, 0.109f, 0.129f));   // #1B1C21
-  D2D1_SIZE_F sz = rt_->GetSize();
+  rt_->Clear(D2D1::ColorF(kBgR / 255.0f, kBgG / 255.0f, kBgB / 255.0f));
+  const D2D1_SIZE_F sz = rt_->GetSize();
   layout(sz);
 
-  ID2D1SolidColorBrush *text=nullptr,*dim=nullptr,*accent=nullptr,*accentHot=nullptr,
-                       *panel=nullptr,*panelHot=nullptr,*disabled=nullptr,*amber=nullptr,*section=nullptr;
-  rt_->CreateSolidColorBrush(D2D1::ColorF(0.93f,0.93f,0.95f), &text);
-  rt_->CreateSolidColorBrush(D2D1::ColorF(0.53f,0.55f,0.62f), &dim);
-  rt_->CreateSolidColorBrush(D2D1::ColorF(0.60f,0.64f,0.78f), &section);   // group headers (brighter than dim)
-  rt_->CreateSolidColorBrush(D2D1::ColorF(0.16f,0.51f,0.94f), &accent);
-  rt_->CreateSolidColorBrush(D2D1::ColorF(0.30f,0.61f,0.98f), &accentHot);
-  rt_->CreateSolidColorBrush(D2D1::ColorF(0.20f,0.21f,0.25f), &panel);
-  rt_->CreateSolidColorBrush(D2D1::ColorF(0.27f,0.28f,0.33f), &panelHot);
-  rt_->CreateSolidColorBrush(D2D1::ColorF(0.15f,0.15f,0.18f), &disabled);
-  rt_->CreateSolidColorBrush(D2D1::ColorF(0.82f,0.54f,0.16f), &amber);
+  drawStatus(sz.width);
+  drawPickerField(L"MICROPHONE", rcMicField_, PickerKind::Capture);
+  drawPickerField(L"OUTPUT",     rcOutField_, PickerKind::Render);
+  drawEngineAndBypass(sz.width);
+  drawHelpOrRelaunch();
+  drawSliderGroups(sz.width);
+  drawLatency(sz.width);
+  drawFooter();
+  drawPickerOverlay();   // last: the open dropdown sits on top of everything
 
-  const float pad = 18.0f;
-  auto box = [&](D2D1_RECT_F r, ID2D1Brush* b) {
-    rt_->FillRoundedRectangle(D2D1::RoundedRect(r, 8, 8), b);
-  };
-  auto label = [&](const std::wstring& s, D2D1_RECT_F r, ID2D1Brush* b, IDWriteTextFormat* f) {
-    rt_->DrawText(s.c_str(), (UINT32)s.size(), f, r, b);
-  };
-
-  // 1. status line (wrapped, left-aligned)
-  label(toW(state_->statusLine()), D2D1::RectF(pad, 14, sz.width - pad, 78), text, textFmt_);
-
-  // 2. device pickers (Microphone + Output): caption above a field showing the active name + ▾
-  auto drawField = [&](const wchar_t* cap, D2D1_RECT_F r, PickerKind k) {
-    label(cap, D2D1::RectF(r.left, r.top - 16, r.right, r.top), dim, capFmt_);
-    box(r, panel);
-    std::wstring name = toW(picker_.fieldLabel(k)) + L"    ▾";   // name + down-caret
-    D2D1_RECT_F tr = D2D1::RectF(r.left + 12, r.top + 9, r.right - 12, r.bottom);
-    rt_->DrawText(name.c_str(), (UINT32)name.size(), textFmt_, tr, text);
-  };
-  drawField(L"MICROPHONE", rcMicField_, PickerKind::Capture);
-  drawField(L"OUTPUT",     rcOutField_, PickerKind::Render);
-
-  // 3. engine segmented control (caption + two buttons; active = accent, hover = lighter panel)
-  label(L"ENGINE", D2D1::RectF(pad, 216, sz.width - pad, 232), dim, capFmt_);
-  const uint32_t ae = state_->activeEngine();
-  box(rcEngineRnn_, ae==0 ? accent : (hot_==0 ? panelHot : panel));
-  box(rcEngineDfn_, ae==1 ? accent : (hot_==1 ? panelHot : panel));
-  label(L"RNNoise",        rcEngineRnn_, text, centerFmt_);
-  label(L"DeepFilterNet3", rcEngineDfn_, text, centerFmt_);
-
-  // 4. bypass toggle (amber when bypassed; greyed + reason when no DSP chain)
-  label(L"BYPASS", D2D1::RectF(pad, 284, sz.width - pad, 300), dim, capFmt_);
-  const bool bEn = state_->bypassEnabled();
-  ID2D1Brush* bBox = !bEn ? static_cast<ID2D1Brush*>(disabled)
-                   : state_->bypassed() ? static_cast<ID2D1Brush*>(amber)
-                   : static_cast<ID2D1Brush*>(hot_==2 ? panelHot : panel);
-  box(rcBypass_, bBox);
-  std::wstring bLabel = !bEn ? toW(state_->bypassDisabledReason())
-                       : state_->bypassed() ? L"Bypassed — click to enable"
-                                            : L"Enabled — click to bypass";
-  label(bLabel, rcBypass_, bEn ? text : dim, centerFmt_);
-
-  // 5. Relaunch (only when the worker is down) OR the hover help strip (otherwise) — they share the band.
-  if (state_->statusKind()==StatusKind::Down) {
-    box(rcRelaunch_, hot_==3 ? accentHot : accent);
-    std::wstring rlbl = respawn_.reconnecting()
-        ? (L"Reconnecting\x2026 (" + std::to_wstring(respawn_.attempts()) + L"/" + std::to_wstring(respawn_.maxAttempts()) + L")")
-        : L"Relaunch worker";
-    label(rlbl.c_str(), rcRelaunch_, text, centerFmt_);
-  } else {
-    box(rcHelp_, panel);
-    D2D1_RECT_F htr = D2D1::RectF(rcHelp_.left + 12, rcHelp_.top + 8, rcHelp_.right - 12, rcHelp_.bottom - 8);
-    std::wstring h = helpText();
-    label(h, htr, helpHot_ < 0 ? dim : text, textFmt_);
-  }
-
-  // 6. Tuning sliders (caption + value above; track with a draggable thumb)
-  auto drawSlider = [&](const wchar_t* cap, int i, bool enabled) {
-    D2D1_RECT_F& tr = trackByIndex(i);
-    ID2D1Brush* fg = enabled ? text : dim;
-    label(cap, D2D1::RectF(tr.left, tr.top - 20, tr.right, tr.top - 4), dim, capFmt_);
-    std::wstring val = enabled ? toW(sliderByIndex(i).format()) : L"DFN3 only";
-    label(val, D2D1::RectF(tr.left, tr.top - 20, tr.right, tr.top - 4), fg, capFmtRight_);
-    box(tr, panel);
-    float f = sliderByIndex(i).fraction();
-    float cx = tr.left + f * (tr.right - tr.left);
-    D2D1_RECT_F thumb = D2D1::RectF(cx - 6, tr.top - 6, cx + 6, tr.bottom + 6);
-    box(thumb, enabled ? (grabbed_==i ? accentHot : accent) : disabled);
-  };
-  // Collapsible section header: chevron (open/collapsed) + caps label + a hairline rule to the edge.
-  // The header brightens on hover (hotSec_). Clicking the row toggles the group (see toggleSection).
-  auto sectionHdr = [&](const wchar_t* s, int i, float labelW) {
-    std::wstring lbl = (secOpen_[i] ? L"\x25BE  " : L"\x25B8  ") + std::wstring(s);   // ▾ open / ▸ collapsed
-    label(lbl, D2D1::RectF(pad, secY_[i] - 2, sz.width - pad, secY_[i] + 16),
-          hotSec_ == i ? text : section, capFmt_);
-    float ly = secY_[i] + 8.0f;
-    rt_->DrawLine(D2D1::Point2F(pad + labelW, ly), D2D1::Point2F(sz.width - pad, ly), section, 1.0f);
-  };
-  sectionHdr(L"DENOISE", 0, 100);
-  if (secOpen_[0]) { drawSlider(L"STRENGTH", 7, true); drawSlider(L"AGGRESSION", 1, aggressionEnabled()); }
-  sectionHdr(L"VOICE LEVEL", 1, 120);
-  if (secOpen_[1]) { drawSlider(L"TARGET LOUDNESS", 0, true); drawSlider(L"MAX BOOST", 8, true);
-                     drawSlider(L"LIMITER", 3, true); }
-  sectionHdr(L"CLEANUP", 2, 100);
-  if (secOpen_[2]) { drawSlider(L"HPF", 2, true); drawSlider(L"NOISE GATE", 6, true);
-                     drawSlider(L"DE-CLICK", 4, true); drawSlider(L"SPEECH DECLICK", 5, true); }
-
-  // 6b. Latency (ring frames): editable box + approx-ms readout + Apply (restarts the worker)
-  label(L"LATENCY (ring frames)", D2D1::RectF(pad, rcRingBox_.top - 20, sz.width - pad, rcRingBox_.top - 4), dim, capFmt_);
-  box(rcRingBox_, ringFocused_ ? panelHot : panel);
-  {
-    std::wstring shown = ringEdit_;
-    if (ringFocused_) shown += L"|";                       // simple caret while focused
-    D2D1_RECT_F br = D2D1::RectF(rcRingBox_.left + 12, rcRingBox_.top + 9, rcRingBox_.right - 8, rcRingBox_.bottom);
-    rt_->DrawText(shown.c_str(), (UINT32)shown.size(), textFmt_, br, text);
-    wchar_t ms[32];
-    swprintf(ms, 32, L"\x2248 %d ms", ringParse() * 5);   // U+2248 (almost-equal); delay ~= frames x 5 ms
-    D2D1_RECT_F mr = D2D1::RectF(rcRingBox_.right + 12, rcRingBox_.top + 9, rcRingApply_.left - 8, rcRingBox_.bottom);
-    rt_->DrawText(ms, (UINT32)wcslen(ms), textFmt_, mr, dim);
-  }
-  const bool ringDirty = settings_ && ringPendingClamped() != (int)settings_->ringFrames;
-  box(rcRingApply_, ringDirty ? (hot_==5 ? accentHot : accent) : disabled);
-  label(L"Apply", rcRingApply_, ringDirty ? text : dim, centerFmt_);
-
-  // 7. Quit (footer, right-aligned) — full shutdown, same path as the tray Quit
-  box(rcQuit_, hot_==4 ? panelHot : panel);
-  label(L"Quit", rcQuit_, text, centerFmt_);
-
-  // 7b. Low-latency checkbox (footer-left) — toggles [global].low_latency (respawns the worker)
-  {
-    const bool ll = settings_ && settings_->lowLatency;
-    D2D1_RECT_F cbx = D2D1::RectF(rcLowLat_.left, rcLowLat_.top + 3, rcLowLat_.left + 16, rcLowLat_.top + 19);
-    rt_->DrawRectangle(cbx, hot_==6 ? accentHot : dim, 1.5f);
-    if (ll) rt_->FillRectangle(D2D1::RectF(cbx.left + 3, cbx.top + 3, cbx.right - 3, cbx.bottom - 3), accent);
-    D2D1_RECT_F cbl = D2D1::RectF(cbx.right + 8, rcLowLat_.top, rcLowLat_.right, rcLowLat_.bottom);
-    label(L"LOW LATENCY", cbl, ll ? text : dim, textFmt_);
-  }
-
-  // 7. Open dropdown overlay — drawn last, on top of everything
-  if (picker_.isOpen()) {
-    PickerKind k = picker_.openKind();
-    D2D1_RECT_F o = overlayRect();
-    box(o, panelHot);
-    const auto& drows = picker_.rows(k);
-    for (size_t i = 0; i < drows.size(); ++i) {
-      float top = o.top + kRowH * (float)i;
-      D2D1_RECT_F rr = D2D1::RectF(o.left, top, o.right, top + kRowH);
-      const DeviceRow& d = drows[i];
-      const bool sel = DevicePicker::selectable(d);
-      const bool active = (d.id == picker_.activeId(k));
-      std::wstring line = (active ? L"✓ " : L"   ") + toW(d.name);
-      if (!sel) line += L"   — 48 kHz only";
-      D2D1_RECT_F tr = D2D1::RectF(rr.left + 12, rr.top + 8, rr.right - 12, rr.bottom);
-      rt_->DrawText(line.c_str(), (UINT32)line.size(), textFmt_, tr, sel ? text : dim);
-    }
-  }
-
-  text->Release(); dim->Release(); accent->Release(); accentHot->Release();
-  panel->Release(); panelHot->Release(); disabled->Release(); amber->Release(); section->Release();
   if (rt_->EndDraw() == D2DERR_RECREATE_TARGET) discardRenderTarget();
 }
 
-static bool hit(D2D1_RECT_F r, int x, int y) {
-  return x>=r.left && x<=r.right && y>=r.top && y<=r.bottom;
+void AppWindow::drawStatus(float width) {
+  label(toW(state_->statusLine()), D2D1::RectF(kPad, kStatusTop, width - kPad, kStatusBottom), br_.text, textFmt_);
 }
 
-int AppWindow::hitControl(int x, int y) const {
-  if (hit(rcEngineRnn_, x, y)) return 0;
-  if (hit(rcEngineDfn_, x, y)) return 1;
-  if (hit(rcBypass_,    x, y)) return 2;
-  if (hit(rcRelaunch_,  x, y)) return 3;
-  if (hit(rcQuit_,      x, y)) return 4;
-  if (hit(rcRingApply_, x, y)) return 5;
-  if (hit(rcLowLat_,    x, y)) return 6;
-  return -1;
+// Device picker field: caption above a box showing the active device name + a down caret.
+void AppWindow::drawPickerField(const wchar_t* caption, D2D1_RECT_F r, PickerKind k) {
+  label(caption, D2D1::RectF(r.left, r.top - kCaptionH, r.right, r.top), br_.dim, capFmt_);
+  box(r, br_.panel);
+  label(toW(picker_.fieldLabel(k)) + L"    \x25BE",
+        D2D1::RectF(r.left + 12, r.top + 9, r.right - 12, r.bottom), br_.text, textFmt_);
 }
 
-Slider& AppWindow::sliderByIndex(int i) {
-  switch (i) { case 0: return sldGain_; case 1: return sldAggr_; case 2: return sldHpf_; case 3: return sldLim_; case 4: return sldDck_; case 5: return sldVfl_; case 6: return sldGate_; case 7: return sldMix_; default: return sldBoost_; }
+void AppWindow::drawEngineAndBypass(float width) {
+  // Engine segmented control: active = accent, hover = lighter panel.
+  label(L"ENGINE", D2D1::RectF(kPad, kEngineY - kCaptionH, width - kPad, kEngineY), br_.dim, capFmt_);
+  const uint32_t ae = state_->activeEngine();
+  box(rcEngineRnn_, ae==0 ? br_.accent : (hot_==Control::EngineRnn ? br_.panelHot : br_.panel));
+  box(rcEngineDfn_, ae==1 ? br_.accent : (hot_==Control::EngineDfn ? br_.panelHot : br_.panel));
+  label(L"RNNoise",        rcEngineRnn_, br_.text, centerFmt_);
+  label(L"DeepFilterNet3", rcEngineDfn_, br_.text, centerFmt_);
+
+  // Bypass toggle: amber when bypassed; greyed + reason when there is no DSP chain.
+  label(L"BYPASS", D2D1::RectF(kPad, kBypassY - kCaptionH, width - kPad, kBypassY), br_.dim, capFmt_);
+  const bool bEn = state_->bypassEnabled();
+  ID2D1Brush* bBox = !bEn ? static_cast<ID2D1Brush*>(br_.disabled)
+                   : state_->bypassed() ? static_cast<ID2D1Brush*>(br_.amber)
+                   : static_cast<ID2D1Brush*>(hot_==Control::Bypass ? br_.panelHot : br_.panel);
+  box(rcBypass_, bBox);
+  const std::wstring bLabel = !bEn ? toW(state_->bypassDisabledReason())
+                            : state_->bypassed() ? L"Bypassed \x2014 click to enable"
+                                                 : L"Enabled \x2014 click to bypass";
+  label(bLabel, rcBypass_, bEn ? br_.text : br_.dim, centerFmt_);
 }
-D2D1_RECT_F& AppWindow::trackByIndex(int i) {
-  switch (i) { case 0: return rcGain_; case 1: return rcAggr_; case 2: return rcHpf_; case 3: return rcLim_; case 4: return rcDck_; case 5: return rcVfl_; case 6: return rcGate_; case 7: return rcMix_; default: return rcBoost_; }
+
+// Relaunch (only when the worker is down) OR the hover help strip (otherwise) — they share the band.
+void AppWindow::drawHelpOrRelaunch() {
+  if (state_->statusKind() == StatusKind::Down) {
+    box(rcRelaunch_, hot_==Control::Relaunch ? br_.accentHot : br_.accent);
+    const std::wstring rlbl = respawn_.reconnecting()
+        ? (L"Reconnecting\x2026 (" + std::to_wstring(respawn_.attempts()) + L"/" + std::to_wstring(respawn_.maxAttempts()) + L")")
+        : L"Relaunch worker";
+    label(rlbl, rcRelaunch_, br_.text, centerFmt_);
+  } else {
+    box(rcHelp_, br_.panel);
+    label(helpText(), D2D1::RectF(rcHelp_.left + 12, rcHelp_.top + 8, rcHelp_.right - 12, rcHelp_.bottom - 8),
+          helpHot_ == kHelpNone ? br_.dim : br_.text, textFmt_);
+  }
 }
-bool AppWindow::aggressionEnabled() const { return state_->activeEngine() == 1; }  // DFN3 only
+
+// Collapsible group headers (chevron + caps title + hairline rule; brightens on hover) and the
+// sliders of every open group.
+void AppWindow::drawSliderGroups(float width) {
+  for (int g = 0; g < kSliderGroupCount; ++g) {
+    const SliderGroup& grp = kSliderGroups[g];
+    const std::wstring title = (secOpen_[g] ? L"\x25BE  " : L"\x25B8  ") + std::wstring(grp.title);   // ▾ open / ▸ collapsed
+    label(title, D2D1::RectF(kPad, secY_[g] - 2, width - kPad, secY_[g] + 16),
+          hotSec_ == g ? br_.text : br_.section, capFmt_);
+    const float ly = secY_[g] + 8.0f;
+    rt_->DrawLine(D2D1::Point2F(kPad + grp.titleWidth, ly), D2D1::Point2F(width - kPad, ly), br_.section, 1.0f);
+    if (secOpen_[g])
+      for (int k = 0; k < grp.count; ++k) drawSlider(grp.ids[k]);
+  }
+}
+
+// Caption + value above the track; the thumb is draggable.
+void AppWindow::drawSlider(SliderId id) {
+  const SliderSpec& spec = sliderSpec(id);
+  const D2D1_RECT_F& tr = track(id);
+  const bool enabled = sliderEnabled(id);
+  const D2D1_RECT_F capRow = D2D1::RectF(tr.left, tr.top - 20, tr.right, tr.top - 4);
+  label(spec.caption, capRow, br_.dim, capFmt_);
+  label(enabled ? toW(slider(id).format()) : std::wstring(L"DFN3 only"), capRow,
+        enabled ? br_.text : br_.dim, capFmtRight_);
+  box(tr, br_.panel);
+  const float cx = tr.left + slider(id).fraction() * (tr.right - tr.left);
+  box(D2D1::RectF(cx - 6, tr.top - 6, cx + 6, tr.bottom + 6),
+      enabled ? (grabbed_ == (int)id ? br_.accentHot : br_.accent) : br_.disabled);
+}
+
+// Latency (ring frames): editable box + approx-ms readout + Apply (restarts the worker).
+void AppWindow::drawLatency(float width) {
+  label(L"LATENCY (ring frames)", D2D1::RectF(kPad, rcRingBox_.top - 20, width - kPad, rcRingBox_.top - 4), br_.dim, capFmt_);
+  box(rcRingBox_, ringFocused_ ? br_.panelHot : br_.panel);
+  label(ringEdit_ + (ringFocused_ ? L"|" : L""),   // simple caret while focused
+        D2D1::RectF(rcRingBox_.left + 12, rcRingBox_.top + 9, rcRingBox_.right - 8, rcRingBox_.bottom), br_.text, textFmt_);
+  wchar_t ms[32];
+  swprintf(ms, 32, L"\x2248 %d ms", ringParse() * 5);   // delay ~= frames x 5 ms (ring primed half full)
+  label(ms, D2D1::RectF(rcRingBox_.right + 12, rcRingBox_.top + 9, rcRingApply_.left - 8, rcRingBox_.bottom), br_.dim, textFmt_);
+  const bool ringDirty = settings_ && ringPendingClamped() != (int)settings_->ringFrames;
+  box(rcRingApply_, ringDirty ? (hot_==Control::RingApply ? br_.accentHot : br_.accent) : br_.disabled);
+  label(L"Apply", rcRingApply_, ringDirty ? br_.text : br_.dim, centerFmt_);
+}
+
+// Footer: Low-latency checkbox (left) and Quit (right; full shutdown, same path as the tray Quit).
+void AppWindow::drawFooter() {
+  box(rcQuit_, hot_==Control::Quit ? br_.panelHot : br_.panel);
+  label(L"Quit", rcQuit_, br_.text, centerFmt_);
+
+  const bool ll = settings_ && settings_->lowLatency;
+  const D2D1_RECT_F cbx = D2D1::RectF(rcLowLat_.left, rcLowLat_.top + 3, rcLowLat_.left + 16, rcLowLat_.top + 19);
+  rt_->DrawRectangle(cbx, hot_==Control::LowLatency ? br_.accentHot : br_.dim, 1.5f);
+  if (ll) rt_->FillRectangle(D2D1::RectF(cbx.left + 3, cbx.top + 3, cbx.right - 3, cbx.bottom - 3), br_.accent);
+  label(L"LOW LATENCY", D2D1::RectF(cbx.right + 8, rcLowLat_.top, rcLowLat_.right, rcLowLat_.bottom),
+        ll ? br_.text : br_.dim, textFmt_);
+}
+
+void AppWindow::drawPickerOverlay() {
+  if (!picker_.isOpen()) return;
+  const PickerKind k = picker_.openKind();
+  const D2D1_RECT_F o = overlayRect();
+  box(o, br_.panelHot);
+  const auto& rows = picker_.rows(k);
+  for (size_t i = 0; i < rows.size(); ++i) {
+    const float top = o.top + kRowH * (float)i;
+    const DeviceRow& d = rows[i];
+    const bool sel = DevicePicker::selectable(d);
+    const bool active = (d.id == picker_.activeId(k));
+    std::wstring line = (active ? L"\x2713 " : L"   ") + toW(d.name);
+    if (!sel) line += L"   \x2014 48 kHz only";
+    label(line, D2D1::RectF(o.left + 12, top + 8, o.right - 12, top + kRowH), sel ? br_.text : br_.dim, textFmt_);
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Hit testing
+// ---------------------------------------------------------------------------------------------
+
+AppWindow::Control AppWindow::hitControl(int x, int y) const {
+  if (hit(rcEngineRnn_, x, y)) return Control::EngineRnn;
+  if (hit(rcEngineDfn_, x, y)) return Control::EngineDfn;
+  if (hit(rcBypass_,    x, y)) return Control::Bypass;
+  if (hit(rcRelaunch_,  x, y)) return Control::Relaunch;
+  if (hit(rcQuit_,      x, y)) return Control::Quit;
+  if (hit(rcRingApply_, x, y)) return Control::RingApply;
+  if (hit(rcLowLat_,    x, y)) return Control::LowLatency;
+  return Control::None;
+}
+
+bool AppWindow::sliderEnabled(SliderId id) const {
+  return !sliderSpec(id).dfn3Only || state_->activeEngine() == 1;
+}
 
 int AppWindow::trackHit(int x, int y) const {
-  const D2D1_RECT_F rc[9] = { rcGain_, rcAggr_, rcHpf_, rcLim_, rcDck_, rcVfl_, rcGate_, rcMix_, rcBoost_ };
-  for (int i = 0; i < 9; ++i) {
-    if (i == 1 && !aggressionEnabled()) continue;   // aggression not draggable on RNNoise
-    if (x >= rc[i].left && x <= rc[i].right && y >= rc[i].top - 12 && y <= rc[i].bottom + 12) return i;
+  for (const SliderSpec& s : kSliderSpecs) {
+    if (!sliderEnabled(s.id)) continue;   // e.g. aggression is not draggable on RNNoise
+    const D2D1_RECT_F& r = track(s.id);
+    if (x >= r.left && x <= r.right && y >= r.top - 12 && y <= r.bottom + 12) return (int)s.id;
   }
   return -1;
 }
+
 int AppWindow::helpTargetAt(int x, int y) const {
   // Sliders first (same horizontal band as the track, extended up to cover the caption row).
-  const D2D1_RECT_F rc[9] = { rcGain_, rcAggr_, rcHpf_, rcLim_, rcDck_, rcVfl_, rcGate_, rcMix_, rcBoost_ };
-  for (int i = 0; i < 9; ++i)
-    if (x >= rc[i].left && x <= rc[i].right && y >= rc[i].top - 20 && y <= rc[i].bottom + 8) return i;
-  if (hit(rcMicField_, x, y))  return 100;
-  if (hit(rcOutField_, x, y))  return 101;
-  if (hit(rcEngineRnn_, x, y)) return 200;
-  if (hit(rcEngineDfn_, x, y)) return 201;
-  if (hit(rcBypass_, x, y))    return 202;
-  if (hit(rcRingBox_, x, y) || hit(rcRingApply_, x, y)) return 102;
-  if (hit(rcLowLat_, x, y)) return 103;
-  return -1;
+  for (const SliderSpec& s : kSliderSpecs) {
+    const D2D1_RECT_F& r = track(s.id);
+    if (x >= r.left && x <= r.right && y >= r.top - 20 && y <= r.bottom + 8) return (int)s.id;
+  }
+  if (hit(rcMicField_, x, y))  return kHelpMic;
+  if (hit(rcOutField_, x, y))  return kHelpOutput;
+  if (hit(rcEngineRnn_, x, y)) return kHelpEngineRnn;
+  if (hit(rcEngineDfn_, x, y)) return kHelpEngineDfn;
+  if (hit(rcBypass_, x, y))    return kHelpBypass;
+  if (hit(rcRingBox_, x, y) || hit(rcRingApply_, x, y)) return kHelpLatency;
+  if (hit(rcLowLat_, x, y))    return kHelpLowLatency;
+  return kHelpNone;
 }
 
 std::wstring AppWindow::helpText() const {
+  if (helpHot_ >= 0 && helpHot_ < kSliderCount) return kSliderSpecs[helpHot_].help;
   switch (helpHot_) {
-    case 0:   return L"TARGET LOUDNESS — auto-levels your voice to this level while you speak (an AGC, not a raw volume). It only acts when the VAD dot in the status line is lit. Watch the AGC readout move as you drag.";
-    case 8:   return L"MAX BOOST \x2014 the most the auto-leveler may raise your voice. If the AGC readout sits at this value while you talk, your mic is quieter than it can make up for: raise MAX BOOST (or your mic level in Windows). Lower it if background noise gets pumped up between words.";
-    case 1:   return L"AGGRESSION — how hard DeepFilterNet3 scrubs noise (DFN3 only). Higher is cleaner but can sound processed.";
-    case 2:   return L"HPF — high-pass filter. Cuts low rumble, handling thumps and AC hum below the set frequency. Raise to remove more low end.";
-    case 3:   return L"LIMITER — a ceiling that stops loud peaks from clipping. Lower the ceiling for safer, quieter peaks.";
-    case 4:   return L"DE-CLICK — ducks short clicks (keyboard/mouse) in the gaps between words. Raise until clicks fade; too high can soften consonants.";
-    case 5:   return L"SPEECH DECLICK — how much de-click applies while you talk. 0 = never touch your voice (safest). Raise only if clicks ride on your speech.";
-    case 6:   return L"NOISE GATE — silences the gaps between words so the amplified noise floor / typing static drops out when you're not speaking. Raise until the gaps go quiet; too high can clip soft word endings.";
-    case 7:   return L"STRENGTH — how hard the denoiser works. Lower blends your natural (un-denoised) voice back in to soften musical-noise / 'laser' artifacts (RNNoise); 100% = full denoise.";
-    case 100: return L"MICROPHONE — the input device being cleaned. Click to choose a different mic.";
-    case 101: return L"OUTPUT — where the cleaned audio is sent (e.g. CABLE Input, which apps pick as your mic). Click to choose.";
-    case 200: return L"ENGINE: RNNoise — lighter, low-latency denoiser. Best at keyboard/mouse clicks — use this in a clicky room.";
-    case 201: return L"ENGINE: DeepFilterNet3 — stronger on steady background noise, but passes short clicks (use DE-CLICK or RNNoise for those).";
-    case 202: return L"BYPASS — pass your mic through untouched with denoising off. Click to toggle (A/B your setup).";
-    case 102: return L"LATENCY — audio buffer depth in frames (1 frame = 10 ms audio; buffered delay \x2248 frames \x00D7 5 ms). Higher tolerates glitches better but adds delay. Applying restarts the audio engine (brief dropout).";
-    case 103: return L"LOW LATENCY — run RNNoise at its native \x223C 0 ms engine delay (drops the \x223C 30 ms DFN3 alignment pin). Switching to DFN3 later causes a one-time timing shift. Toggling restarts the audio engine (brief dropout).";
-    default:  return L"Hover a slider or control to see what it does and how to use it.";
+    case kHelpMic:        return L"MICROPHONE \x2014 the input device being cleaned. Click to choose a different mic.";
+    case kHelpOutput:     return L"OUTPUT \x2014 where the cleaned audio is sent (e.g. CABLE Input, which apps pick as your mic). Click to choose.";
+    case kHelpEngineRnn:  return L"ENGINE: RNNoise \x2014 lighter, low-latency denoiser. Best at keyboard/mouse clicks \x2014 use this in a clicky room.";
+    case kHelpEngineDfn:  return L"ENGINE: DeepFilterNet3 \x2014 stronger on steady background noise, but passes short clicks (use DE-CLICK or RNNoise for those).";
+    case kHelpBypass:     return L"BYPASS \x2014 pass your mic through untouched with denoising off. Click to toggle (A/B your setup).";
+    case kHelpLatency:    return L"LATENCY \x2014 audio buffer depth in frames (1 frame = 10 ms audio; buffered delay \x2248 frames \x00D7 5 ms). Higher tolerates glitches better but adds delay. Applying restarts the audio engine (brief dropout).";
+    case kHelpLowLatency: return L"LOW LATENCY \x2014 run RNNoise at its native \x223C 0 ms engine delay (drops the \x223C 30 ms DFN3 alignment pin). Switching to DFN3 later causes a one-time timing shift. Toggling restarts the audio engine (brief dropout).";
+    default:              return L"Hover a slider or control to see what it does and how to use it.";
   }
 }
 
-void AppWindow::setSliderFromX(int i, int x) {
-  D2D1_RECT_F& r = trackByIndex(i);
-  float t = (r.right > r.left) ? ((float)x - r.left) / (r.right - r.left) : 0.0f;
-  sliderByIndex(i).setFraction(t);
+D2D1_RECT_F AppWindow::overlayRect() const {
+  const D2D1_RECT_F& field = (picker_.openKind()==PickerKind::Capture) ? rcMicField_ : rcOutField_;
+  const auto& rows = picker_.rows(picker_.openKind());
+  float h = kRowH * (rows.empty() ? 1.0f : (float)rows.size());
+  return D2D1::RectF(field.left, field.bottom + 2, field.right, field.bottom + 2 + h);
 }
-vc::ipc::Params AppWindow::applySlider(int i) {
-  Slider& s = sliderByIndex(i);
-  switch (i) {
-    case 0: return state_->onSetOutputGain(s.value());
-    case 1: return state_->onSetAggression(s.value());
-    case 2: return state_->onSetHpf(s.value());
-    case 3: return state_->onSetLimiter(s.value());
-    case 4: return state_->onSetDeclick(s.value());
-    case 5: return state_->onSetDeclickVoiceFloor(s.value());
-    case 6: return state_->onSetGate(s.value());
-    case 7: return state_->onSetMix(s.value());
-    default: return state_->onSetMaxBoost(s.value());
-  }
+
+int AppWindow::overlayHit(int x, int y) const {
+  if (!picker_.isOpen()) return -1;
+  D2D1_RECT_F o = overlayRect();
+  if (x < o.left || x > o.right || y < o.top || y > o.bottom) return -1;
+  int idx = (int)(((float)y - o.top) / kRowH);
+  const auto& rows = picker_.rows(picker_.openKind());
+  return (idx >= 0 && idx < (int)rows.size()) ? idx : -1;
 }
+
+// ---------------------------------------------------------------------------------------------
+// Actions
+// ---------------------------------------------------------------------------------------------
+
+void AppWindow::setSliderFromX(SliderId id, int x) {
+  const D2D1_RECT_F& r = track(id);
+  const float t = (r.right > r.left) ? ((float)x - r.left) / (r.right - r.left) : 0.0f;
+  slider(id).setFraction(t);
+}
+
+vc::ipc::Params AppWindow::applySlider(SliderId id) {
+  return (state_->*sliderSpec(id).apply)(slider(id).value());
+}
+
 void AppWindow::persistTuning() {
   if (!settings_) return;
   vc::MicProfile* p = settings_->activeProfile();
   if (!p) return;
-  p->outputGainDbfs = sldGain_.value();
-  p->aggression     = sldAggr_.value();
-  p->hpfHz          = sldHpf_.value();
-  p->limiterDbfs    = sldLim_.value();
-  p->declickStrength = sldDck_.value();
-  p->declickVoiceFloor = sldVfl_.value();
-  p->gateStrength = sldGate_.value();
-  p->mixStrength = sldMix_.value();
-  p->maxBoostDb = sldBoost_.value();
+  for (const SliderSpec& s : kSliderSpecs) p->*s.profileField = slider(s.id).value();
   settings_->save(configPath_);
 }
 
@@ -499,11 +513,20 @@ void AppWindow::commitRingEdit() {
   ringEdit_ = std::to_wstring(ringPendingClamped());
 }
 
+void AppWindow::startWorker() {
+  pushedTuning_ = false;     // re-push the active mic's tuning once the worker is ready (tick())
+  sup_->startOrAttach();
+}
+
 void AppWindow::respawnWorker() {
-  sup_->shutdown(3000);      // fully stop the current worker process
-  pushedTuning_ = false;     // re-push the active mic's tuning to the fresh worker (tick() readiness path)
-  sup_->startOrAttach();     // spawns fresh -> reads the new ring_frames
-  InvalidateRect(hwnd_, nullptr, FALSE);
+  sup_->shutdown(kShutdownWaitMs);   // fully stop the current worker process
+  startWorker();                     // spawns fresh -> re-reads settings.toml (ring_frames, low_latency)
+  invalidate();
+}
+
+void AppWindow::quit() {
+  sup_->shutdown(kShutdownWaitMs);
+  DestroyWindow(hwnd_);
 }
 
 void AppWindow::toggleLowLatency() {
@@ -511,7 +534,7 @@ void AppWindow::toggleLowLatency() {
   settings_->lowLatency = !settings_->lowLatency;   // global; read by the bridge at worker start
   settings_->save(configPath_);
   if (spawned_) respawnWorker();   // first-run (no worker yet): value takes effect at first spawn
-  else InvalidateRect(hwnd_, nullptr, FALSE);
+  else invalidate();
 }
 
 void AppWindow::resizeToContent() {
@@ -524,7 +547,7 @@ void AppWindow::resizeToContent() {
 }
 
 void AppWindow::toggleSection(int i) {
-  if (i < 0 || i > 2) return;
+  if (i < 0 || i >= kSliderGroupCount) return;
   secOpen_[i] = !secOpen_[i];
   if (settings_) {
     if (secOpen_[i]) settings_->collapsedSections &= ~(1u << i);
@@ -532,7 +555,7 @@ void AppWindow::toggleSection(int i) {
     settings_->save(configPath_);
   }
   resizeToContent();
-  InvalidateRect(hwnd_, nullptr, FALSE);
+  invalidate();
 }
 
 void AppWindow::applyRing() {
@@ -545,26 +568,10 @@ void AppWindow::applyRing() {
   if (spawned_) respawnWorker();   // first-run (no worker yet): value takes effect at first spawn
 }
 
-D2D1_RECT_F AppWindow::overlayRect() const {
-  const D2D1_RECT_F& field = (picker_.openKind()==PickerKind::Capture) ? rcMicField_ : rcOutField_;
-  const auto& rows = picker_.rows(picker_.openKind());
-  float h = kRowH * (rows.empty() ? 1.0f : (float)rows.size());
-  return D2D1::RectF(field.left, field.bottom + 2, field.right, field.bottom + 2 + h);
-}
-
-int AppWindow::overlayHit(int x, int y) const {
-  if (!picker_.isOpen()) return -1;
-  D2D1_RECT_F o = overlayRect();
-  if (x < o.left || x > o.right || y < o.top || y > o.bottom) return -1;
-  int idx = (int)(((float)y - o.top) / kRowH);
-  const auto& rows = picker_.rows(picker_.openKind());
-  return (idx >= 0 && idx < (int)rows.size()) ? idx : -1;
-}
-
 void AppWindow::sendCurrent(const vc::ipc::Params& p, bool throttled) {
   outbox_.stage(p);
   flushParams(/*force=*/!throttled);
-  InvalidateRect(hwnd_, nullptr, FALSE);
+  invalidate();
 }
 
 // Deliver the newest staged Params. A send can fail when it lands while the worker's single-instance
@@ -587,6 +594,7 @@ void AppWindow::onCommandEngine(uint32_t engine) {
     if (p->engine != name) { p->engine = name; settings_->save(configPath_); }
   }
 }
+
 void AppWindow::onCommandBypass() { if (state_->bypassEnabled()) sendCurrent(state_->onToggleBypass()); }
 
 void AppWindow::applyPick(PickerKind k, size_t rowIndex) {
@@ -594,7 +602,7 @@ void AppWindow::applyPick(PickerKind k, size_t rowIndex) {
   if (rowIndex >= rows.size()) { picker_.close(); return; }
   const DeviceRow chosen = rows[rowIndex];          // copy before pick() mutates picker state
   std::string id = picker_.pick(k, rowIndex);       // "" if non-selectable / unchanged
-  if (id.empty()) { InvalidateRect(hwnd_, nullptr, FALSE); return; }
+  if (id.empty()) { invalidate(); return; }
   if (!settings_) { picker_.close(); return; }
 
   if (k == PickerKind::Capture) {
@@ -621,14 +629,13 @@ void AppWindow::applyPick(PickerKind k, size_t rowIndex) {
   } else {
     sup_->sendSelectRender(id);
   }
-  InvalidateRect(hwnd_, nullptr, FALSE);
+  invalidate();
 }
 
 void AppWindow::requestRelaunch() {
   respawn_.reset();          // manual relaunch clears any auto-respawn episode
-  pushedTuning_ = false;
-  sup_->startOrAttach();
-  InvalidateRect(hwnd_, nullptr, FALSE);
+  startWorker();
+  invalidate();
 }
 
 void AppWindow::showRestore() {
@@ -654,10 +661,8 @@ void AppWindow::tick() {
     }
   }
   // Auto-respawn on a post-ready death (e.g. device loss); launch failures do not loop.
-  if (respawn_.onTick(r.alive, r.ready, !r.launchFailure, nowMs) == RespawnPolicy::Action::Respawn) {
-    pushedTuning_ = false;             // re-push the seeded tuning once the fresh worker is ready
-    sup_->startOrAttach();
-  }
+  if (respawn_.onTick(r.alive, r.ready, !r.launchFailure, nowMs) == RespawnPolicy::Action::Respawn)
+    startWorker();
   if (tray_) tray_->update(*state_);
   // Only repaint when a paint-relevant input actually changed. All tick-driven visuals derive
   // from the telemetry snapshot (keyed by seq, which bumps ~1 Hz on each aggregate publish), the
@@ -667,8 +672,62 @@ void AppWindow::tick() {
   const int attempts = respawn_.attempts();
   if (seq != lastPaintSeq_ || kind != lastPaintKind_ || attempts != lastPaintAttempts_) {
     lastPaintSeq_ = seq; lastPaintKind_ = kind; lastPaintAttempts_ = attempts;
-    InvalidateRect(hwnd_, nullptr, FALSE);
+    invalidate();
   }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Input
+// ---------------------------------------------------------------------------------------------
+
+void AppWindow::onMouseDown(int x, int y) {
+  if (ringFocused_ && !hit(rcRingBox_, x, y)) { commitRingEdit(); ringFocused_ = false; }   // click-away commits
+  if (picker_.isOpen()) {                          // overlay takes priority
+    int row = overlayHit(x, y);
+    if (row >= 0) applyPick(picker_.openKind(), (size_t)row);
+    else picker_.close();                          // click-away dismisses
+    invalidate();
+    return;
+  }
+  if (hit(rcMicField_, x, y)) { refreshDevices(); picker_.open(PickerKind::Capture); invalidate(); return; }
+  if (hit(rcOutField_, x, y)) { refreshDevices(); picker_.open(PickerKind::Render);  invalidate(); return; }
+  if (hit(rcRingBox_, x, y))  { ringFocused_ = true; invalidate(); return; }
+  for (int i = 0; i < kSliderGroupCount; ++i) if (hit(rcSecHdr_[i], x, y)) { toggleSection(i); return; }
+  if (int s = trackHit(x, y); s >= 0) {
+    grabbed_ = s;
+    setSliderFromX((SliderId)s, x);
+    sendCurrent(applySlider((SliderId)s));
+    return;
+  }
+  switch (hitControl(x, y)) {
+    case Control::EngineRnn:  onCommandEngine(0); break;
+    case Control::EngineDfn:  onCommandEngine(1); break;
+    case Control::Bypass:     onCommandBypass(); break;   // no-ops when disabled
+    case Control::Relaunch:   if (state_->statusKind()==StatusKind::Down) requestRelaunch(); break;
+    case Control::Quit:       quit(); break;
+    case Control::RingApply:  applyRing(); break;         // persist + respawn
+    case Control::LowLatency: toggleLowLatency(); break;  // persist + respawn
+    case Control::None:       break;
+  }
+}
+
+void AppWindow::onMouseMove(int x, int y) {
+  if (grabbed_ >= 0) {   // dragging a slider
+    setSliderFromX((SliderId)grabbed_, x);
+    sendCurrent(applySlider((SliderId)grabbed_), /*throttled=*/true);   // drag: <= 1 send / 30 ms
+    return;
+  }
+  Control h = hitControl(x, y);
+  if (h==Control::Bypass && !state_->bypassEnabled()) h = Control::None;                  // disabled bypass: no hover
+  if (h==Control::Relaunch && state_->statusKind()!=StatusKind::Down) h = Control::None;  // relaunch only when down
+  if (h != hot_) { hot_ = h; invalidate(); }
+  const int hp = helpTargetAt(x, y);                                 // hovered control for the help strip
+  if (hp != helpHot_) { helpHot_ = hp; invalidate(); }
+  int hsec = -1;                                                     // hovered slider-group header
+  for (int i = 0; i < kSliderGroupCount; ++i) if (hit(rcSecHdr_[i], x, y)) hsec = i;
+  if (hsec != hotSec_) { hotSec_ = hsec; invalidate(); }
+  TRACKMOUSEEVENT tme{ sizeof(TRACKMOUSEEVENT), TME_LEAVE, hwnd_, 0 };
+  TrackMouseEvent(&tme);                                             // so WM_MOUSELEAVE fires
 }
 
 LRESULT AppWindow::handle(UINT msg, WPARAM w, LPARAM l) {
@@ -678,35 +737,13 @@ LRESULT AppWindow::handle(UINT msg, WPARAM w, LPARAM l) {
     case WM_SIZE:
       if (rt_) { RECT rc; GetClientRect(hwnd_, &rc); rt_->Resize(D2D1::SizeU(rc.right, rc.bottom)); }
       return 0;
-    case WM_LBUTTONDOWN: {
-      int x = GET_X_LPARAM(l), y = GET_Y_LPARAM(l);
-      if (ringFocused_ && !hit(rcRingBox_, x, y)) { commitRingEdit(); ringFocused_ = false; }   // click-away commits
-      if (picker_.isOpen()) {                          // overlay takes priority
-        int row = overlayHit(x, y);
-        if (row >= 0) applyPick(picker_.openKind(), (size_t)row);
-        else picker_.close();                          // click-away dismisses
-        InvalidateRect(hwnd_, nullptr, FALSE);
-        return 0;
-      }
-      if (hit(rcMicField_, x, y)) { refreshDevices(); picker_.open(PickerKind::Capture); InvalidateRect(hwnd_, nullptr, FALSE); return 0; }
-      if (hit(rcOutField_, x, y)) { refreshDevices(); picker_.open(PickerKind::Render);  InvalidateRect(hwnd_, nullptr, FALSE); return 0; }
-      if (hit(rcRingBox_, x, y)) { ringFocused_ = true; InvalidateRect(hwnd_, nullptr, FALSE); return 0; }
-      for (int i = 0; i < 3; ++i) if (hit(rcSecHdr_[i], x, y)) { toggleSection(i); return 0; }
-      { int s = trackHit(x, y);
-        if (s >= 0) { grabbed_ = s; setSliderFromX(s, x); sendCurrent(applySlider(s)); InvalidateRect(hwnd_, nullptr, FALSE); return 0; } }
-      switch (hitControl(x, y)) {
-        case 0: onCommandEngine(0); break;
-        case 1: onCommandEngine(1); break;
-        case 2: onCommandBypass(); break;   // onCommandBypass() itself no-ops when disabled
-        case 3: if (state_->statusKind()==StatusKind::Down) requestRelaunch(); break;
-        case 4: sup_->shutdown(3000); DestroyWindow(hwnd_); break;   // full quit
-        case 5: applyRing(); break;   // latency Apply -> persist + respawn
-        case 6: toggleLowLatency(); break;   // low-latency checkbox -> persist + respawn
-      }
+    case WM_LBUTTONDOWN: onMouseDown(GET_X_LPARAM(l), GET_Y_LPARAM(l)); return 0;
+    case WM_MOUSEMOVE:   onMouseMove(GET_X_LPARAM(l), GET_Y_LPARAM(l)); return 0;
+    case WM_LBUTTONUP:
+      if (grabbed_ >= 0) { flushParams(/*force=*/true); persistTuning(); grabbed_ = -1; invalidate(); }   // deliver final value + persist
       return 0;
-    }
     case WM_KEYDOWN:
-      if (w == VK_ESCAPE && picker_.isOpen()) { picker_.close(); InvalidateRect(hwnd_, nullptr, FALSE); }
+      if (w == VK_ESCAPE && picker_.isOpen()) { picker_.close(); invalidate(); }
       return 0;
     case WM_CHAR:
       if (ringFocused_) {
@@ -715,46 +752,25 @@ LRESULT AppWindow::handle(UINT msg, WPARAM w, LPARAM l) {
         else if (c == L'\b') { if (!ringEdit_.empty()) ringEdit_.pop_back(); }   // Backspace
         else if (c == L'\r') { applyRing(); ringFocused_ = false; }              // Enter commits + applies
         else if (c == 27)    { commitRingEdit(); ringFocused_ = false; }         // Esc cancels edit
-        InvalidateRect(hwnd_, nullptr, FALSE);
+        invalidate();
         return 0;
       }
       break;
-    case WM_MOUSEMOVE: {
-      if (grabbed_ >= 0) {   // dragging a slider
-        setSliderFromX(grabbed_, GET_X_LPARAM(l));
-        sendCurrent(applySlider(grabbed_), /*throttled=*/true);   // drag: <= 1 send / 30 ms
-        InvalidateRect(hwnd_, nullptr, FALSE);
-        return 0;
-      }
-      int h = hitControl(GET_X_LPARAM(l), GET_Y_LPARAM(l));
-      if (h==2 && !state_->bypassEnabled()) h = -1;                       // disabled bypass: no hover
-      if (h==3 && state_->statusKind()!=StatusKind::Down) h = -1;         // relaunch only when down
-      if (h != hot_) { hot_ = h; InvalidateRect(hwnd_, nullptr, FALSE); }
-      int hp = helpTargetAt(GET_X_LPARAM(l), GET_Y_LPARAM(l));           // hovered control for the help strip
-      if (hp != helpHot_) { helpHot_ = hp; InvalidateRect(hwnd_, nullptr, FALSE); }
-      int hsec = -1;                                                     // hovered slider-group header
-      for (int i = 0; i < 3; ++i) if (hit(rcSecHdr_[i], GET_X_LPARAM(l), GET_Y_LPARAM(l))) hsec = i;
-      if (hsec != hotSec_) { hotSec_ = hsec; InvalidateRect(hwnd_, nullptr, FALSE); }
-      TRACKMOUSEEVENT tme{ sizeof(TRACKMOUSEEVENT), TME_LEAVE, hwnd_, 0 };
-      TrackMouseEvent(&tme);                                             // so WM_MOUSELEAVE fires
-      return 0;
-    }
-    case WM_LBUTTONUP:
-      if (grabbed_ >= 0) { flushParams(/*force=*/true); persistTuning(); grabbed_ = -1; }   // deliver final value + persist
-      return 0;
     case WM_MOUSELEAVE:
-      if (hot_ != -1 || helpHot_ != -1 || hotSec_ != -1) { hot_ = -1; helpHot_ = -1; hotSec_ = -1; InvalidateRect(hwnd_, nullptr, FALSE); }
+      if (hot_ != Control::None || helpHot_ != kHelpNone || hotSec_ != -1) {
+        hot_ = Control::None; helpHot_ = kHelpNone; hotSec_ = -1; invalidate();
+      }
       return 0;
     case WM_SETCURSOR:
-      if (LOWORD(l)==HTCLIENT && (hot_ != -1 || hotSec_ != -1)) { SetCursor(LoadCursor(nullptr, IDC_HAND)); return TRUE; }
+      if (LOWORD(l)==HTCLIENT && (hot_ != Control::None || hotSec_ != -1)) { SetCursor(LoadCursor(nullptr, IDC_HAND)); return TRUE; }
       break;
     case WM_COMMAND:
       switch (LOWORD(w)) {
-        case kTrayCmdEnabled:  onCommandBypass(); break;
+        case kTrayCmdEnabled:   onCommandBypass(); break;
         case kTrayCmdEngineRnn: onCommandEngine(0); break;
         case kTrayCmdEngineDfn: onCommandEngine(1); break;
-        case kTrayCmdOpen:     showRestore(); break;
-        case kTrayCmdQuit:     sup_->shutdown(3000); DestroyWindow(hwnd_); break;
+        case kTrayCmdOpen:      showRestore(); break;
+        case kTrayCmdQuit:      quit(); break;
       }
       return 0;
     case WM_TRAY:
