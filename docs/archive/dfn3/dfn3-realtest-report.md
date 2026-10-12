@@ -6,7 +6,7 @@
 **Source:** three real 48 kHz mono PCM16 recordings from the user's K688 mechanical
 keyboard — `typing_only.wav` (12 s), `speech_only.wav` (12 s), `speech_typing.wav` (20 s).
 These have **no ground-truth separation**, so every output is scored against its own **raw
-input** after xcorr-lag alignment (tool: `tools/dfn3/dfn3_realtest.py`, reusing
+input** after xcorr-lag alignment (tool: `docs/archive/dfn3-tools/dfn3_realtest.py`, reusing
 `dfn3_compare.py`'s `read_mono` + `best_lag`).
 
 **Engines:** `dfn3-stream` (the live low-latency `_ll` DFN3) and `rnnoise`.
@@ -148,7 +148,7 @@ is RNNoise.
 (`*_pass.wav` passthrough copies were also generated as the 0-dB reference but can be
 deleted.)
 
-Reproduce: `python tools/dfn3/dfn3_realtest.py` (expects the input recordings + processed
+Reproduce: `python docs/archive/dfn3-tools/dfn3_realtest.py` (expects the input recordings + processed
 outputs in the repo root).
 
 ---
@@ -161,7 +161,7 @@ suppression a *real* limitation, or an artifact of the quiet recordings (peaks -
 input, feeding it a hotter signal should make it "wake up."
 
 **Method.** Applied a uniform **+20 dB** gain (x10.0) to each of the three raw recordings
-(`tools/dfn3/dfn3_gain.py`), producing `*_n.wav`. +20 dB on -27 to -42 dBFS peaks lands at -7 to
+(`docs/archive/dfn3-tools/dfn3_gain.py`), producing `*_n.wav`. +20 dB on -27 to -42 dBFS peaks lands at -7 to
 -22 dBFS — comfortably below full scale. **Clipped samples after gain: 0 (0.0000%) on all
 three files.** Re-ran both engines BARE on the normalized clips and re-scored with the same
 metrics.
@@ -221,8 +221,8 @@ with +20 dB), so the full chain still needs proper gain-staging / a level meter,
 should be re-tested inside the full chain where AGC sets a consistent hot level. That would
 let DFN3 perform at its best — but its best here is still ~5.6 dB, far short of RNNoise.
 
-Reproduce: `python tools/dfn3/dfn3_gain.py <in.wav> <out.wav> 20` on each raw clip, re-run the
-engines on the `_n.wav` inputs, then `python tools/dfn3/dfn3_realtest.py _n`.
+Reproduce: `python docs/archive/dfn3-tools/dfn3_gain.py <in.wav> <out.wav> 20` on each raw clip, re-run the
+engines on the `_n.wav` inputs, then `python docs/archive/dfn3-tools/dfn3_realtest.py _n`.
 
 ### Normalized A/B clips left for the user (repo root, not committed)
 

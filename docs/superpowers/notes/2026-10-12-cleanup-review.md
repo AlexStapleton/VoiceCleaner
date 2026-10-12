@@ -76,7 +76,7 @@ Effort S/M/L, risk low/med/high. ✔ = verified by hand beyond the review pass.
   aggression is "wired in a later phase"; worker prints "Automatic reconnect is Phase 1";
   4-slider-era comments in `app_window.h`. S, low.
 - Repo layout: no root README; blueprint/reports/research_notes at root → `docs/`; 7 DFN3 Python
-  harnesses → `tools/dfn3/` (rename the two engine-agnostic scorers); `docs/STATUS.md` references a
+  harnesses → `docs/archive/dfn3-tools/` (rename the two engine-agnostic scorers); `docs/STATUS.md` references a
   `phase0-app.exe` that no longer exists. S, low.
 
 ### Not worth doing now
@@ -107,7 +107,7 @@ Implemented:
   resets drift tracking; old flat config format removed (`Config::load` rejects it).
 - Batch 2 — `models/dfn3-ll`, `Dfn3Offline`, `dfn3-probe`, shipped `settings.toml`,
   `copy_if_absent.cmake` and unbuilt rnnoise files removed; only DFN3 runtime models copied/zipped;
-  `VC_BUILD_DEV_TOOLS` (default OFF) gates offline-cli; DFN3 scripts in `tools/dfn3/`.
+  `VC_BUILD_DEV_TOOLS` (default OFF) gates offline-cli; DFN3 scripts in `docs/archive/dfn3-tools/`.
 - Batch 3 — unused API removed; IPC `SetWarmStandby` + Params `dspChain/driftComp/dryTap` removed,
   command magic VCC1 → VCC2; shared `win-audio/utf8.h`; stale comments fixed; drift tomls deleted;
   README, docs reorganized (`docs/design`, `docs/research`, `docs/dfn3`), STATUS current-state section.

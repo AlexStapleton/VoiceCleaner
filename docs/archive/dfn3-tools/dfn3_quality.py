@@ -19,7 +19,7 @@ Reuses read_mono / best_lag / rms from dfn3_compare.py; alignment handles the
 processing latency via the xcorr lag.
 
 Usage:
-  python tools/dfn3/dfn3_quality.py --clean qual_clean.wav --mix qual_mix.wav \
+  python docs/archive/dfn3-tools/dfn3_quality.py --clean qual_clean.wav --mix qual_mix.wav \
       --proc out.wav [--noise qual_noise.wav] [--leadin-s 0.5] [--label NAME]
 """
 import argparse

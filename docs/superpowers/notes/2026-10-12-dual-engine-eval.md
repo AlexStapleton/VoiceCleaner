@@ -49,3 +49,11 @@ speech-active frames" metric (-0.38 vs -0.52 dB) did not capture this audible di
 user's priority (no typing audible, ever) it is the wrong metric. Spec Part 6.3 requires the user to
 prefer Dual by ear, so Dual does not ship as designed; the structural cause (DFN3 owns the speech
 segments) means controller tuning can't fix it.
+
+## Outcome
+
+- **Dual is shelved.** The listening test above failed it, and the structural cause (DFN3 owns the speech
+  segments) cannot be fixed by controller tuning.
+- **DeepFilterNet3 was removed in v1.6.** RNNoise is the only engine. The DFN3 evaluation material is kept in
+  `docs/archive/dfn3/` and `docs/archive/dfn3-tools/` (see `docs/archive/README.md`).
+- Part 0 of the Dual spec (RNNoise's real 960-sample delay) shipped.

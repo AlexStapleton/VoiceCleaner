@@ -19,13 +19,13 @@ DeepFilterNet runtime.
 
 ## Method
 
-1. `tools/dfn3/dfn3_make_val_wav.py` → `val_in.wav`: 48 kHz mono PCM16, 3.0 s,
+1. `docs/archive/dfn3-tools/dfn3_make_val_wav.py` → `val_in.wav`: 48 kHz mono PCM16, 3.0 s,
    deterministic (seed 20260814). Three AM-modulated formant tones
    (200/900/2500 Hz, 3 Hz envelope) + white noise at ~7 dB SNR, with a 0.5 s
    noise-only lead-in.
 2. Reference: `deep-filter.exe -o refout val_in.wav` → `refout/val_in.wav`.
 3. Ours: `offline-cli --engine dfn3 val_in.wav val_ours.wav`.
-4. `tools/dfn3/dfn3_compare.py`: cross-correlate to find the integer sample lag,
+4. `docs/archive/dfn3-tools/dfn3_compare.py`: cross-correlate to find the integer sample lag,
    align, trim to common length, then report Pearson r, per-region RMS, and a
    coarse magnitude-spectrum MSE.
 
@@ -72,8 +72,8 @@ window). Until then, RNNoise is the live engine and DFN3 is offline-only.
 ## Reproduce
 
 ```
-python tools/dfn3/dfn3_make_val_wav.py val_in.wav
+python docs/archive/dfn3-tools/dfn3_make_val_wav.py val_in.wav
 deep-filter.exe -o refout val_in.wav            # deep_filter 0.5.6, from releases
 offline-cli --engine dfn3 val_in.wav val_ours.wav
-python tools/dfn3/dfn3_compare.py refout/val_in.wav val_ours.wav
+python docs/archive/dfn3-tools/dfn3_compare.py refout/val_in.wav val_ours.wav
 ```

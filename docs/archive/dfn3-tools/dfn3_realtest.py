@@ -17,7 +17,7 @@ per-test output WAV (produced by offline-cli.exe). Missing files are skipped for
 that test, so a partial set (e.g. only the aggression sweep) still runs.
 
 Usage:
-  python tools/dfn3/dfn3_realtest.py [suffix]
+  python docs/archive/dfn3-tools/dfn3_realtest.py [suffix]
 The optional suffix (e.g. "_n" for the +20 dB normalized re-test) is inserted
 before ".wav" in every filename. All WAVs live in the repo root.
 """

@@ -1,8 +1,7 @@
 # Dual Engine Mode (RNNoise in the gaps, DeepFilterNet3 while speaking) — Design
 
 Date: 2026-10-12
-Status: Reviewed (design; Sonnet review 2026-10-12 folded in), implementation plan in
-`docs/superpowers/plans/2026-10-12-dual-engine-mode.md`
+Status: SHELVED 2026-10-12 — user listening test: Dual lets typing through under speech (DFN3 owns speech segments); DFN3 then removed from the product in v1.6. Kept for the record; Part 0 (RNNoise's real 960-sample delay) shipped.
 
 ## Problem
 
@@ -10,7 +9,7 @@ VoiceCleaner offers two engines and each wins at something different:
 
 - **RNNoise** nearly erases mouse/keyboard clicks in the gaps between words, is cheap and has low
   latency, but thins the voice a little (91.8% speech-band retention, 2.44 dB LSD on the user's real
-  recordings, `docs/dfn3/dfn3-realtest-report.md`).
+  recordings, `docs/archive/dfn3/dfn3-realtest-report.md`).
 - **DeepFilterNet3 (DFN3)** keeps the voice more natural (95.9%, 1.31 dB LSD) and handles steady noise
   (fans, hum) better, but lets clicks through, adds ~30 ms, costs ~3x the CPU, and — found 2026-10-12 —
   barely works on quiet input (see Part 1).

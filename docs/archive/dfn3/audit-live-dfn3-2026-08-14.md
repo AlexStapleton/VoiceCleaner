@@ -43,7 +43,7 @@ self-consistent," not "the output is correct," and not "the output is good."
 ## P1 — Correctness & quality validation (HIGH)
 
 **1.1 The shipped `_ll` model has no external ground truth.** The only authoritative check
-(r=0.9946 vs the official `deep-filter` binary, `docs/dfn3/dfn3-validation.md`) is for the **standard**
+(r=0.9946 vs the official `deep-filter` binary, `docs/archive/dfn3/dfn3-validation.md`) is for the **standard**
 model `models/dfn3`, which is **not what ships live** (`bridge.cpp:45` loads `models/dfn3-ll`). The
 `deep-filter` 0.5.6 binary bundles the standard weights, so it cannot sample-match `_ll`.
 → Validate `_ll` against DeepFilterNet's Python with the `_ll` checkpoint, or exported golden `.npz`
@@ -55,7 +55,7 @@ sides, an off-by-one here passes every gate in the repo. This is the highest-lev
 in the pipeline. → Ground-truth it against a `_ll` reference (even a directional check).
 
 **1.3 Denoising quality has never been measured, and the test signal is wrong for the use case.**
-The one validation clip (`tools/dfn3/dfn3_make_val_wav.py`) is synthetic sines + **white** noise; DFN3's
+The one validation clip (`docs/archive/dfn3-tools/dfn3_make_val_wav.py`) is synthetic sines + **white** noise; DFN3's
 justification is **impulsive/keyboard** noise (non-stationary), which white noise doesn't represent.
 `r` is *similarity to a reference*, not an SNR/noise-removal metric. → Build a small real corpus
 (real speech + real keyboard/fan/babble), measure segmental-SNR improvement, and listen.

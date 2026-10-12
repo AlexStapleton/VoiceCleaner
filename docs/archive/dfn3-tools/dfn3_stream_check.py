@@ -22,7 +22,7 @@ Each windowed graph's required window W is found empirically (grow W until that 
 reproduce the aligned whole-utterance frames). GRU hidden size is auto-detected per streaming
 graph (512 for `_ll`, 256 for standard). Prints per-output max|diff|, the WORST, and PASS/FAIL.
 
-Deps: onnx, onnxruntime, numpy.  Usage: python tools/dfn3/dfn3_stream_check.py [models/dfn3]
+Deps: onnx, onnxruntime, numpy.  Usage: python docs/archive/dfn3-tools/dfn3_stream_check.py [models/dfn3]
 """
 import configparser
 import sys

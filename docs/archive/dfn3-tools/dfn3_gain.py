@@ -6,10 +6,10 @@ clipped-sample count), and writes the result as PCM16 at the original rate/
 channel count.
 
 Usage:
-  python tools/dfn3/dfn3_gain.py <in.wav> <out.wav> <dB>
+  python docs/archive/dfn3-tools/dfn3_gain.py <in.wav> <out.wav> <dB>
 
 Example (+20 dB):
-  python tools/dfn3/dfn3_gain.py typing_only.wav typing_only_n.wav 20
+  python docs/archive/dfn3-tools/dfn3_gain.py typing_only.wav typing_only_n.wav 20
 """
 import sys
 import wave

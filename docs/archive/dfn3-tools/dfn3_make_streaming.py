@@ -33,7 +33,7 @@ frames per hop). Two model-specific resolutions:
 
 Pure onnx graph surgery + onnxsim cleanup -- no PyTorch, no retraining.
 Deps: onnx, onnxsim (best-effort), onnxruntime (optional, for the shape print).
-Usage: python tools/dfn3/dfn3_make_streaming.py [models/dfn3]
+Usage: python docs/archive/dfn3-tools/dfn3_make_streaming.py [models/dfn3]
 """
 import configparser
 import sys

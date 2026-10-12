@@ -26,7 +26,7 @@ SNR improvement against the clean reference, not just similarity to another tool
    DFN3's "better for keyboard clicks" justification; if anything it shows the
    opposite. See caveats — the synthetic clicks may be unrepresentative.
 
-## Clip design (`tools/dfn3/dfn3_make_quality_clip.py`)
+## Clip design (`docs/archive/dfn3-tools/dfn3_make_quality_clip.py`)
 
 Deterministic (seed 20260815), 48 kHz mono, 4.0 s. Written as three aligned
 files so metrics have ground truth: `qual_mix.wav` (input to denoise),
@@ -54,7 +54,7 @@ files so metrics have ground truth: `qual_mix.wav` (input to denoise),
   speech-frame aggregate reads ~3.4 dB because its frame mask includes
   lower-energy syllable edges.
 
-## Metrics (`tools/dfn3/dfn3_quality.py`)
+## Metrics (`docs/archive/dfn3-tools/dfn3_quality.py`)
 
 All aligned to the clean reference by xcorr lag (handles processing latency).
 Metrics over speech-active frames (VAD from the clean reference):
@@ -113,10 +113,10 @@ samples (−10.00 ms).
 - **`deep-filter` 0.5.6 binary: NOT present.** Searched the repo and
   Downloads/Desktop/tools/bin; not found. So the standard-pipeline re-confirmation
   (expected r ≈ 0.99) and any external `_ll` reference could not be produced this
-  run. The prior standard-DFN3 validation (r = 0.9946, `docs/dfn3/dfn3-validation.md`)
+  run. The prior standard-DFN3 validation (r = 0.9946, `docs/archive/dfn3/dfn3-validation.md`)
   stands as the external anchor for the shared DSP machinery `_ll` reuses.
 - **`_ll` model reference:** even if the binary were present, `deep-filter` ships
-  the STANDARD DFN3 weights; per `docs/dfn3/dfn3-validation.md` it exposes no
+  the STANDARD DFN3 weights; per `docs/archive/dfn3/dfn3-validation.md` it exposes no
   model/tar flag to load the `_ll` split. So a true external `_ll` reference is
   **not obtainable from that tool** regardless. The `_ll` path remains validated
   only internally (streaming ≡ whole-utterance, r = 1.0) against our own
@@ -149,13 +149,13 @@ samples (−10.00 ms).
 ## Reproduce
 
 ```
-python tools/dfn3/dfn3_make_quality_clip.py qual
+python docs/archive/dfn3-tools/dfn3_make_quality_clip.py qual
 build/src/offline-cli/Release/offline-cli.exe --engine dfn3-stream     qual_mix.wav out_dfn3stream.wav
 build/src/offline-cli/Release/offline-cli.exe --engine dfn3-ll         qual_mix.wav out_dfn3ll.wav
 build/src/offline-cli/Release/offline-cli.exe --chain --engine rnnoise qual_mix.wav out_rnnoise.wav
 build/src/offline-cli/Release/offline-cli.exe --engine rnnoise         qual_mix.wav out_rnnoise_nochain.wav
 build/src/offline-cli/Release/offline-cli.exe --engine passthrough     qual_mix.wav out_passthrough.wav
 for e in dfn3stream dfn3ll rnnoise rnnoise_nochain passthrough; do \
-  python tools/dfn3/dfn3_quality.py --clean qual_clean.wav --mix qual_mix.wav --proc out_$e.wav; done
-python tools/dfn3/dfn3_compare.py out_dfn3ll.wav out_dfn3stream.wav
+  python docs/archive/dfn3-tools/dfn3_quality.py --clean qual_clean.wav --mix qual_mix.wav --proc out_$e.wav; done
+python docs/archive/dfn3-tools/dfn3_compare.py out_dfn3ll.wav out_dfn3stream.wav
 ```

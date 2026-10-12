@@ -1,5 +1,7 @@
 # Dual Engine Mode — Implementation Plan
 
+Status: SHELVED 2026-10-12 — user listening test: Dual lets typing through under speech (DFN3 owns speech segments); DFN3 then removed from the product in v1.6. Kept for the record; Part 0 (RNNoise's real 960-sample delay) shipped.
+
 > **For agentic workers:** Implement task-by-task with subagents. Each task names the model to use:
 > **Sonnet 5.5** for algorithmic / real-time / cross-cutting work, **Haiku 5.5** for mechanical
 > plumbing, renames, UI strings and test updates. The coordinating session (Opus) reviews every task's
