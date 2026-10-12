@@ -6,7 +6,6 @@
 #include <atomic>
 #include <thread>
 #include <chrono>
-#include <iostream>
 #include <vector>
 #include <windows.h>
 #include <shellapi.h>   // CommandLineToArgvW
@@ -118,13 +117,12 @@ static void printList(const char* label, EDataFlow flow, vc::DeviceEnumerator& e
 }
 
 int main(int argc, char** argv) {
-  bool listDevices = false; std::string configPath; int seconds = 0; std::string recordPath; bool devKeys = false;
+  bool listDevices = false; std::string configPath; int seconds = 0; std::string recordPath;
   for (int i = 1; i < argc; ++i) {
     if (!std::strcmp(argv[i], "--list-devices")) listDevices = true;
     else if (!std::strcmp(argv[i], "--config") && i + 1 < argc) { ++i; configPath = configPathFromWideCommandLine(); }
     else if (!std::strcmp(argv[i], "--seconds") && i + 1 < argc) seconds = std::atoi(argv[++i]);
     else if (!std::strcmp(argv[i], "--record") && i + 1 < argc) recordPath = argv[++i];
-    else if (!std::strcmp(argv[i], "--dev-keys")) devKeys = true;
   }
 
   try {
@@ -153,14 +151,13 @@ int main(int argc, char** argv) {
     if (!bridge.start()) return 1;
 
     // Command channel: a named-pipe server dispatching worker-control commands (params,
-    // engine selection via SetParams.engine, shutdown). Must outlive the main loop; stopped
+    // device re-selection, shutdown). Must outlive the main loop; stopped
     // explicitly below (its destructor also calls stop(), which is safe/idempotent).
     vc::ipc::PipeServer pipe;
     pipe.start(L"\\\\.\\pipe\\voicecleaner", [&bridge](const vc::ipc::Command& c){
       switch (c.type) {
         case vc::ipc::CmdType::SetParams:
           bridge.params().publish(c.params);
-          bridge.request_engine((int)c.params.engine);   // lean: install-on-demand + crossfade; warm: instant crossfade; passthrough: no-op
           break;
         case vc::ipc::CmdType::ResetCounters:
           bridge.reset_counters();   // zero dropout/frame-time/ring-high-water for a clean measurement window
@@ -178,26 +175,10 @@ int main(int argc, char** argv) {
       }
     });
 
-    // Interim warm-standby switch trigger (NOT the command channel): a non-RT stdin
-    // reader that maps 1->engine 0 (RNNoise), 2->engine 1 (DFN3). Only spawned when
-    // --dev-keys is passed; normal runs never start this thread. Blocking on std::cin, so on
-    // shutdown we set g_stop and detach (join would block until a keypress).
-    std::thread switchThread;
-    if (devKeys) {
-      switchThread = std::thread([&bridge]{
-        std::string line;
-        while (!g_stop.load() && std::getline(std::cin, line)) {
-          if (line.find('1') != std::string::npos)      { bridge.request_engine(0); std::printf("switch -> RNNoise\n"); }
-          else if (line.find('2') != std::string::npos) { bridge.request_engine(1); std::printf("switch -> DFN3\n"); }
-        }
-      });
-    }
-
     int rc = 0;
     auto t0 = std::chrono::steady_clock::now();
     while (!g_stop.load()) {
       std::this_thread::sleep_for(std::chrono::milliseconds(100));
-      bridge.reclaimRetiredEngines();   // free engines the RT relay retired after a lean switch
       if (bridge.device_lost()) {
         std::fprintf(stderr, "fatal: audio device lost/invalidated — exiting "
                              "(the VoiceCleaner app restarts the worker).\n");
@@ -212,8 +193,6 @@ int main(int argc, char** argv) {
     std::printf("stopping...\n");
     pipe.stop();
     bridge.stop();
-    // The stdin reader blocks in std::getline; detach so shutdown never waits on a keypress.
-    if (switchThread.joinable()) switchThread.detach();
     return rc;
   } catch (const std::exception& ex) {
     std::fprintf(stderr, "fatal: %s\n", ex.what());

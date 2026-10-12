@@ -22,24 +22,12 @@ FetchContent_Declare(tomlplusplus
   GIT_TAG v3.4.0)
 FetchContent_MakeAvailable(tomlplusplus)
 
-FetchContent_Declare(onnxruntime
-  URL https://github.com/microsoft/onnxruntime/releases/download/v1.28.3/onnxruntime-win-x64-1.28.3.zip
-  URL_HASH SHA256=1d6fab48e85f948436af7c8c971d2c145cf224e2c444755dec894f8b0de11a83)
-FetchContent_MakeAvailable(onnxruntime)
-add_library(onnxruntime SHARED IMPORTED GLOBAL)
-set_target_properties(onnxruntime PROPERTIES
-  IMPORTED_IMPLIB "${onnxruntime_SOURCE_DIR}/lib/onnxruntime.lib"
-  IMPORTED_LOCATION "${onnxruntime_SOURCE_DIR}/lib/onnxruntime.dll"
-  INTERFACE_INCLUDE_DIRECTORIES "${onnxruntime_SOURCE_DIR}/include")
-
 enable_testing()
 add_subdirectory(third_party/rnnoise)
-add_subdirectory(third_party/kissfft)
 add_subdirectory(src/transport-core)
 add_subdirectory(src/vc-ipc)
 add_subdirectory(src/win-ipc)
 add_subdirectory(src/denoise-core)
-add_subdirectory(src/dfn3)
 add_subdirectory(src/win-audio)
 add_subdirectory(src/voicecleaner-worker)
 if (VC_BUILD_DEV_TOOLS)

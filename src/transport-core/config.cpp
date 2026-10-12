@@ -22,8 +22,9 @@ void Config::apply_cli(int argc, char** argv) {
     if (!std::strcmp(argv[i], "--capture") && i + 1 < argc) captureDeviceId = argv[++i];
     else if (!std::strcmp(argv[i], "--render") && i + 1 < argc) renderDeviceId = argv[++i];
     else if (!std::strcmp(argv[i], "--csv") && i + 1 < argc) csvPath = argv[++i];
+    else if (!std::strcmp(argv[i], "--engine") && i + 1 < argc) engine = argv[++i];
     else if (!std::strcmp(argv[i], "--ring") && i + 1 < argc) ringFrames = clampRingFrames(std::atoll(argv[++i]));
-    // Any other token (valueless flags like --dev-keys/--list-devices, or flags handled in main
+    // Any other token (valueless flags like --list-devices, or flags handled in main
     // such as --config/--seconds/--record and their values) is skipped without desyncing.
   }
   validate();
@@ -31,5 +32,6 @@ void Config::apply_cli(int argc, char** argv) {
 void Config::validate() {
   if (ringFrames < kRingFramesMin) ringFrames = kRingFramesMin;
   if (ringFrames > kRingFramesMax) ringFrames = kRingFramesMax;
+  if (engine != "rnnoise" && engine != "none") engine = "rnnoise";   // only RNNoise (or the dev passthrough) exists
 }
 }

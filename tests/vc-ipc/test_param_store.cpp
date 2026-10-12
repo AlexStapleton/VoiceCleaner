@@ -13,6 +13,6 @@ TEST(ParamStore, SnapshotReturnsLastPublished) {
 TEST(ParamStore, LastPublishWins) {
   ParamStore s;
   Params p = Params::defaults();
-  for (uint32_t i = 1; i <= 100; ++i) { p.engine = i % 2; s.publish(p); }
-  EXPECT_EQ(s.snapshot().engine, 0u);           // 100 % 2
+  for (uint32_t i = 1; i <= 100; ++i) { p.hpfCutoffHz = float(i); s.publish(p); }
+  EXPECT_FLOAT_EQ(s.snapshot().hpfCutoffHz, 100.0f);
 }

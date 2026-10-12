@@ -2,7 +2,7 @@
 #include <cstring>
 namespace vc::ipc {
 namespace {
-constexpr uint8_t kMagic[4] = {'V','C','C','2'};
+constexpr uint8_t kMagic[4] = {'V','C','C','3'};
 template <class T> void put(std::vector<uint8_t>& b, const T& v) {
   const auto* p = reinterpret_cast<const uint8_t*>(&v);
   b.insert(b.end(), p, p + sizeof(T));

@@ -12,11 +12,9 @@ Config Settings::resolveActive() const {
   c.captureDeviceId = activeCaptureId;
   c.renderDeviceId  = renderId;
   c.ringFrames      = ringFrames;
-  c.lowLatency      = lowLatency;
   for (const auto& m : mics) {
     if (m.id == activeCaptureId) {
-      c.engine      = m.engine;
-      c.warmStandby = m.warmStandby;
+      c.engine      = "rnnoise";
       c.dspChain    = m.dspChain;
       break;
     }
@@ -34,7 +32,6 @@ Settings Settings::load(const std::string& path) {
     s.activeCaptureId = (*g)["active_capture_id"].value_or(std::string(""));
     s.renderId        = (*g)["render_id"].value_or(std::string(""));
     s.ringFrames      = clampRingFrames((*g)["ring_frames"].value_or((int64_t)8));   // hand-edited -1 must not wrap
-    s.lowLatency      = (*g)["low_latency"].value_or(false);
     s.collapsedSections = (unsigned)(*g)["collapsed_sections"].value_or((int64_t)0);
     if (auto mics = t["mic"].as_table()) {
       for (auto&& [key, val] : *mics) {
@@ -42,10 +39,7 @@ Settings Settings::load(const std::string& path) {
           MicProfile m;
           m.id          = std::string(key.str());
           m.name        = (*p)["name"].value_or(std::string(""));
-          m.engine      = (*p)["engine"].value_or(std::string("rnnoise"));
-          m.warmStandby = (*p)["warm_standby"].value_or(false);
           m.dspChain    = (*p)["dsp_chain"].value_or(true);
-          m.aggression     = (float)(*p)["aggression"].value_or(0.0);
           m.hpfHz          = (float)(*p)["hpf_hz"].value_or(80.0);
           m.outputGainDbfs = (float)(*p)["output_gain_dbfs"].value_or(-16.0);
           m.maxBoostDb     = (float)(*p)["max_boost_db"].value_or(18.0);   // absent in pre-v1.4 files -> 18
@@ -81,17 +75,13 @@ bool Settings::save(const std::string& path) const {
   g.insert_or_assign("active_capture_id", activeCaptureId);
   g.insert_or_assign("render_id", renderId);
   g.insert_or_assign("ring_frames", (int64_t)ringFrames);
-  g.insert_or_assign("low_latency", lowLatency);
   g.insert_or_assign("collapsed_sections", (int64_t)collapsedSections);
 
   toml::table micTbl;
   for (const auto& m : mics) {
     toml::table p;
     p.insert_or_assign("name", m.name);
-    p.insert_or_assign("engine", m.engine);
-    p.insert_or_assign("warm_standby", m.warmStandby);
     p.insert_or_assign("dsp_chain", m.dspChain);
-    p.insert_or_assign("aggression", (double)m.aggression);
     p.insert_or_assign("hpf_hz", (double)m.hpfHz);
     p.insert_or_assign("output_gain_dbfs", (double)m.outputGainDbfs);
     p.insert_or_assign("limiter_dbfs", (double)m.limiterDbfs);

@@ -25,12 +25,8 @@ struct Config {
   double ki             = 2e-9;
   double driftMaxPpm    = 150.0;
   double filterAlpha    = 0.02;
-  std::string engine   = "none";   // "none" (passthrough) | "rnnoise" | "dfn3" = standard DeepFilterNet3 (models/dfn3), ~30 ms latency
+  std::string engine   = "rnnoise";   // "rnnoise" (the only engine) | "none" = developer passthrough (--engine none)
   bool        dspChain = false;     // wrap the engine in the DSP chain (see DspChain)
-  bool        warmStandby = false;  // run rnnoise+dfn3 both warm, live switch. In this mode
-                                    // `engine` selects the DEFAULT-active engine at startup: "dfn3" -> DFN3, else RNNoise.
-  bool        lowLatency = false;   // skip the DFN3 delay pin so RNNoise runs at native ~0 latency
-                                    // (switching to DFN3 then causes a one-time ~30 ms timing shift)
   static Config load(const std::string& tomlPath);   // settings.toml ([global] + [mic."<id>"]); throws on a bad file
   void apply_cli(int argc, char** argv);
   void validate();

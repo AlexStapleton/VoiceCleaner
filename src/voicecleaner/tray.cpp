@@ -66,10 +66,6 @@ void Tray::showMenu(const UiState& s) {
   HMENU m = CreatePopupMenu();
   AppendMenuW(m, MF_STRING | (s.bypassed() ? 0 : MF_CHECKED) |
                  (s.bypassEnabled() ? 0 : MF_GRAYED), kTrayCmdEnabled, L"Enabled");
-  HMENU eng = CreatePopupMenu();
-  AppendMenuW(eng, MF_STRING | (s.activeEngine()==0 ? MF_CHECKED : 0), kTrayCmdEngineRnn, L"RNNoise");
-  AppendMenuW(eng, MF_STRING | (s.activeEngine()==1 ? MF_CHECKED : 0), kTrayCmdEngineDfn, L"DeepFilterNet3");
-  AppendMenuW(m, MF_POPUP, (UINT_PTR)eng, L"Engine");
   AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
   AppendMenuW(m, MF_STRING, kTrayCmdOpen, L"Open VoiceCleaner");
   AppendMenuW(m, MF_STRING, kTrayCmdQuit, L"Quit");

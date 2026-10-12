@@ -57,46 +57,10 @@ bool Bridge::start() {
   Frame silent{}; silent.fill(0.0f);
   for (size_t i = 0; i < ringB_.capacity() / 2; ++i) ringB_.try_push(silent);  // prime half-full
 
-  {
-    // Serialize the engine (re)build against reclaimRetiredEngines() (the main loop polls it while a
-    // device reselect rebuilds here on the pipe thread; both mutate dyn_/engine_/dfn3Adapter_).
-    std::lock_guard<std::mutex> lk(engMutex_);
-    // Fold any resident DFN3's failedHops before the old container is destroyed below (its destructor
-    // frees resident leaves with no onRetire hook), then null the observer so it never dangles across
-    // the rebuild.
-    if (dfn3Adapter_) { dfn3FailedHopsRetired_ += dfn3Adapter_->failedHops(); dfn3Adapter_ = nullptr; }
-
-    // Engine: RNNoise (idx 0) / DFN3 (idx 1) live behind a DynamicEngine container that supports
-    // warm standby (both resident) and lean on-demand switching. Passthrough ("none") stays static.
-    // Per-engine algorithmic delays are known constants for the shipped model: RNNoise 0, DFN3 1440
-    // (standard models/dfn3: Dfn3Streaming::latencySamples() = kHop*(1+latencyFrames) = 480*3). Pinned
-    // so a switch never shifts output timing; the loader verifies a loaded DFN3 matches the pinned value.
-    constexpr uint32_t kDfn3DelaySamples = 1440;
-    auto loader = [this](int idx) -> std::unique_ptr<INoiseFilter> {
-      if (idx == 0) return std::make_unique<RnnoiseFilter>();
-      auto a = std::make_unique<Dfn3StreamAdapter>("models/dfn3");   // throws on model load failure
-      if (a->AlgorithmicDelaySamples() != kDfn3DelaySamples)
-        std::fprintf(stderr, "warning: DFN3 delay %u != pinned %u — crossfade timing will be off; update delaySamples\n",
-                     a->AlgorithmicDelaySamples(), kDfn3DelaySamples);
-      dfn3Adapter_ = a.get();
-      return a;
-    };
-    if (cfg_.engine == "rnnoise" || cfg_.engine == "dfn3") {
-      DynamicEngine::Config dc;
-      dc.mode = cfg_.warmStandby ? DynamicEngine::Mode::Warm : DynamicEngine::Mode::Lean;
-      dc.initialActive = (cfg_.engine == "dfn3") ? 1 : 0;
-      dc.fadeFrames = 15;
-      dc.delaySamples[0] = 0;
-      dc.delaySamples[1] = cfg_.lowLatency ? 0u : kDfn3DelaySamples;   // low-latency: don't pin RNNoise to DFN3's delay
-      auto de = std::make_unique<DynamicEngine>(loader, dc);   // builds initial leaf(s); may throw
-      dyn_ = de.get();
-      engine_ = std::move(de);
-    } else {
-      dyn_ = nullptr;
-      engine_ = std::make_unique<PassthroughFilter>();   // "none": static passthrough, no switching
-    }
-    if (cfg_.dspChain) chain_ = std::make_unique<DspChain>(engine_.get(), DspChain::Config{});
-  }
+  // Engine: RNNoise (the only real engine); "none" is a developer passthrough.
+  if (cfg_.engine == "none") engine_ = std::make_unique<PassthroughFilter>();
+  else                       engine_ = std::make_unique<RnnoiseFilter>();
+  if (cfg_.dspChain) chain_ = std::make_unique<DspChain>(engine_.get(), DspChain::Config{});
 
   frameReady_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
   start_ = std::chrono::steady_clock::now();   // telemetry uptimeMs baseline
@@ -138,37 +102,16 @@ bool Bridge::start() {
                 lb.captureMs, lb.framerMs, lb.ringMs, lb.engineMs, lb.renderMs, lb.totalMs);
   }
 
-  std::printf("bridge running: ring=%zu frames (primed %zu), engine=%s, warm_standby=%s, dsp_chain=%s, csv=%s\n",
+  std::printf("bridge running: ring=%zu frames (primed %zu), engine=%s, dsp_chain=%s, csv=%s\n",
               ringB_.capacity(), ringB_.capacity()/2, cfg_.engine.c_str(),
-              cfg_.warmStandby ? "on" : "off", cfg_.dspChain ? "on" : "off",
+              cfg_.dspChain ? "on" : "off",
               cfg_.csvPath.empty() ? "off" : cfg_.csvPath.c_str());
   return true;
-}
-
-void Bridge::request_engine(int idx) {
-  std::lock_guard<std::mutex> lk(engMutex_);
-  if (!dyn_) return;   // passthrough: no switching
-  try {
-    dyn_->requestActive(idx);
-  } catch (const std::exception& e) {
-    std::fprintf(stderr, "engine switch to %d failed (kept current engine): %s\n", idx, e.what());
-  }
 }
 
 void Bridge::reset_counters() noexcept {
   dropouts_.reset();                                              // atomic counts: safe from this (non-RT) thread
   statsResetRequested_.store(true, std::memory_order_relaxed);    // relay clears frameStats_/ringBHigh_ next hop
-}
-
-void Bridge::reclaimRetiredEngines() {
-  std::lock_guard<std::mutex> lk(engMutex_);
-  if (!dyn_) return;
-  dyn_->reclaim([this](INoiseFilter* p, int idx) {
-    if (idx == 1) {   // a DFN3 leaf is about to be freed: preserve its failedHops, drop the dangling observer
-      dfn3FailedHopsRetired_ += static_cast<Dfn3StreamAdapter*>(p)->failedHops();
-      if (dfn3Adapter_ == p) dfn3Adapter_ = nullptr;
-    }
-  });
 }
 
 void Bridge::onCapture(const float* interleaved, size_t frames, int channels) {
@@ -205,7 +148,6 @@ void Bridge::relayLoop() {
         chain_->setAgcMaxGainDb(sp.agcMaxGainDb);
         chain_->setBypass(sp.bypass != 0);
       }
-      if (engine_) engine_->SetAggression(sp.aggression);   // DFN3-only; RNNoise/passthrough no-op
       const float* src = f.data();
       const auto t0 = std::chrono::steady_clock::now();   // time ONLY engine+chain compute
       if (chain_)       { chain_->process_frame(f.data(), proc_.data()); src = proc_.data(); }
@@ -242,8 +184,6 @@ void Bridge::relayLoop() {
           t.uptimeMs = (uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
                            std::chrono::steady_clock::now() - start_).count();
           t.dropouts = (uint32_t)dropouts_.overruns();
-          t.activeEngine = dyn_ ? (uint32_t)dyn_->activeIndex()
-                                : (cfg_.engine == "dfn3" ? 1u : 0u);
           t.driftRatioPpm = ratioPpm_.load(std::memory_order_relaxed);
           t.workerState = (uint32_t)vc::ipc::WorkerState::Running;
           t.bypass   = (chain_ && sp.bypass != 0) ? 1u : 0u;   // true bypass only meaningful with a chain
@@ -306,15 +246,7 @@ void Bridge::stop() {
                   hopStats_.percentileMs(50.0), hopStats_.percentileMs(99.0), hopStats_.percentileMs(99.9),
                   hopStats_.fractionOverMs(10.0) * 100.0);
     }
-    {
-      std::lock_guard<std::mutex> lk(engMutex_);   // dfn3Adapter_ may be written by a --dev-keys request_engine
-      const uint64_t dfn3Failed = dfn3FailedHopsRetired_ + (dfn3Adapter_ ? dfn3Adapter_->failedHops() : 0);
-      if (dfn3Failed > 0) {
-        std::printf("dfn3 engine failures (silenced hops): %llu\n", (unsigned long long)dfn3Failed);
-      }
-    }
   }
-  reclaimRetiredEngines();   // RT is joined; free any leaf the final fade retired
   render_.stop();
   logger_.stop();
   if (frameReady_) { CloseHandle(static_cast<HANDLE>(frameReady_)); frameReady_ = nullptr; }

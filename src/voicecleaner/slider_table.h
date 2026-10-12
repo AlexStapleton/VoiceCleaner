@@ -10,9 +10,9 @@ namespace vc::ui {
 // The tuning sliders. The window draws, hit-tests, applies, persists and seeds them all from
 // kSliderSpecs, so adding a slider means adding one row here (plus its Params/MicProfile field).
 enum class SliderId : int {
-  TargetLoudness, Aggression, Hpf, Limiter, Declick, SpeechDeclick, NoiseGate, Strength, MaxBoost,
+  TargetLoudness, Hpf, Limiter, Declick, SpeechDeclick, NoiseGate, Strength, MaxBoost,
 };
-inline constexpr int kSliderCount = 9;
+inline constexpr int kSliderCount = 8;
 
 struct SliderSpec {
   SliderId id;
@@ -20,7 +20,6 @@ struct SliderSpec {
   const wchar_t* help;                             // help-strip text on hover
   float lo, hi, def;                               // range + default (== MicProfile / Params defaults)
   SliderFmt fmt;
-  bool dfn3Only;                                   // greyed out ("DFN3 only") on RNNoise
   float vc::MicProfile::* profileField;            // persisted per mic in settings.toml
   float vc::ipc::Params::* paramField;             // live value sent to the worker
   vc::ipc::Params (UiState::*apply)(float);        // UiState setter for paramField

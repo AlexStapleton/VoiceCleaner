@@ -12,7 +12,6 @@ struct MockEngine : INoiseFilter {
   explicit MockEngine(float vad):v(vad){}
   void ProcessFrame(const float* in, float* out) noexcept override { for(size_t i=0;i<FRAME_SAMPLES;++i) out[i]=in[i]; }
   float LastVadProbability() const noexcept override { return v; }
-  void SetAggression(float) noexcept override {}
   uint32_t AlgorithmicDelaySamples() const noexcept override { return 0; }
 };
 

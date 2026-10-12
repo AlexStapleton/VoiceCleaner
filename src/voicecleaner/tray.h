@@ -8,10 +8,8 @@ namespace vc::ui {
 // Tray command IDs routed via WM_COMMAND.
 enum : UINT {
   kTrayCmdEnabled = 100,   // toggle bypass
-  kTrayCmdEngineRnn = 101,
-  kTrayCmdEngineDfn = 102,
-  kTrayCmdOpen = 103,
-  kTrayCmdQuit = 104,
+  kTrayCmdOpen = 101,
+  kTrayCmdQuit = 102,
 };
 static const UINT WM_TRAY = WM_APP + 1;   // tray callback message
 
@@ -20,7 +18,7 @@ class Tray {
   Tray(HINSTANCE hInst, HWND hwnd);
   ~Tray();
   bool add();
-  void update(const UiState& s);   // icon tooltip reflects active/bypassed + engine
+  void update(const UiState& s);   // icon tooltip reflects active/bypassed
   void remove();
   void showMenu(const UiState& s); // right-click context menu
 

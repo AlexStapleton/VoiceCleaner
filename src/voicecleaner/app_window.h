@@ -34,15 +34,13 @@ class AppWindow {
 
   void showRestore();          // bring back from tray (single-instance restore + tray click)
   void onCommandBypass();      // shared path for window + tray "Enabled" toggle
-  void onCommandEngine(uint32_t engine);
   void requestRelaunch();
 
  private:
   // Clickable buttons (hover highlight + click action).
-  enum class Control { None = -1, EngineRnn, EngineDfn, Bypass, Relaunch, Quit, RingApply, LowLatency };
+  enum class Control { None = -1, Bypass, Relaunch, Quit, RingApply };
   // What the help strip explains. Sliders are 0..kSliderCount-1 (their SliderId).
-  enum HelpTarget : int { kHelpNone = -1, kHelpMic = 100, kHelpOutput, kHelpLatency, kHelpLowLatency,
-                          kHelpEngineRnn, kHelpEngineDfn, kHelpBypass };
+  enum HelpTarget : int { kHelpNone = -1, kHelpMic = 100, kHelpOutput, kHelpLatency, kHelpBypass };
 
   // Solid-colour brushes, created with the render target and released with it.
   struct Brushes {
@@ -65,7 +63,7 @@ class AppWindow {
   void label(const std::wstring& s, D2D1_RECT_F r, ID2D1Brush* b, IDWriteTextFormat* f);
   void drawStatus(float width);
   void drawPickerField(const wchar_t* caption, D2D1_RECT_F r, PickerKind k);
-  void drawEngineAndBypass(float width);
+  void drawBypass(float width);
   void drawHelpOrRelaunch();
   void drawSliderGroups(float width);
   void drawSlider(SliderId id);
@@ -77,7 +75,8 @@ class AppWindow {
   Control hitControl(int x, int y) const;
   int  trackHit(int x, int y) const;       // slider whose track band contains (x,y), or -1
   int  helpTargetAt(int x, int y) const;   // HelpTarget / SliderId under (x,y)
-  std::wstring helpText() const;           // plain-English "what + how" for helpHot_
+  static std::wstring helpTextFor(int target);   // plain-English "what + how" for a HelpTarget / SliderId
+  float measureHelpHeight() const;         // help-strip height that fits the longest help text
   D2D1_RECT_F overlayRect() const;         // the open dropdown's bounding rect
   int  overlayHit(int x, int y) const;     // row index under (x,y) in the open overlay, or -1
 
@@ -88,7 +87,6 @@ class AppWindow {
   void flushParams(bool force);            // deliver outbox_.pending() if due; keeps it pending on failure
   void refreshDevices();                   // enumerate WASAPI devices + seed picker active from settings
   void applyPick(PickerKind k, size_t rowIndex);   // persist + spawn/switch
-  bool sliderEnabled(SliderId id) const;   // false for DFN3-only sliders while RNNoise is active
   void setSliderFromX(SliderId id, int x); // set a slider's value from click/drag x
   vc::ipc::Params applySlider(SliderId id);  // push the slider's value into UiState -> Params
   void persistTuning();                    // write the active profile on drag-end
@@ -96,7 +94,6 @@ class AppWindow {
   void startWorker();                      // spawn/attach; the active tuning is re-pushed once ready
   void respawnWorker();                    // full stop + fresh spawn so ring_frames is re-read
   void quit();                             // stop the worker and close the app
-  void toggleLowLatency();                 // flip [global].low_latency, persist, respawn
   void toggleSection(int i);               // collapse/expand slider group i (persist + resize)
   void resizeToContent();                  // resize the window to the current laid-out height
   void applyRing();                        // commit+clamp the latency box, persist, respawn
@@ -146,14 +143,14 @@ class AppWindow {
   int grabbed_ = -1;              // SliderId being dragged, or -1
   std::array<bool, kSliderGroupCount> secOpen_{true, true, true};   // groups expanded? (seeded from settings)
   float contentH_ = 0.0f;         // laid-out client height (drives the window resize); set by layout()
+  float helpH_ = 84.0f;           // help-strip height; create() grows it to fit the longest text
   std::wstring ringEdit_;         // latency box edit buffer (digits); seeded from settings_->ringFrames
   bool ringFocused_ = false;      // latency box has keyboard focus (caret shown)
 
   // control rects (client coords), recomputed in layout()
   D2D1_RECT_F rcMicField_{}, rcOutField_{};
-  D2D1_RECT_F rcEngineRnn_{}, rcEngineDfn_{}, rcBypass_{}, rcRelaunch_{}, rcQuit_{}, rcHelp_{};
+  D2D1_RECT_F rcBypass_{}, rcRelaunch_{}, rcQuit_{}, rcHelp_{};
   D2D1_RECT_F rcRingBox_{}, rcRingApply_{};   // editable latency box + Apply button
-  D2D1_RECT_F rcLowLat_{};                    // low-latency checkbox (footer-left)
   std::array<D2D1_RECT_F, kSliderGroupCount> rcSecHdr_{};   // clickable slider-group header rows
   std::array<float, kSliderGroupCount> secY_{};             // slider-group header baselines
 

@@ -3,11 +3,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <exception>
 #include <vector>
 
 #include "channel.h"
-#include "dfn3_streaming.h"
 #include "dsp_chain.h"
 #include "frame.h"
 #include "passthrough_filter.h"
@@ -17,40 +15,28 @@
 int main(int argc, char** argv) {
   bool useChain = false;
   bool useRnnoise = false;
-  bool useDfn3 = false;
-  float aggression = 0.0f;  // 0 = disabled; DFN3 ERB-mask shaping
   int argi = 1;
-  // Optional flags in any order: --chain, --engine <name> (default passthrough),
-  // --aggression <0..1> (DFN3 only).
+  // Optional flags in any order: --chain, --engine <name> (default passthrough).
   while (argi < argc) {
     if (std::strcmp(argv[argi], "--chain") == 0) {
       useChain = true;
       ++argi;
-    } else if (std::strcmp(argv[argi], "--aggression") == 0) {
-      if (argi + 1 >= argc) {
-        std::fprintf(stderr, "error: --aggression requires a value (0..1)\n");
-        return 2;
-      }
-      aggression = static_cast<float>(std::atof(argv[argi + 1]));
-      argi += 2;
     } else if (std::strcmp(argv[argi], "--engine") == 0) {
       if (argi + 1 >= argc) {
         std::fprintf(stderr,
                      "error: --engine requires a value "
-                     "(passthrough|rnnoise|dfn3)\n");
+                     "(passthrough|rnnoise)\n");
         return 2;
       }
       const char* eng = argv[argi + 1];
       if (std::strcmp(eng, "rnnoise") == 0) {
         useRnnoise = true;
-      } else if (std::strcmp(eng, "dfn3") == 0) {
-        useDfn3 = true;
       } else if (std::strcmp(eng, "passthrough") == 0) {
         useRnnoise = false;
       } else {
         std::fprintf(stderr,
                      "error: unknown engine '%s' "
-                     "(expected passthrough|rnnoise|dfn3|dfn3-ll|dfn3-stream|dfn3-std-stream)\n",
+                     "(expected passthrough|rnnoise)\n",
                      eng);
         return 2;
       }
@@ -63,7 +49,7 @@ int main(int argc, char** argv) {
   if (argc - argi != 2) {
     std::fprintf(stderr,
                  "usage: offline-cli [--chain] "
-                 "[--engine passthrough|rnnoise|dfn3] [--aggression 0..1] "
+                 "[--engine passthrough|rnnoise] "
                  "<in.wav> <out.wav>\n");
     return 2;
   }
@@ -80,47 +66,6 @@ int main(int argc, char** argv) {
   const size_t frames = in.channels > 0 ? in.samples.size() / in.channels : 0;
   std::vector<float> mono(frames);
   vc::extract_channel(in.samples.data(), frames, in.channels, 0, mono.data());
-
-  // DeepFilterNet3: drive the same real-time Dfn3Streaming engine the app uses, hop-by-hop over
-  // 480-sample blocks, padding the tail with latencySamples() zeros to flush. Ignores --chain.
-  if (useDfn3) {
-    const char* modelDir = "models/dfn3";
-    const char* engName = "dfn3";
-    std::vector<float> enhanced;
-    try {
-      vc::Dfn3Streaming stream(modelDir);
-      stream.setAggression(aggression);
-      const size_t hop = 480;
-      const size_t flush = stream.latencySamples();
-      const size_t total = frames + flush;
-      const size_t blocks = (total + hop - 1) / hop;
-      enhanced.assign(blocks * hop, 0.0f);
-      std::vector<float> inBlk(hop), outBlk(hop);
-      for (size_t b = 0; b < blocks; ++b) {
-        const size_t off = b * hop;
-        for (size_t i = 0; i < hop; ++i) {
-          const size_t idx = off + i;
-          inBlk[i] = idx < frames ? mono[idx] : 0.0f;
-        }
-        stream.process(inBlk.data(), outBlk.data());
-        for (size_t i = 0; i < hop; ++i) enhanced[off + i] = outBlk[i];
-      }
-    } catch (const std::exception& e) {
-      std::fprintf(stderr, "error: %s failed: %s\n", engName, e.what());
-      return 1;
-    }
-    vc::WavData outStream;
-    outStream.sampleRate = in.sampleRate;
-    outStream.channels = 1;
-    outStream.samples = enhanced;
-    if (!vc::wav_write(outPath, outStream, /*asFloat=*/false)) {
-      std::fprintf(stderr, "error: failed to write %s\n", outPath);
-      return 1;
-    }
-    std::printf("engine=%s chain=n/a: processed %zu samples at %u Hz -> %s\n",
-                engName, enhanced.size(), outStream.sampleRate, outPath);
-    return 0;
-  }
 
   std::vector<float> processed(frames);
   vc::PassthroughFilter passthrough;

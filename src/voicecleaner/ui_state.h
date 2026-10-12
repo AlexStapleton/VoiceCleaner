@@ -12,8 +12,7 @@ enum class StatusKind : uint32_t { Active, Bypassed, Down, NoConfig };
 
 // Pure UI state model. Fed telemetry + user events; computes the display and the
 // control-enablement state. Owns one Params `current_` seeded from Params::defaults() (which equals
-// the worker's runtime values), and keeps current_.engine / current_.bypass synced to telemetry so
-// a bypass-only toggle never carries a stale engine.
+// the worker's runtime values), and keeps current_.bypass synced to telemetry.
 class UiState {
  public:
   UiState();
@@ -26,10 +25,8 @@ class UiState {
   void onWorkerDown();                                      // supervisor declared death / launch failure
 
   // ---- user actions: mutate current_, return the Params the caller sends via SetParams ----
-  vc::ipc::Params onSelectEngine(uint32_t engine);   // 0 = RNNoise, 1 = DFN3
-  vc::ipc::Params onToggleBypass();                   // flips current_.bypass; engine stays synced
-  void seedTuning(float aggression, float hpfHz, float gainDbfs, float limiterDbfs, float declick, float declickVoiceFloor, float gate, float mix, float maxBoostDb = 18.0f);  // attach seed
-  vc::ipc::Params onSetAggression(float v);
+  vc::ipc::Params onToggleBypass();                   // flips current_.bypass
+  void seedTuning(float hpfHz, float gainDbfs, float limiterDbfs, float declick, float declickVoiceFloor, float gate, float mix, float maxBoostDb = 18.0f);  // attach seed
   vc::ipc::Params onSetHpf(float v);
   vc::ipc::Params onSetOutputGain(float v);
   vc::ipc::Params onSetLimiter(float v);
@@ -42,21 +39,15 @@ class UiState {
   // ---- queries (paint) ----
   StatusKind statusKind() const { return kind_; }
   std::string statusLine() const;
-  uint32_t activeEngine() const { return activeEngine_; }   // segmented-control highlight (authoritative)
   bool bypassed() const { return bypass_; }
   bool bypassEnabled() const { return dspChain_; }
   std::string bypassDisabledReason() const;
   const vc::ipc::Params& current() const { return current_; }
 
  private:
-  static const char* engineName(uint32_t engine);   // "RNNoise" / "DeepFilterNet3"
-
   vc::ipc::Params current_ = vc::ipc::Params::defaults();
   StatusKind kind_ = StatusKind::Down;   // pre-ready shows Down until the first ready telemetry
   std::string renderLabel_;
-  uint32_t activeEngine_ = 0;
-  uint32_t pendingEngine_ = 0;   // engine the user last selected
-  bool     enginePending_ = false;  // true until telemetry confirms pendingEngine_ is active
   bool bypass_ = false;
   bool dspChain_ = true;
   bool  telVadActive_ = false;   // last telemetry VAD state (readout)
@@ -85,7 +76,7 @@ class LivenessTracker {
 };
 
 // Exact worker command line: "<dir>\voicecleaner-worker.exe" --config "<configPath>".
-// No forced flags — the worker honors settings.toml (warm_standby / dsp_chain / engine / ring_frames).
+// No forced flags — the worker honors settings.toml (dsp_chain / ring_frames).
 std::wstring buildWorkerCommandLine(const std::wstring& moduleDir, const std::wstring& configPath);
 
 }  // namespace vc::ui

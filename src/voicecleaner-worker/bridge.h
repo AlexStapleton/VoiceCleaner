@@ -19,9 +19,6 @@
 #include "inoise_filter.h"
 #include "passthrough_filter.h"
 #include "rnnoise_filter.h"
-#include "dfn3_stream_adapter.h"
-#include "dynamic_engine.h"
-#include <mutex>
 #include "dsp_chain.h"
 #include "param_store.h"
 #include "telemetry_shm.h"
@@ -38,11 +35,6 @@ public:
   bool reselectCapture(const std::string& deviceId, double driftSeedPpm);
   bool reselectRender(const std::string& deviceId);
   bool device_lost() const noexcept { return deviceLost_.load(std::memory_order_acquire); }
-  // Non-RT engine switch (idx 0 = rnnoise, 1 = dfn3). Installs the target on demand when lean, then
-  // requests the crossfade. Serialized with reclaim by engMutex_. Catches loader failure internally.
-  void request_engine(int idx);
-  // Non-RT: free engines retired by the RT relay. Call from a non-RT loop (worker main tick).
-  void reclaimRetiredEngines();
   // Non-RT: zero the dropout + frame-time counters (and ring high-water) for a clean measurement
   // window. dropouts_ is atomic (reset here); relay-owned stats are cleared on the relay's next hop.
   void reset_counters() noexcept;
@@ -59,11 +51,7 @@ private:
   Resampler          resampler_;
   FrameAccumulator   reframe_;    // relay side: re-block resampler output into 480-sample frames
   std::vector<float> rsOut_;      // relay side: resampler output scratch
-  std::unique_ptr<INoiseFilter> engine_;   // constructed in start() (non-RT): DynamicEngine or PassthroughFilter
-  DynamicEngine*                dyn_ = nullptr;  // non-owning; == engine_.get() when engine is rnnoise/dfn3, else null
-  Dfn3StreamAdapter*            dfn3Adapter_ = nullptr;  // non-owning; the live DFN3 leaf, or null (observability)
-  std::mutex                    engMutex_;         // serializes non-RT container mutation: request_engine + reclaim
-  uint64_t                      dfn3FailedHopsRetired_ = 0;  // failedHops folded in before a DFN3 leaf is freed
+  std::unique_ptr<INoiseFilter> engine_;   // constructed in start() (non-RT): RnnoiseFilter or PassthroughFilter
   std::unique_ptr<DspChain>     chain_;     // optional DC->HPF->AGC->limiter wrap
   Frame                         proc_;      // processed-frame scratch (relay RT)
   std::atomic<double> ratioPpm_{0.0};

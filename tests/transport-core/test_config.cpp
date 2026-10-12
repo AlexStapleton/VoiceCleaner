@@ -45,8 +45,20 @@ TEST(Config, ClampsNegativeRingFromCli) {
   c.apply_cli(3, const_cast<char**>(argv));
   EXPECT_EQ(c.ringFrames, vc::kRingFramesMin);
 }
+TEST(Config, EngineCliFlagSelectsRnnoiseOrNone) {
+  vc::Config c;
+  const char* a1[] = {"app", "--engine", "rnnoise"};
+  c.apply_cli(3, const_cast<char**>(a1));
+  EXPECT_EQ(c.engine, "rnnoise");
+  const char* a2[] = {"app", "--engine", "none"};
+  c.apply_cli(3, const_cast<char**>(a2));
+  EXPECT_EQ(c.engine, "none");
+  const char* a3[] = {"app", "--engine", "bogus"};   // unknown -> RNNoise
+  c.apply_cli(3, const_cast<char**>(a3));
+  EXPECT_EQ(c.engine, "rnnoise");
+}
 TEST(Config, ApplyCliHandlesValuelessFlagBeforeDevicePairs) {
-  const char* argv[] = {"exe", "--dev-keys", "--capture", "CAP", "--render", "REN"};
+  const char* argv[] = {"exe", "--list-devices", "--capture", "CAP", "--render", "REN"};
   vc::Config c;
   c.apply_cli(6, const_cast<char**>(argv));
   EXPECT_EQ(c.captureDeviceId, "CAP");
@@ -59,12 +71,12 @@ TEST(Config, LoadsNewSchemaViaSettings) {
     "render_id = \"ren-1\"\n"
     "ring_frames = 16\n"
     "[mic.\"cap-1\"]\n"
-    "engine = \"dfn3\"\n"
+    "engine = \"dfn3\"\n"   // legacy key from an old engine: ignored
     "dsp_chain = true\n");
   Config c = Config::load(p);
   EXPECT_EQ(c.captureDeviceId, "cap-1");
   EXPECT_EQ(c.renderDeviceId, "ren-1");
   EXPECT_EQ(c.ringFrames, 16u);
-  EXPECT_EQ(c.engine, "dfn3");
+  EXPECT_EQ(c.engine, "rnnoise");   // profile resolves to RNNoise regardless of legacy keys
   EXPECT_TRUE(c.dspChain);
 }

@@ -20,7 +20,6 @@ TEST(Params, DefaultsMatchTodaysDspChain) {
   EXPECT_FLOAT_EQ(p.agcTargetDbfs, -16.0f);
   EXPECT_FLOAT_EQ(p.agcMaxGainDb, 18.0f);
   EXPECT_FLOAT_EQ(p.limiterCeilingDbfs, -1.0f);
-  EXPECT_EQ(p.engine, 1u);
   EXPECT_EQ(p.bypass, 0u);
 }
 TEST(Params, DeclickDefaultsOff) {

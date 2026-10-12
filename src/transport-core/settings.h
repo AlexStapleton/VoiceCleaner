@@ -5,14 +5,11 @@
 #include "config.h"
 namespace vc {
 
-// One [mic."<id>"] profile: the engine choice plus every tuning slider for that microphone.
+// One [mic."<id>"] profile: every tuning slider for that microphone.
 struct MicProfile {
   std::string id;                 // WASAPI device id (the section key)
   std::string name;               // cached friendly label (UTF-8)
-  std::string engine = "rnnoise"; // "none" | "rnnoise" | "dfn3"
-  bool warmStandby = false;
   bool dspChain = true;
-  float aggression     = 0.0f;    // .aggression
   float hpfHz          = 80.0f;   // .hpf_hz
   float outputGainDbfs = -16.0f;  // .output_gain_dbfs  (== agcTargetDbfs)
   float maxBoostDb = 18.0f;       // .max_boost_db      (== agcMaxGainDb)
@@ -29,7 +26,6 @@ struct Settings {
   std::string activeCaptureId;    // [global].active_capture_id  ("" => none)
   std::string renderId;           // [global].render_id
   size_t      ringFrames = 8;     // [global].ring_frames, clamped to [kRingFramesMin, kRingFramesMax] (8 ~= 40 ms)
-  bool        lowLatency = false; // [global].low_latency — skip the DFN3 delay pin (RNNoise ~0 latency)
   unsigned    collapsedSections = 0;  // [global].collapsed_sections — UI slider-group collapse bitmask
   std::vector<MicProfile> mics;   // all [mic."<id>"] sections
 

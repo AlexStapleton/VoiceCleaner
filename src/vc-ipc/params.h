@@ -5,11 +5,9 @@ namespace vc::ipc {
 // double-buffered slot and read wait-free on the RT thread. Changing the layout: bump the command
 // magic in command.cpp.
 struct Params {
-  float    aggression;          // 0..1 DFN3 ERB-mask shaping (AGGRESSION slider)
   float    hpfCutoffHz;         // high-pass cutoff
   float    agcTargetDbfs;       // AGC target = "output gain"
   float    limiterCeilingDbfs;  // brickwall ceiling
-  uint32_t engine;              // 0 = RNNoise, 1 = DFN3
   uint32_t bypass;              // 0 / 1
   float    declickStrength;     // 0..1 transient/click ducker (0 = off)
   float    declickVoiceFloor;   // 0..1 duck fraction kept during voice (0 = fully voice-safe)
@@ -19,11 +17,9 @@ struct Params {
 
   static constexpr Params defaults() {
     return Params{
-        /*aggression*/ 0.0f,
         /*hpfCutoffHz*/ 80.0f,
         /*agcTargetDbfs*/ -16.0f,
         /*limiterCeilingDbfs*/ -1.0f,
-        /*engine*/ 1u,
         /*bypass*/ 0u,
         /*declickStrength*/ 0.0f,
         /*declickVoiceFloor*/ 0.0f,

@@ -7,44 +7,17 @@ UiState::UiState() = default;
 
 void UiState::setRenderLabel(std::string label) { renderLabel_ = std::move(label); }
 
-const char* UiState::engineName(uint32_t engine) {
-  return engine == 1 ? "DeepFilterNet3" : "RNNoise";
-}
-
 void UiState::onNoConfig() { kind_ = StatusKind::NoConfig; }
 
 void UiState::onWorkerDown() { kind_ = StatusKind::Down; }
 
 void UiState::onTelemetry(const vc::ipc::Telemetry& t, bool ready) {
-  activeEngine_ = t.activeEngine;
   bypass_       = (t.bypass != 0);
   dspChain_     = (t.dspChain != 0);
-  // Keep the outgoing snapshot synced to live state: a later bypass-only toggle then
-  // carries the live engine, and the embedded request_engine on the worker becomes a no-op.
-  // Sticky engine latch: after a user selects an engine, hold current_.engine at that choice and
-  // stop syncing from telemetry until telemetry confirms the switch — otherwise a stale (lagging)
-  // tick would revert a just-selected engine, and a bypass toggle in that window would carry the
-  // old engine (which the worker's per-SetParams request_engine would honor).
-  if (enginePending_) {
-    if (t.activeEngine == pendingEngine_) {   // worker confirmed the switch -> resume normal sync
-      enginePending_ = false;
-      current_.engine = t.activeEngine;
-    }
-    // else: hold current_.engine at the user's pendingEngine_ (do not sync to stale telemetry)
-  } else {
-    current_.engine = t.activeEngine;
-  }
   current_.bypass = t.bypass;
   telVadActive_ = (t.vadActive != 0);
   telAgcGainDb_ = t.agcGainDb;
   if (ready) kind_ = bypass_ ? StatusKind::Bypassed : StatusKind::Active;
-}
-
-vc::ipc::Params UiState::onSelectEngine(uint32_t engine) {
-  current_.engine = engine;
-  pendingEngine_ = engine;
-  enginePending_ = true;
-  return current_;
 }
 
 vc::ipc::Params UiState::onToggleBypass() {
@@ -52,8 +25,7 @@ vc::ipc::Params UiState::onToggleBypass() {
   return current_;
 }
 
-void UiState::seedTuning(float aggression, float hpfHz, float gainDbfs, float limiterDbfs, float declick, float declickVoiceFloor, float gate, float mix, float maxBoostDb) {
-  current_.aggression         = aggression;
+void UiState::seedTuning(float hpfHz, float gainDbfs, float limiterDbfs, float declick, float declickVoiceFloor, float gate, float mix, float maxBoostDb) {
   current_.hpfCutoffHz        = hpfHz;
   current_.agcTargetDbfs      = gainDbfs;
   current_.limiterCeilingDbfs = limiterDbfs;
@@ -63,7 +35,6 @@ void UiState::seedTuning(float aggression, float hpfHz, float gainDbfs, float li
   current_.mixStrength        = mix;
   current_.agcMaxGainDb       = maxBoostDb;
 }
-vc::ipc::Params UiState::onSetAggression(float v)  { current_.aggression = v;         return current_; }
 vc::ipc::Params UiState::onSetHpf(float v)         { current_.hpfCutoffHz = v;        return current_; }
 vc::ipc::Params UiState::onSetOutputGain(float v)  { current_.agcTargetDbfs = v;      return current_; }
 vc::ipc::Params UiState::onSetLimiter(float v)     { current_.limiterCeilingDbfs = v; return current_; }
@@ -85,12 +56,10 @@ std::string UiState::statusLine() const {
       char buf[64];
       std::snprintf(buf, sizeof(buf), " \xC2\xB7 VAD %s \xC2\xB7 AGC %+.1f dB",
                     telVadActive_ ? "\xE2\x97\x8F" : "\xE2\x97\x8B", (double)telAgcGainDb_);
-      return "\xE2\x97\x8F Active \xC2\xB7 " + std::string(engineName(activeEngine_)) +
-             " \xC2\xB7 \xE2\x86\x92 " + renderLabel_ + buf;                 // dot Active mid engine arrow label + readout
+      return "\xE2\x97\x8F Active \xC2\xB7 \xE2\x86\x92 " + renderLabel_ + buf;   // dot Active mid arrow label + readout
     }
     case StatusKind::Bypassed:
-      return "\xE2\x97\x8B Bypassed \xC2\xB7 " + std::string(engineName(activeEngine_)) +
-             " \xC2\xB7 \xE2\x86\x92 " + renderLabel_;
+      return "\xE2\x97\x8B Bypassed \xC2\xB7 \xE2\x86\x92 " + renderLabel_;
     case StatusKind::NoConfig:
       return "Choose a microphone and an output below to start";
     case StatusKind::Down:

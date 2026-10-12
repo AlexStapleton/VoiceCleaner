@@ -37,17 +37,17 @@ static const UINT kRestoreMsg = RegisterWindowMessageW(kRestoreMsgName);
 static const int   kClientW = 460;
 static const float kPad = 18.0f;           // left/right margin
 static const float kCtlH = 40.0f;          // field / button height
-static const float kSegGap = 8.0f;         // gap between the two engine buttons
 static const float kCaptionH = 16.0f;      // caption row above a field
-static const float kMicY = 92.0f, kOutY = 160.0f, kEngineY = 232.0f, kBypassY = 300.0f;
+static const float kMicY = 92.0f, kOutY = 160.0f, kBypassY = 232.0f;
 static const float kStatusTop = 14.0f, kStatusBottom = 78.0f;
-static const float kGroupsTop = 350.0f;    // first slider-group header
+static const float kGroupsTop = 282.0f;    // first slider-group header
 static const float kHeaderToTrack = 42.0f; // group header -> its first track
 static const float kTrackH = 12.0f;
 static const float kTrackPitch = 44.0f;    // track -> next track
 static const float kCollapsedH = 24.0f;    // a collapsed group's header block
-static const float kHelpH = 84.0f;         // hover help strip
-static const float kFooterH = 40.0f;       // Low-latency checkbox + Quit
+static const float kHelpMinH = 84.0f;      // hover help strip (grown to fit the longest text)
+static const float kHelpInsetX = 12.0f, kHelpInsetY = 8.0f;   // text inset inside the help strip
+static const float kFooterH = 40.0f;       // Quit
 static const float kRowH = 34.0f;          // dropdown row height
 static const D2D1_RECT_F kHidden = {-1000, -1000, -1000, -1000};   // collapsed slider tracks
 
@@ -115,6 +115,8 @@ bool AppWindow::create(const wchar_t* title) {
   wc.lpszClassName = kClass;
   RegisterClassW(&wc);
 
+  helpH_ = measureHelpHeight();
+
   // Seed slider-group collapse state, then lay out once to learn the initial client height.
   if (settings_)
     for (int i = 0; i < kSliderGroupCount; ++i) secOpen_[i] = !((settings_->collapsedSections >> i) & 1u);
@@ -163,7 +165,7 @@ void AppWindow::seedFromActiveProfile() {
   vc::MicProfile* p = settings_->activeProfile();
   if (!p) return;
   for (const SliderSpec& s : kSliderSpecs) slider(s.id).setValue(p->*s.profileField);
-  state_->seedTuning(p->aggression, p->hpfHz, p->outputGainDbfs, p->limiterDbfs,
+  state_->seedTuning(p->hpfHz, p->outputGainDbfs, p->limiterDbfs,
                      p->declickStrength, p->declickVoiceFloor, p->gateStrength, p->mixStrength,
                      p->maxBoostDb);
 }
@@ -212,9 +214,6 @@ void AppWindow::layout(D2D1_SIZE_F sz) {
   const float right = sz.width - kPad;
   rcMicField_ = D2D1::RectF(kPad, kMicY, right, kMicY + kCtlH);
   rcOutField_ = D2D1::RectF(kPad, kOutY, right, kOutY + kCtlH);
-  const float mid = sz.width * 0.5f;
-  rcEngineRnn_ = D2D1::RectF(kPad, kEngineY, mid - kSegGap * 0.5f, kEngineY + kCtlH);
-  rcEngineDfn_ = D2D1::RectF(mid + kSegGap * 0.5f, kEngineY, right, kEngineY + kCtlH);
   rcBypass_    = D2D1::RectF(kPad, kBypassY, right, kBypassY + kCtlH);
 
   // Collapsible slider groups. Positions flow from a running cursor so collapsing a group reflows
@@ -241,11 +240,10 @@ void AppWindow::layout(D2D1_SIZE_F sz) {
   rcRingBox_   = D2D1::RectF(kPad, rbTop, kPad + 120, rbTop + kCtlH);        // editable latency box
   rcRingApply_ = D2D1::RectF(right - 100, rbTop, right, rbTop + kCtlH);
   const float yHelp = rbTop + kCtlH + 16.0f;
-  rcHelp_      = D2D1::RectF(kPad, yHelp, right, yHelp + kHelpH);            // hover help strip
+  rcHelp_      = D2D1::RectF(kPad, yHelp, right, yHelp + helpH_);            // hover help strip
   rcRelaunch_  = D2D1::RectF(kPad, yHelp, right, yHelp + kCtlH);             // only when Down (shares the help band)
-  contentH_    = yHelp + kHelpH + kFooterH;                                  // total client height
+  contentH_    = yHelp + helpH_ + kFooterH;                                  // total client height
   rcQuit_      = D2D1::RectF(right - 90, contentH_ - 36, right, contentH_ - 10);
-  rcLowLat_    = D2D1::RectF(kPad, contentH_ - 34, kPad + 210, contentH_ - 10);   // footer-left checkbox
 }
 
 void AppWindow::box(D2D1_RECT_F r, ID2D1Brush* b) {
@@ -267,7 +265,7 @@ void AppWindow::paint() {
   drawStatus(sz.width);
   drawPickerField(L"MICROPHONE", rcMicField_, PickerKind::Capture);
   drawPickerField(L"OUTPUT",     rcOutField_, PickerKind::Render);
-  drawEngineAndBypass(sz.width);
+  drawBypass(sz.width);
   drawHelpOrRelaunch();
   drawSliderGroups(sz.width);
   drawLatency(sz.width);
@@ -289,15 +287,7 @@ void AppWindow::drawPickerField(const wchar_t* caption, D2D1_RECT_F r, PickerKin
         D2D1::RectF(r.left + 12, r.top + 9, r.right - 12, r.bottom), br_.text, textFmt_);
 }
 
-void AppWindow::drawEngineAndBypass(float width) {
-  // Engine segmented control: active = accent, hover = lighter panel.
-  label(L"ENGINE", D2D1::RectF(kPad, kEngineY - kCaptionH, width - kPad, kEngineY), br_.dim, capFmt_);
-  const uint32_t ae = state_->activeEngine();
-  box(rcEngineRnn_, ae==0 ? br_.accent : (hot_==Control::EngineRnn ? br_.panelHot : br_.panel));
-  box(rcEngineDfn_, ae==1 ? br_.accent : (hot_==Control::EngineDfn ? br_.panelHot : br_.panel));
-  label(L"RNNoise",        rcEngineRnn_, br_.text, centerFmt_);
-  label(L"DeepFilterNet3", rcEngineDfn_, br_.text, centerFmt_);
-
+void AppWindow::drawBypass(float width) {
   // Bypass toggle: amber when bypassed; greyed + reason when there is no DSP chain.
   label(L"BYPASS", D2D1::RectF(kPad, kBypassY - kCaptionH, width - kPad, kBypassY), br_.dim, capFmt_);
   const bool bEn = state_->bypassEnabled();
@@ -321,7 +311,8 @@ void AppWindow::drawHelpOrRelaunch() {
     label(rlbl, rcRelaunch_, br_.text, centerFmt_);
   } else {
     box(rcHelp_, br_.panel);
-    label(helpText(), D2D1::RectF(rcHelp_.left + 12, rcHelp_.top + 8, rcHelp_.right - 12, rcHelp_.bottom - 8),
+    label(helpTextFor(helpHot_), D2D1::RectF(rcHelp_.left + kHelpInsetX, rcHelp_.top + kHelpInsetY,
+                                             rcHelp_.right - kHelpInsetX, rcHelp_.bottom - kHelpInsetY),
           helpHot_ == kHelpNone ? br_.dim : br_.text, textFmt_);
   }
 }
@@ -345,15 +336,13 @@ void AppWindow::drawSliderGroups(float width) {
 void AppWindow::drawSlider(SliderId id) {
   const SliderSpec& spec = sliderSpec(id);
   const D2D1_RECT_F& tr = track(id);
-  const bool enabled = sliderEnabled(id);
   const D2D1_RECT_F capRow = D2D1::RectF(tr.left, tr.top - 20, tr.right, tr.top - 4);
   label(spec.caption, capRow, br_.dim, capFmt_);
-  label(enabled ? toW(slider(id).format()) : std::wstring(L"DFN3 only"), capRow,
-        enabled ? br_.text : br_.dim, capFmtRight_);
+  label(toW(slider(id).format()), capRow, br_.text, capFmtRight_);
   box(tr, br_.panel);
   const float cx = tr.left + slider(id).fraction() * (tr.right - tr.left);
   box(D2D1::RectF(cx - 6, tr.top - 6, cx + 6, tr.bottom + 6),
-      enabled ? (grabbed_ == (int)id ? br_.accentHot : br_.accent) : br_.disabled);
+      grabbed_ == (int)id ? br_.accentHot : br_.accent);
 }
 
 // Latency (ring frames): editable box + approx-ms readout + Apply (restarts the worker).
@@ -370,17 +359,10 @@ void AppWindow::drawLatency(float width) {
   label(L"Apply", rcRingApply_, ringDirty ? br_.text : br_.dim, centerFmt_);
 }
 
-// Footer: Low-latency checkbox (left) and Quit (right; full shutdown, same path as the tray Quit).
+// Footer: Quit (right; full shutdown, same path as the tray Quit).
 void AppWindow::drawFooter() {
   box(rcQuit_, hot_==Control::Quit ? br_.panelHot : br_.panel);
   label(L"Quit", rcQuit_, br_.text, centerFmt_);
-
-  const bool ll = settings_ && settings_->lowLatency;
-  const D2D1_RECT_F cbx = D2D1::RectF(rcLowLat_.left, rcLowLat_.top + 3, rcLowLat_.left + 16, rcLowLat_.top + 19);
-  rt_->DrawRectangle(cbx, hot_==Control::LowLatency ? br_.accentHot : br_.dim, 1.5f);
-  if (ll) rt_->FillRectangle(D2D1::RectF(cbx.left + 3, cbx.top + 3, cbx.right - 3, cbx.bottom - 3), br_.accent);
-  label(L"LOW LATENCY", D2D1::RectF(cbx.right + 8, rcLowLat_.top, rcLowLat_.right, rcLowLat_.bottom),
-        ll ? br_.text : br_.dim, textFmt_);
 }
 
 void AppWindow::drawPickerOverlay() {
@@ -405,23 +387,15 @@ void AppWindow::drawPickerOverlay() {
 // ---------------------------------------------------------------------------------------------
 
 AppWindow::Control AppWindow::hitControl(int x, int y) const {
-  if (hit(rcEngineRnn_, x, y)) return Control::EngineRnn;
-  if (hit(rcEngineDfn_, x, y)) return Control::EngineDfn;
   if (hit(rcBypass_,    x, y)) return Control::Bypass;
   if (hit(rcRelaunch_,  x, y)) return Control::Relaunch;
   if (hit(rcQuit_,      x, y)) return Control::Quit;
   if (hit(rcRingApply_, x, y)) return Control::RingApply;
-  if (hit(rcLowLat_,    x, y)) return Control::LowLatency;
   return Control::None;
-}
-
-bool AppWindow::sliderEnabled(SliderId id) const {
-  return !sliderSpec(id).dfn3Only || state_->activeEngine() == 1;
 }
 
 int AppWindow::trackHit(int x, int y) const {
   for (const SliderSpec& s : kSliderSpecs) {
-    if (!sliderEnabled(s.id)) continue;   // e.g. aggression is not draggable on RNNoise
     const D2D1_RECT_F& r = track(s.id);
     if (x >= r.left && x <= r.right && y >= r.top - 12 && y <= r.bottom + 12) return (int)s.id;
   }
@@ -436,26 +410,41 @@ int AppWindow::helpTargetAt(int x, int y) const {
   }
   if (hit(rcMicField_, x, y))  return kHelpMic;
   if (hit(rcOutField_, x, y))  return kHelpOutput;
-  if (hit(rcEngineRnn_, x, y)) return kHelpEngineRnn;
-  if (hit(rcEngineDfn_, x, y)) return kHelpEngineDfn;
   if (hit(rcBypass_, x, y))    return kHelpBypass;
   if (hit(rcRingBox_, x, y) || hit(rcRingApply_, x, y)) return kHelpLatency;
-  if (hit(rcLowLat_, x, y))    return kHelpLowLatency;
   return kHelpNone;
 }
 
-std::wstring AppWindow::helpText() const {
-  if (helpHot_ >= 0 && helpHot_ < kSliderCount) return kSliderSpecs[helpHot_].help;
-  switch (helpHot_) {
+std::wstring AppWindow::helpTextFor(int target) {
+  if (target >= 0 && target < kSliderCount) return kSliderSpecs[target].help;
+  switch (target) {
     case kHelpMic:        return L"MICROPHONE \x2014 the input device being cleaned. Click to choose a different mic.";
     case kHelpOutput:     return L"OUTPUT \x2014 where the cleaned audio is sent (e.g. CABLE Input, which apps pick as your mic). Click to choose.";
-    case kHelpEngineRnn:  return L"ENGINE: RNNoise \x2014 lighter, low-latency denoiser. Best at keyboard/mouse clicks \x2014 use this in a clicky room.";
-    case kHelpEngineDfn:  return L"ENGINE: DeepFilterNet3 \x2014 stronger on steady background noise, but passes short clicks (use DE-CLICK or RNNoise for those).";
     case kHelpBypass:     return L"BYPASS \x2014 pass your mic through untouched with denoising off. Click to toggle (A/B your setup).";
     case kHelpLatency:    return L"LATENCY \x2014 audio buffer depth in frames (1 frame = 10 ms audio; buffered delay \x2248 frames \x00D7 5 ms). Higher tolerates glitches better but adds delay. Applying restarts the audio engine (brief dropout).";
-    case kHelpLowLatency: return L"LOW LATENCY \x2014 run RNNoise at its native \x223C 0 ms engine delay (drops the \x223C 30 ms DFN3 alignment pin). Switching to DFN3 later causes a one-time timing shift. Toggling restarts the audio engine (brief dropout).";
     default:              return L"Hover a slider or control to see what it does and how to use it.";
   }
+}
+
+// The help strip must fit its longest text: lay out every help string at the strip's text width
+// with the strip's font and take the tallest (a fixed height let 5-line texts spill into the footer).
+float AppWindow::measureHelpHeight() const {
+  const float textW = (float)kClientW - 2.0f * kPad - 2.0f * kHelpInsetX;
+  float tallest = 0.0f;
+  auto measure = [&](int target) {
+    const std::wstring s = helpTextFor(target);
+    IDWriteTextLayout* tl = nullptr;
+    if (SUCCEEDED(dwFactory_->CreateTextLayout(s.c_str(), (UINT32)s.size(), textFmt_, textW, 10000.0f, &tl))) {
+      DWRITE_TEXT_METRICS m{};
+      if (SUCCEEDED(tl->GetMetrics(&m)) && m.height > tallest) tallest = m.height;
+      tl->Release();
+    }
+  };
+  for (int i = 0; i < kSliderCount; ++i) measure(i);
+  for (int t = kHelpMic; t <= kHelpBypass; ++t) measure(t);
+  measure(kHelpNone);
+  const float h = tallest + 2.0f * kHelpInsetY + 4.0f;   // + a little air below the last line
+  return h > kHelpMinH ? h : kHelpMinH;
 }
 
 D2D1_RECT_F AppWindow::overlayRect() const {
@@ -520,21 +509,13 @@ void AppWindow::startWorker() {
 
 void AppWindow::respawnWorker() {
   sup_->shutdown(kShutdownWaitMs);   // fully stop the current worker process
-  startWorker();                     // spawns fresh -> re-reads settings.toml (ring_frames, low_latency)
+  startWorker();                     // spawns fresh -> re-reads settings.toml (ring_frames)
   invalidate();
 }
 
 void AppWindow::quit() {
   sup_->shutdown(kShutdownWaitMs);
   DestroyWindow(hwnd_);
-}
-
-void AppWindow::toggleLowLatency() {
-  if (!settings_) return;
-  settings_->lowLatency = !settings_->lowLatency;   // global; read by the bridge at worker start
-  settings_->save(configPath_);
-  if (spawned_) respawnWorker();   // first-run (no worker yet): value takes effect at first spawn
-  else invalidate();
 }
 
 void AppWindow::resizeToContent() {
@@ -585,16 +566,6 @@ void AppWindow::flushParams(bool force) {
   outbox_.onAttempt(now, sup_->send(c));
 }
 
-void AppWindow::onCommandEngine(uint32_t engine) {
-  sendCurrent(state_->onSelectEngine(engine));
-  // Remember the choice in the active mic's profile: the worker starts on it, and switching mics
-  // (applyPick) restores each mic's own engine.
-  if (vc::MicProfile* p = settings_ ? settings_->activeProfile() : nullptr) {
-    const char* name = engine == 1 ? "dfn3" : "rnnoise";
-    if (p->engine != name) { p->engine = name; settings_->save(configPath_); }
-  }
-}
-
 void AppWindow::onCommandBypass() { if (state_->bypassEnabled()) sendCurrent(state_->onToggleBypass()); }
 
 void AppWindow::applyPick(PickerKind k, size_t rowIndex) {
@@ -623,9 +594,7 @@ void AppWindow::applyPick(PickerKind k, size_t rowIndex) {
   } else if (k == PickerKind::Capture) {
     sup_->sendSelectCapture(id, /*driftSeed*/0.0);         // live pipeline rebuild on the new mic
     seedFromActiveProfile();                                // load the new mic's sliders + tuning into state_
-    const vc::MicProfile* p = settings_->activeProfile();
-    uint32_t eng = (p && p->engine == "dfn3") ? 1u : 0u;
-    sendCurrent(state_->onSelectEngine(eng));              // push the new mic's engine + tuning live
+    sendCurrent(state_->current());                         // push the new mic's tuning live
   } else {
     sup_->sendSelectRender(id);
   }
@@ -700,13 +669,10 @@ void AppWindow::onMouseDown(int x, int y) {
     return;
   }
   switch (hitControl(x, y)) {
-    case Control::EngineRnn:  onCommandEngine(0); break;
-    case Control::EngineDfn:  onCommandEngine(1); break;
     case Control::Bypass:     onCommandBypass(); break;   // no-ops when disabled
     case Control::Relaunch:   if (state_->statusKind()==StatusKind::Down) requestRelaunch(); break;
     case Control::Quit:       quit(); break;
     case Control::RingApply:  applyRing(); break;         // persist + respawn
-    case Control::LowLatency: toggleLowLatency(); break;  // persist + respawn
     case Control::None:       break;
   }
 }
@@ -767,8 +733,6 @@ LRESULT AppWindow::handle(UINT msg, WPARAM w, LPARAM l) {
     case WM_COMMAND:
       switch (LOWORD(w)) {
         case kTrayCmdEnabled:   onCommandBypass(); break;
-        case kTrayCmdEngineRnn: onCommandEngine(0); break;
-        case kTrayCmdEngineDfn: onCommandEngine(1); break;
         case kTrayCmdOpen:      showRestore(); break;
         case kTrayCmdQuit:      quit(); break;
       }
