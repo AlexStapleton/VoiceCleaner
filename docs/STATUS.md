@@ -19,6 +19,7 @@ Recent releases:
   choice persisted, status line names the real output, LATENCY clamped to 4..512 everywhere, plus a
   cleanup pass (dead code, retired `models/dfn3-ll`, repo layout, `app_window` refactor). Review:
   `docs/superpowers/notes/2026-10-12-cleanup-review.md`.
+  Also ONNX Runtime 1.28.0 → 1.28.3 (patch release: memory-safety fixes; DFN3 only).
 
 Worker developer flags (console run): `--list-devices`, `--config <settings.toml>`, `--capture/--render
 <id>`, `--ring <4..512>`, `--csv <path>` (drift CSV for `tools/analyze_drift.py`), `--record <wav>
@@ -181,7 +182,7 @@ Full offline pipeline works and **sample-matches the official `deep-filter` refe
 - **ERB filterbank** (`erb.h`): 32 bands, exact libDF construction.
 - **Feature extraction** (`dfn3_features.h`): `feat_erb`/`feat_spec` with libDF exp-mean normalization.
 - **Post-inference DSP** (`dfn3_postdsp.h`): ERB mask broadcast + order-5 deep filter.
-- **ONNX Runtime 1.28.0** vendored (FetchContent, pinned SHA256); models in `models/dfn3/`.
+- **ONNX Runtime 1.28.3** (1.28.0 before v1.5) vendored (FetchContent, pinned SHA256); models in `models/dfn3/`.
 - **Orchestrator** `src/dfn3/dfn3_offline.{h,cpp}`: STFT → features → enc/erb_dec/df_dec over full T →
   mask (high bins) + deep filter (noisy low bins) → ISTFT. `src/dfn3-probe/` loads/checks the models.
 Reference details (params, model I/O shapes): `docs/dfn3/dfn3-progress.md`.

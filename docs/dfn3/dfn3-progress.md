@@ -23,8 +23,8 @@ ONNX graphs are only the encoder/decoders.
 
 ## ONNX models (`models/dfn3/`, split form — the form the official Rust runtime uses)
 
-Vendored; ONNX Runtime **1.28.0** (FetchContent, pinned SHA256
-`abef733dacbe2f571547a7150b479b5cb9cc0df22f96c24983a42cadb1b4f8bc`). Use `intra_op_num_threads=1`.
+Vendored; ONNX Runtime **1.28.3** (FetchContent, pinned SHA256
+`1d6fab48e85f948436af7c8c971d2c145cf224e2c444755dec894f8b0de11a83`; 1.28.0 until v1.5). Use `intra_op_num_threads=1`.
 
 **Exact I/O (from `dfn3-probe`, dynamic dims shown as T):**
 

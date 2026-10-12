@@ -23,8 +23,8 @@ FetchContent_Declare(tomlplusplus
 FetchContent_MakeAvailable(tomlplusplus)
 
 FetchContent_Declare(onnxruntime
-  URL https://github.com/microsoft/onnxruntime/releases/download/v1.28.0/onnxruntime-win-x64-1.28.0.zip
-  URL_HASH SHA256=abef733dacbe2f571547a7150b479b5cb9cc0df22f96c24983a42cadb1b4f8bc)
+  URL https://github.com/microsoft/onnxruntime/releases/download/v1.28.3/onnxruntime-win-x64-1.28.3.zip
+  URL_HASH SHA256=1d6fab48e85f948436af7c8c971d2c145cf224e2c444755dec894f8b0de11a83)
 FetchContent_MakeAvailable(onnxruntime)
 add_library(onnxruntime SHARED IMPORTED GLOBAL)
 set_target_properties(onnxruntime PROPERTIES
