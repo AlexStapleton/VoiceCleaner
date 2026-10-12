@@ -14,13 +14,13 @@ TEST(Latency, RnnoiseLowLatencyBudget) {
   in.captureBufferFrames = 480;   // 10 ms
   in.renderBufferFrames  = 480;   // 10 ms
   in.ringPrimedFrames    = 8;     // 8 * 10 ms = 80 ms (shipped default ring_frames=16 -> primes 8)
-  in.engineDelaySamples  = 0;     // RNNoise / low-latency: no pin
+  in.engineDelaySamples  = 960;   // RNNoise real delay (20 ms); LOW LATENCY pins everything to 960
   LatencyBreakdown b = compute_latency(in);
   EXPECT_NEAR(b.captureMs, 10.0, 1e-6);
   EXPECT_NEAR(b.ringMs,    80.0, 1e-6);
-  EXPECT_NEAR(b.engineMs,   0.0, 1e-6);
+  EXPECT_NEAR(b.engineMs,  20.0, 1e-6);
   EXPECT_NEAR(b.renderMs,  10.0, 1e-6);
-  EXPECT_NEAR(b.totalMs,   110.0, 1e-6);   // 10+10+80+0+10
+  EXPECT_NEAR(b.totalMs,   130.0, 1e-6);   // 10+10+80+20+10
 }
 
 TEST(Latency, Dfn3PinAdds30ms) {

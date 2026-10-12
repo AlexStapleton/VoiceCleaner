@@ -93,6 +93,19 @@ TEST(DynamicEngine, LowLatencyZeroDelaysReportZeroDelay) {
   EXPECT_EQ(eng.AlgorithmicDelaySamples(), 0u);   // RNNoise runs at native zero latency
 }
 
+TEST(DynamicEngine, EqualPinsPadNothingAndReportThePin) {
+  // LOW LATENCY pins every engine to RNNoise's real 960: max(pins) - ownPin == 0 => no padding, and
+  // the reported delay is the pin. (Pins {960, 0} would wrongly pad idx 1 by 960.)
+  EngineProbe pr[2]; pr[0] = {1.0f, 960}; pr[1] = {1.0f, 1440};
+  DynamicEngine::Config c; c.mode = DynamicEngine::Mode::Lean; c.initialActive = 0;
+  c.fadeFrames = 1; c.delaySamples[0] = 960; c.delaySamples[1] = 960;
+  DynamicEngine eng(probeLoader(pr), c);
+  EXPECT_EQ(eng.AlgorithmicDelaySamples(), 960u);
+  std::vector<float> in(FRAME_SAMPLES, 1.0f), out(FRAME_SAMPLES);
+  eng.ProcessFrame(in.data(), out.data());
+  for (size_t i = 0; i < FRAME_SAMPLES; ++i) EXPECT_EQ(out[i], 1.0f) << "no alignment delay may be inserted";
+}
+
 TEST(DynamicEngine, LeanSwitchLoadsCrossfadesRetires) {
   EngineProbe pr[2]; pr[0] = {1.0f, 0}; pr[1] = {0.0f, 0};   // from passes input, to outputs 0
   DynamicEngine::Config c; c.mode = DynamicEngine::Mode::Lean; c.initialActive = 0;

@@ -68,7 +68,7 @@ bool Bridge::start() {
 
     // Engine: RNNoise (idx 0) / DFN3 (idx 1) live behind a DynamicEngine container that supports
     // warm standby (both resident) and lean on-demand switching. Passthrough ("none") stays static.
-    // Per-engine algorithmic delays are known constants for the shipped model: RNNoise 0, DFN3 1440
+    // Per-engine algorithmic delays are known constants for the shipped model: RNNoise 960 (kRnnoiseDelaySamples), DFN3 1440
     // (standard models/dfn3: Dfn3Streaming::latencySamples() = kHop*(1+latencyFrames) = 480*3). Pinned
     // so a switch never shifts output timing; the loader verifies a loaded DFN3 matches the pinned value.
     constexpr uint32_t kDfn3DelaySamples = 1440;
@@ -86,8 +86,11 @@ bool Bridge::start() {
       dc.mode = cfg_.warmStandby ? DynamicEngine::Mode::Warm : DynamicEngine::Mode::Lean;
       dc.initialActive = (cfg_.engine == "dfn3") ? 1 : 0;
       dc.fadeFrames = 15;
-      dc.delaySamples[0] = 0;
-      dc.delaySamples[1] = cfg_.lowLatency ? 0u : kDfn3DelaySamples;   // low-latency: don't pin RNNoise to DFN3's delay
+      // Default: pin RNNoise to DFN3's 1440 (RNNoise is padded by 480). Low-latency: all pins equal so
+      // nothing is padded (RNNoise stays at its native 960, reported delay 960 keeps STRENGTH aligned).
+      // Not {960, 0}: that would pad DFN3 by 960.
+      dc.delaySamples[0] = kRnnoiseDelaySamples;
+      dc.delaySamples[1] = cfg_.lowLatency ? kRnnoiseDelaySamples : kDfn3DelaySamples;
       auto de = std::make_unique<DynamicEngine>(loader, dc);   // builds initial leaf(s); may throw
       dyn_ = de.get();
       engine_ = std::move(de);
