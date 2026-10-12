@@ -4,8 +4,10 @@
 #include "dfn3_streaming.h"
 namespace vc {
 
-Dfn3StreamAdapter::Dfn3StreamAdapter(const std::string& modelDir)
-    : eng_(std::make_unique<Dfn3Streaming>(modelDir)) {  // throws std::runtime_error on load failure
+Dfn3StreamAdapter::Dfn3StreamAdapter(const std::string& modelDir, const Options& opt)
+    : eng_(std::make_unique<Dfn3Streaming>(modelDir)),
+      autoLevel_(opt.autoInputLevel),
+      pre_(eng_->latencySamples()) {  // throws std::runtime_error on load failure
   // Self-warm-up (RT-critical): the first W-1 hops fill the internal analysis/GRU
   // windows and cause ORT to allocate persistent input tensors. We run those hops
   // HERE, in the ctor (executed on bridge.start(), off the RT relay thread), so the
@@ -19,13 +21,17 @@ Dfn3StreamAdapter::Dfn3StreamAdapter(const std::string& modelDir)
   float in[480] = {0.0f};
   float out[480];
   eng_->reset();
+  // Warm-up hops go straight to the model (unity gain); the normalizer/pre-gain start fresh afterwards.
   for (int i = 0; i < 16; ++i) eng_->process(in, out);  // >= standard model prime (2 no-encoder warm-up hops + window fill W~6); 16 is a safe margin
 }
 
 Dfn3StreamAdapter::~Dfn3StreamAdapter() = default;
 
 void Dfn3StreamAdapter::ProcessFrame(const float* in, float* out) noexcept {
-  eng_->process(in, out);
+  if (!autoLevel_) { eng_->process(in, out); return; }
+  lastGainDb_ = norm_.process(in);
+  const float g = std::pow(10.0f, lastGainDb_ * (1.0f / 20.0f));   // once per frame
+  pre_.process(in, out, g, [this](const float* a, float* b) noexcept { eng_->process(a, b); });
 }
 
 float Dfn3StreamAdapter::LastVadProbability() const noexcept {
