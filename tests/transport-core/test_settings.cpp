@@ -18,7 +18,7 @@ TEST(Settings, LoadsNewSchemaAndResolvesActive) {
     "ring_frames = 16\n"
     "[mic.\"cap-1\"]\n"
     "name = \"K688\"\n"
-    "engine = \"df" "n3\"\n"        // legacy keys: ignored
+    "engine = \"dfn3\"\n"        // legacy keys: ignored
     "warm_standby = true\n"
     "dsp_chain = true\n");
   Settings s = Settings::load(p);
@@ -119,7 +119,7 @@ TEST(Settings, OlderProfileWithoutTuningLoadsDefaults) {
   auto p = (std::filesystem::temp_directory_path() / "vc_tmp_settings_old.toml").string();
   std::ofstream(p) <<
     "[global]\nactive_capture_id=\"c1\"\nrender_id=\"r1\"\nring_frames=16\n"
-    "[mic.\"c1\"]\nname=\"Mic\"\nengine=\"df" "n3\"\n";
+    "[mic.\"c1\"]\nname=\"Mic\"\nengine=\"dfn3\"\n";
   Settings r = Settings::load(p);
   ASSERT_EQ(r.mics.size(), 1u);
   EXPECT_FLOAT_EQ(r.mics[0].hpfHz, 80.0f);
@@ -200,7 +200,7 @@ TEST(Settings, LegacyV15KeysAreIgnoredAndDroppedOnSave) {
   auto p = (std::filesystem::temp_directory_path() / "vc_tmp_settings_v15.toml").string();
   std::ofstream(p) <<
     "[global]\nactive_capture_id=\"c1\"\nrender_id=\"r1\"\nring_frames=16\nlow_latency=true\n"
-    "[mic.\"c1\"]\nname=\"Mic\"\nengine=\"df" "n3\"\naggression=0.7\nwarm_standby=true\n"
+    "[mic.\"c1\"]\nname=\"Mic\"\nengine=\"dfn3\"\naggression=0.7\nwarm_standby=true\n"
     "dsp_chain=true\nhpf_hz=95.0\n";
   Settings s = Settings::load(p);
   ASSERT_EQ(s.mics.size(), 1u);

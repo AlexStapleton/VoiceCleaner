@@ -25,7 +25,7 @@ struct Config {
   double ki             = 2e-9;
   double driftMaxPpm    = 150.0;
   double filterAlpha    = 0.02;
-  std::string engine   = "none";   // "rnnoise" (the engine; what an active mic profile resolves to) | "none" = developer passthrough (--engine none)
+  std::string engine   = "rnnoise";   // "rnnoise" (the only engine) | "none" = developer passthrough (--engine none)
   bool        dspChain = false;     // wrap the engine in the DSP chain (see DspChain)
   static Config load(const std::string& tomlPath);   // settings.toml ([global] + [mic."<id>"]); throws on a bad file
   void apply_cli(int argc, char** argv);

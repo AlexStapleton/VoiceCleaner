@@ -71,7 +71,7 @@ TEST(Config, LoadsNewSchemaViaSettings) {
     "render_id = \"ren-1\"\n"
     "ring_frames = 16\n"
     "[mic.\"cap-1\"]\n"
-    "engine = \"df" "n3\"\n"   // legacy key from an old engine: ignored
+    "engine = \"dfn3\"\n"   // legacy key from an old engine: ignored
     "dsp_chain = true\n");
   Config c = Config::load(p);
   EXPECT_EQ(c.captureDeviceId, "cap-1");
