@@ -123,6 +123,26 @@ after. The output level is unchanged; only the model's view of the input moves i
 - Acceptance: on the harness clips at -55/-45/-35/-25/-15 dBFS, DFN3 click RMS reduction is within
   3 dB of its -25 dBFS result at every level, and the -15 dBFS result is no worse than today's.
 
+### Part 1 revision (2026-10-12, after implementation and real-recording evaluation)
+
+- The ungated 75th-percentile level failed: on synthetic clips (mostly noise floor) it measured the
+  floor, so the estimate was non-monotonic in clip level and overdrove louder clips; on the user's
+  recordings it gave typing-only audio +15.6 dB and speech only +0.8..2.9 dB (T = -40) — the opposite
+  of what helps. Real-recording data: a +20 dB boost cuts DFN3's voice distortion (LSD 2.14 -> 0.89)
+  but *worsens* its click suppression on click-only audio (-42.5 -> -28.9 dB).
+- **Decision:** the boost is used **only inside Dual**, and the level is **speech-gated by RNNoise's
+  VAD** (only frames with RNNoise VAD >= 0.6 update the level). Click-only audio has almost no such
+  frames (9 of 1500 on `typing.wav`), so it gets no boost — which is right, since Dual hands gaps to
+  RNNoise anyway. Measured speech-frame RMS medians: -46.3 dBFS (`speech.wav`), -41.5 (`both.wav`);
+  the evaluation's best gain was about +20 dB, so the target is **T ≈ -24 dBFS speech RMS** (median of
+  the speech-frame window), still clamped to 0..+30 dB.
+- No boost until 0.5 s of speech frames has been observed (then the fast-slew phase applies), so a
+  fresh engine never boosts on a guess.
+- Plain DFN3 mode keeps `autoInputLevel = false` (bit-identical to v1.5). Its own LSNR-based VAD can't
+  gate the level reliably at low input (chicken-and-egg).
+- `InputLevelNormalizer` gains a `speech` flag per frame (`process(frame, bool speech)`); the ungated
+  mode stays for tests only.
+
 ## Part 2 — Engine container: three slots + a uniform failure counter
 
 - `INoiseFilter` gains `virtual uint64_t failedHops() const noexcept { return 0; }` (same name the DFN3

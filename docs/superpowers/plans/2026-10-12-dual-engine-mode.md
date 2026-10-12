@@ -94,6 +94,10 @@ unit-tested on Linux, so all logic lives in the two pure units.
   `docs/superpowers/notes/2026-10-12-dual-engine-eval.md` (create).
 - [ ] **Step 6: Commit** `feat(dfn3): automatic input level so DFN3 works on quiet microphones`.
 
+> **Task 2 outcome (2026-10-12):** units built and tested, but the ungated level failed acceptance
+> (see spec "Part 1 revision" and the eval note). `Dfn3StreamAdapter` keeps the option, default
+> **off**; v1.5.1 ships DFN3 unchanged. The speech-gated level moves into Task 8 (Dual).
+
 ## Task 3: Release v1.5.1 — **coordinator (Opus)**
 
 - [ ] Docs (`STATUS.md` v1.5.1 entry, README latency numbers if changed), PR, Windows CI green,
@@ -187,6 +191,12 @@ Spec Part 3 (engine).
   - `currentWeight()` (backed by `std::atomic<float>`, read from the telemetry thread) matches the ramp end.
 - [ ] Implement (loader `std::function<std::unique_ptr<INoiseFilter>(int which)>` for the two leaves;
   two `DelayLine`s; per-sample linear ramp; scratch buffers sized at construction).
+- [ ] Speech-gated DFN3 boost (spec "Part 1 revision"): add `process(frame, bool speech)` to
+  `InputLevelNormalizer` (level = median of the last ~3 s of *speech* frames' RMS; no boost until 0.5 s
+  of speech; T ≈ -24 dBFS; 0..+30 dB) with failing tests first (click-only input -> 0 dB; speech at
+  -46 dBFS -> ~+22 dB; speech at -41.5 -> ~+17.5). `DualEngine` wraps its DFN3 leg in `PreGainStage`
+  driven by that normalizer, gated by the RNNoise leg's VAD for the same frame. Re-run the real-recording
+  evaluation (`scratchpad/eval_real`) with the in-app logic; acceptance per spec Part 6.3.
 - [ ] Commit `feat(engine): DualEngine — RNNoise in gaps, DFN3 during speech`.
 
 ---
