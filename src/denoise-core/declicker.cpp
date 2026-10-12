@@ -39,7 +39,7 @@ void Declicker::process(const float* in, float* out, size_t n, float strength, f
     envS_ = envS_ * slowCoef_ + mag * (1.0f - slowCoef_);   // slow baseline
     if (strength > 0.0f && envF_ > crestK_ * (envS_ + 1e-6f)) holdLeft_ = (int)holdSamples_;
     // VAD back-off with a floor: at vad=1 the duck is scaled by voiceFloor_ (not to zero), so clicks
-    // that land on top of speech are still reduced (matters for engines that pass transients, e.g. DFN3).
+    // that land on top of speech are still reduced (matters for engines that pass transients).
     const float backoff = (1.0f - vad) + vad * voiceFloor_;
     const float depth   = holdLeft_ > 0 ? strength * backoff : 0.0f;
     if (holdLeft_ > 0) --holdLeft_;

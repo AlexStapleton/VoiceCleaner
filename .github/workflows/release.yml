@@ -41,8 +41,7 @@ jobs:
         run: cmake -S . -B build -A x64
 
       # Builds the app (UI + worker) and all test executables (developer tools are off by default).
-      # The voicecleaner target's post-build step co-locates the worker exe, onnxruntime.dll and the
-      # DFN3 runtime models next to voicecleaner.exe.
+      # The voicecleaner target's post-build step co-locates the worker exe next to voicecleaner.exe.
       - name: Build (Release)
         run: cmake --build build --config Release --parallel
 
@@ -58,11 +57,10 @@ jobs:
           New-Item -ItemType Directory -Path $pkg | Out-Null
           # No settings.toml: the app keeps per-user settings in %LOCALAPPDATA%\VoiceCleaner and
           # creates them on first run, so unzipping an update over an install never resets them.
-          foreach ($f in 'voicecleaner.exe','voicecleaner-worker.exe','onnxruntime.dll') {
+          foreach ($f in 'voicecleaner.exe','voicecleaner-worker.exe') {
             if (-not (Test-Path "$src/$f")) { throw "missing build output: $src/$f" }
             Copy-Item "$src/$f" $pkg
           }
-          Copy-Item -Recurse "$src/models" "$pkg/models"
           Copy-Item LICENSE $pkg
 
           # The project links the dynamic MSVC runtime (/MD). Ship the runtime DLLs app-local so the
