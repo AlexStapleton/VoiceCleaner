@@ -28,8 +28,6 @@ static const wchar_t* kClass = L"VoiceCleanerWindow";
 static const int  kClientW = 460;   // fixed client width; height flexes with collapsed sections
 static const UINT kTimerId = 1;
 static const float kRowH = 34.0f;   // dropdown row height
-static const int kRingMin = 4;      // below the worker's floor of 3; keeps the value meaningful
-static const int kRingMax = 512;    // ~2.5 s buffered (ring_frames x 5 ms)
 // Cached once: the same value is returned for the same name across processes, so main.cpp's
 // single-instance broadcast lands here (design note, Task 14).
 static const UINT kRestoreMsg = RegisterWindowMessageW(L"VoiceCleanerRestore");
@@ -133,6 +131,7 @@ void AppWindow::refreshDevices() {
   picker_.setDevices(std::move(cap), std::move(ren));
   if (!settings_) return;
   picker_.setActive(settings_->activeCaptureId, settings_->renderId);
+  state_->setRenderLabel(picker_.fieldLabel(PickerKind::Render));   // status line "-> <output>"
   seedFromActiveProfile();   // seed sliders + UiState from the active profile
 }
 
@@ -499,12 +498,7 @@ int AppWindow::ringParse() const {
   return v;
 }
 
-int AppWindow::ringPendingClamped() const {
-  int v = ringParse();
-  if (v < kRingMin) v = kRingMin;
-  if (v > kRingMax) v = kRingMax;
-  return v;
-}
+int AppWindow::ringPendingClamped() const { return (int)vc::clampRingFrames(ringParse()); }
 
 void AppWindow::commitRingEdit() {
   ringEdit_ = std::to_wstring(ringPendingClamped());
@@ -589,7 +583,15 @@ void AppWindow::flushParams(bool force) {
   outbox_.onAttempt(now, sup_->send(c));
 }
 
-void AppWindow::onCommandEngine(uint32_t engine) { sendCurrent(state_->onSelectEngine(engine)); }
+void AppWindow::onCommandEngine(uint32_t engine) {
+  sendCurrent(state_->onSelectEngine(engine));
+  // Remember the choice in the active mic's profile: the worker starts on it, and switching mics
+  // (applyPick) restores each mic's own engine.
+  if (vc::MicProfile* p = settings_ ? settings_->activeProfile() : nullptr) {
+    const char* name = engine == 1 ? "dfn3" : "rnnoise";
+    if (p->engine != name) { p->engine = name; settings_->save(configPath_); }
+  }
+}
 void AppWindow::onCommandBypass() { if (state_->bypassEnabled()) sendCurrent(state_->onToggleBypass()); }
 
 void AppWindow::applyPick(PickerKind k, size_t rowIndex) {
@@ -605,6 +607,7 @@ void AppWindow::applyPick(PickerKind k, size_t rowIndex) {
     settings_->activeCaptureId = id;
   } else {
     settings_->renderId = id;
+    state_->setRenderLabel(chosen.name);
   }
   settings_->save(configPath_);
 

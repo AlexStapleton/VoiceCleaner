@@ -5,7 +5,7 @@
 #include "config.h"
 namespace vc {
 
-// One [mic."<id>"] profile. 4a fields only; tuning fields (aggression/hpf/…/drift_ppm) arrive in 4c/4d.
+// One [mic."<id>"] profile: the engine choice plus every tuning slider for that microphone.
 struct MicProfile {
   std::string id;                 // WASAPI device id (the section key)
   std::string name;               // cached friendly label (UTF-8)
@@ -28,15 +28,15 @@ struct MicProfile {
 struct Settings {
   std::string activeCaptureId;    // [global].active_capture_id  ("" => none)
   std::string renderId;           // [global].render_id
-  size_t      ringFrames = 8;     // [global].ring_frames (shipped default ~40 ms buffered)
+  size_t      ringFrames = 8;     // [global].ring_frames, clamped to [kRingFramesMin, kRingFramesMax] (8 ~= 40 ms)
   bool        lowLatency = false; // [global].low_latency — skip the DFN3 delay pin (RNNoise ~0 latency)
   unsigned    collapsedSections = 0;  // [global].collapsed_sections — UI slider-group collapse bitmask
   std::vector<MicProfile> mics;   // all [mic."<id>"] sections
 
-  static Settings load(const std::string& path);   // new schema OR flat back-compat; missing/bad file => empty
-  bool save(const std::string& path) const;        // atomic (temp + rename); false => target left untouched
-  MicProfile* activeProfile();                      // Task 2
-  MicProfile& ensureProfile(const std::string& id, const std::string& name);  // Task 2
+  static Settings load(const std::string& path);   // UTF-8 path; missing/bad file => empty (first run)
+  bool save(const std::string& path) const;        // UTF-8 path; atomic (temp + rename); false => target left untouched
+  MicProfile* activeProfile();                      // profile of activeCaptureId, or nullptr
+  MicProfile& ensureProfile(const std::string& id, const std::string& name);  // find or create (defaults)
   Config resolveActive() const;                     // flatten active profile -> the worker's flat Config
 };
 

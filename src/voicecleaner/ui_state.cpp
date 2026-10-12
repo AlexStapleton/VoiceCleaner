@@ -92,7 +92,7 @@ std::string UiState::statusLine() const {
       return "\xE2\x97\x8B Bypassed \xC2\xB7 " + std::string(engineName(activeEngine_)) +
              " \xC2\xB7 \xE2\x86\x92 " + renderLabel_;
     case StatusKind::NoConfig:
-      return "No microphone configured \xE2\x80\x94 the mic picker arrives in Phase 4";
+      return "Choose a microphone and an output below to start";
     case StatusKind::Down:
     default:
       return "\xE2\x9C\x95 Worker not running";

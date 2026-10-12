@@ -18,7 +18,7 @@ class UiState {
  public:
   UiState();
 
-  void setRenderLabel(std::string label);   // e.g. "CABLE Input"; used in the status line
+  void setRenderLabel(std::string label);   // chosen output device name, e.g. "CABLE Input (VB-Audio Virtual Cable)"
 
   // ---- events ----
   void onNoConfig();                                        // pre-flight failed: no config / no devices
@@ -53,7 +53,7 @@ class UiState {
 
   vc::ipc::Params current_ = vc::ipc::Params::defaults();
   StatusKind kind_ = StatusKind::Down;   // pre-ready shows Down until the first ready telemetry
-  std::string renderLabel_ = "CABLE Input";
+  std::string renderLabel_;
   uint32_t activeEngine_ = 0;
   uint32_t pendingEngine_ = 0;   // engine the user last selected
   bool     enginePending_ = false;  // true until telemetry confirms pendingEngine_ is active

@@ -102,7 +102,7 @@ bool Bridge::start() {
   start_ = std::chrono::steady_clock::now();   // telemetry uptimeMs baseline
   running_.store(true, std::memory_order_release);
   deviceLost_.store(false, std::memory_order_release);   // reset any prior fatal state
-  logger_.start();
+  if (!cfg_.csvPath.empty()) logger_.start();   // developer drift CSV (--csv); off in normal use
   telemetryOn_ = telemetry_.create(L"Local\\voicecleaner-telemetry");
 
   auto errCb = [this](const char* w){
@@ -140,7 +140,8 @@ bool Bridge::start() {
 
   std::printf("bridge running: ring=%zu frames (primed %zu), engine=%s, warm_standby=%s, dsp_chain=%s, csv=%s\n",
               ringB_.capacity(), ringB_.capacity()/2, cfg_.engine.c_str(),
-              cfg_.warmStandby ? "on" : "off", cfg_.dspChain ? "on" : "off", cfg_.csvPath.c_str());
+              cfg_.warmStandby ? "on" : "off", cfg_.dspChain ? "on" : "off",
+              cfg_.csvPath.empty() ? "off" : cfg_.csvPath.c_str());
   return true;
 }
 
@@ -334,6 +335,9 @@ bool Bridge::reselectCapture(const std::string& deviceId, double driftSeedPpm) {
 bool Bridge::reselectRender(const std::string& deviceId) {
   stop();
   cfg_.renderDeviceId = deviceId;
+  // A new output device has its own clock: restart drift tracking from zero instead of carrying the
+  // old device's correction into the new pairing.
+  if (cfg_.driftCompensation) controller_.seedPpm(0.0);   // no relay running here -> race-free
   return start();
 }
 

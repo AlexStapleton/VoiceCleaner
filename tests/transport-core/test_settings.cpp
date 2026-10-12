@@ -36,22 +36,37 @@ TEST(Settings, LoadsNewSchemaAndResolvesActive) {
   EXPECT_TRUE(c.dspChain);
 }
 
-TEST(Settings, FlatFileBackCompatResolves) {
+TEST(Settings, OldFlatFileLoadsAsEmpty) {
+  // The pre-profile flat layout (top-level capture_device_id/...) is no longer read: the app opens
+  // to the device pickers instead of guessing.
   auto p = writeTmp(
     "capture_device_id = \"cap-9\"\n"
-    "render_device_id = \"ren-9\"\n"
-    "ring_frames = 16\n"
-    "engine = \"rnnoise\"\n"
-    "dsp_chain = true\n");
+    "render_device_id = \"ren-9\"\n");
   Settings s = Settings::load(p);
-  EXPECT_EQ(s.activeCaptureId, "cap-9");
-  EXPECT_EQ(s.renderId, "ren-9");
-  ASSERT_EQ(s.mics.size(), 1u);
-  EXPECT_EQ(s.mics[0].id, "cap-9");
-  EXPECT_EQ(s.mics[0].engine, "rnnoise");
-  vc::Config c = s.resolveActive();
-  EXPECT_EQ(c.captureDeviceId, "cap-9");
-  EXPECT_EQ(c.engine, "rnnoise");
+  EXPECT_TRUE(s.activeCaptureId.empty());
+  EXPECT_TRUE(s.mics.empty());
+}
+
+TEST(Settings, RingFramesIsClampedOnLoad) {
+  // A hand-edited negative value must not wrap to a huge size_t (which made the worker try to
+  // allocate gigabytes); out-of-range values clamp to the LATENCY box's own limits.
+  EXPECT_EQ(Settings::load(writeTmp("[global]\nring_frames = -1\n")).ringFrames, vc::kRingFramesMin);
+  EXPECT_EQ(Settings::load(writeTmp("[global]\nring_frames = 2\n")).ringFrames, vc::kRingFramesMin);
+  EXPECT_EQ(Settings::load(writeTmp("[global]\nring_frames = 100000\n")).ringFrames, vc::kRingFramesMax);
+  EXPECT_EQ(Settings::load(writeTmp("[global]\nring_frames = 16\n")).ringFrames, 16u);
+}
+
+TEST(Settings, SaveAndLoadUnderNonAsciiPath) {
+  // Paths are UTF-8: %LOCALAPPDATA% contains the Windows user name, which can be non-ASCII.
+  namespace fs = std::filesystem;
+  const fs::path dir = fs::temp_directory_path() / fs::path(u8"vc_set\u00E9tings_\u00FC");
+  fs::create_directories(dir);
+  const std::u8string u8 = (dir / "settings.toml").u8string();
+  const std::string p(u8.begin(), u8.end());
+  Settings s; s.activeCaptureId = "cap-1"; s.renderId = "ren-1";
+  ASSERT_TRUE(s.save(p));
+  EXPECT_EQ(Settings::load(p).renderId, "ren-1");
+  std::error_code ec; fs::remove_all(dir, ec);
 }
 
 TEST(Settings, MissingFileIsEmpty) {

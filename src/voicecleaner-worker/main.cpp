@@ -1,4 +1,5 @@
 #include <cstring>
+#include <cwchar>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -8,6 +9,7 @@
 #include <iostream>
 #include <vector>
 #include <windows.h>
+#include <shellapi.h>   // CommandLineToArgvW
 #include "com_guard.h"
 #include "device_enumerator.h"
 #include "config.h"
@@ -88,6 +90,25 @@ static int runRecord(const vc::Config& cfg, const std::string& recordPath, int s
   return 0;
 }
 
+// argv is in the ANSI code page, which can't represent every path: the UI passes
+// %LOCALAPPDATA%\VoiceCleaner\settings.toml, and the user name in it may be non-ASCII. Re-read the
+// --config value from the UTF-16 command line and return it as UTF-8 ("" if absent).
+static std::string configPathFromWideCommandLine() {
+  int n = 0;
+  LPWSTR* wargv = CommandLineToArgvW(GetCommandLineW(), &n);
+  if (!wargv) return {};
+  std::string out;
+  for (int i = 1; i + 1 < n; ++i) {
+    if (std::wcscmp(wargv[i], L"--config") != 0) continue;
+    const wchar_t* w = wargv[i + 1];
+    const int len = WideCharToMultiByte(CP_UTF8, 0, w, -1, nullptr, 0, nullptr, nullptr);
+    if (len > 1) { out.resize((size_t)len - 1); WideCharToMultiByte(CP_UTF8, 0, w, -1, out.data(), len, nullptr, nullptr); }
+    break;
+  }
+  LocalFree(wargv);
+  return out;
+}
+
 static const char* kindStr(vc::SampleKind k) {
   switch (k) { case vc::SampleKind::Float32: return "float32";
                case vc::SampleKind::Pcm16: return "pcm16"; default: return "unsupported"; }
@@ -102,7 +123,7 @@ int main(int argc, char** argv) {
   bool listDevices = false; std::string configPath; int seconds = 0; std::string recordPath; bool devKeys = false;
   for (int i = 1; i < argc; ++i) {
     if (!std::strcmp(argv[i], "--list-devices")) listDevices = true;
-    else if (!std::strcmp(argv[i], "--config") && i + 1 < argc) configPath = argv[++i];
+    else if (!std::strcmp(argv[i], "--config") && i + 1 < argc) { ++i; configPath = configPathFromWideCommandLine(); }
     else if (!std::strcmp(argv[i], "--seconds") && i + 1 < argc) seconds = std::atoi(argv[++i]);
     else if (!std::strcmp(argv[i], "--record") && i + 1 < argc) recordPath = argv[++i];
     else if (!std::strcmp(argv[i], "--dev-keys")) devKeys = true;
@@ -182,8 +203,8 @@ int main(int argc, char** argv) {
       std::this_thread::sleep_for(std::chrono::milliseconds(100));
       bridge.reclaimRetiredEngines();   // free engines the RT relay retired after a lean switch
       if (bridge.device_lost()) {
-        std::fprintf(stderr, "fatal: audio device lost/invalidated — stopping the run visibly. "
-                             "(Automatic reconnect is Phase 1; re-run once the device is back.)\n");
+        std::fprintf(stderr, "fatal: audio device lost/invalidated — exiting "
+                             "(the VoiceCleaner app restarts the worker).\n");
         rc = 2;
         break;
       }

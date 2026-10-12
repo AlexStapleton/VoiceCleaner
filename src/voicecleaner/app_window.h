@@ -64,7 +64,7 @@ class AppWindow {
   void applyRing();                                // commit+clamp the latency box, persist, respawn
   void commitRingEdit();                           // normalize ringEdit_ to the clamped pending value
   int  ringParse() const;                          // ringEdit_ digits -> int (0 if empty/non-digit)
-  int  ringPendingClamped() const;                 // ringParse() clamped to [kRingMin, kRingMax]
+  int  ringPendingClamped() const;                 // ringParse() clamped to [vc::kRingFramesMin, vc::kRingFramesMax]
 
   HINSTANCE hInst_;
   HWND hwnd_ = nullptr;
