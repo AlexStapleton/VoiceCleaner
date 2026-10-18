@@ -8,17 +8,33 @@ Limiter::Limiter(float ceilingDb, size_t lookahead, float releaseMs, float fs)
     : ceiling_(std::pow(10.0f, ceilingDb / 20.0f)),
       L_(lookahead < 1 ? 1 : lookahead),
       relCoef_(std::exp(-1.0f / (releaseMs * 0.001f * fs))),
-      delay_(L_, 0.0f) {}
+      delay_(L_, 0.0f),
+      qMag_(L_ + 1, 0.0f),
+      qPos_(L_ + 1, 0) {}
 
 void Limiter::process(const float* in, float* out, size_t n) noexcept {
+  const size_t cap = L_ + 1;
   for (size_t i = 0; i < n; ++i) {
     float x = in[i];
     // Look-ahead peak: the largest magnitude anywhere in the delay window plus the
     // incoming sample. Driving the target from the window peak keeps the reduction
     // in place until the loud sample has fully transited the delay, so the reduction
     // is guaranteed present by the time that sample emerges from the delay line.
-    float peak = std::fabs(x);
-    for (size_t k = 0; k < L_; ++k) peak = std::max(peak, std::fabs(delay_[k]));
+    // (Samples before the stream start are the delay line's zeros; they never exceed a
+    // real magnitude, so leaving them out of the queue gives the same peak.)
+    const float a = std::fabs(x);
+    // Expire first: the window is positions [pos_-L_, pos_], so the front (oldest) entry leaves when
+    // it is older than pos_-L_. Doing this before the push keeps the queue within its L_+1 slots.
+    if (qCount_ > 0 && qPos_[qHead_] + L_ < pos_) { qHead_ = (qHead_ + 1) % cap; --qCount_; }
+    while (qCount_ > 0) {                                  // drop smaller-or-equal tail entries
+      const size_t back = (qHead_ + qCount_ - 1) % cap;
+      if (qMag_[back] > a) break;
+      --qCount_;
+    }
+    const size_t slot = (qHead_ + qCount_) % cap;
+    qMag_[slot] = a; qPos_[slot] = pos_; ++qCount_;
+    ++pos_;
+    const float peak = qMag_[qHead_];
     float target = (peak > ceiling_) ? ceiling_ / peak : 1.0f;
     // Instant attack (worst-case), slow release back toward unity.
     if (target < gain_) {
@@ -39,6 +55,7 @@ void Limiter::reset() noexcept {
   std::fill(delay_.begin(), delay_.end(), 0.0f);
   widx_ = 0;
   gain_ = 1.0f;
+  qHead_ = 0; qCount_ = 0; pos_ = 0;
 }
 
 }  // namespace vc
