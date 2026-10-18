@@ -1,8 +1,8 @@
 # VoiceCleaner — Project Status & Resume Guide
 
-_Last updated: 2026-10-12_
+_Last updated: 2026-10-18_
 
-## Current state (v1.6)
+## Current state (v1.6.1)
 
 Shipping app: `voicecleaner.exe` (UI + tray) supervising `voicecleaner-worker.exe` (audio). RNNoise is
 the only engine (DeepFilterNet3 was removed in v1.6). Releases are built, tested and
@@ -27,10 +27,13 @@ Recent releases:
   strip fits its longest text. Dual mode designed, evaluated on the user's recordings and shelved
   (spec/plan/eval note in `docs/superpowers`). The v1.5.1 help-strip fix is folded in here (there was no
   v1.5.1 release).
+- **v1.6.1** — performance pass: the limiter's look-ahead peak is now a sliding-window maximum (O(1)
+  per sample instead of a 144-sample scan), ~6x faster (60 → 10 µs per frame) with bit-identical output;
+  whole chain ~245 → ~203 µs per 10 ms frame. Analysis: `docs/superpowers/notes/2026-10-18-performance-analysis.md`.
 
 Worker developer flags (console run): `--list-devices`, `--config <settings.toml>`, `--capture/--render
 <id>`, `--ring <4..512>`, `--csv <path>` (drift CSV for `tools/analyze_drift.py`), `--record <wav>
---seconds N`, `--dev-keys`. The old flat `drift.toml` config format and `phase0-app.exe` referenced in
+--seconds N`. The old flat `drift.toml` config format and `phase0-app.exe` referenced in
 the history below no longer exist.
 
 ## History
